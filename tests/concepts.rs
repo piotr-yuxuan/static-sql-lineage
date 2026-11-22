@@ -1,8 +1,9 @@
 //! The concept check: every type in `src/` has a home in `docs/concepts.md`, every home
-//! names a type, and no type's name is defined twice.  A type is a struct, an enum, a
-//! union, a trait or a type alias outside `#[cfg(test)]`, wherever it is defined and
-//! whatever its visibility; a home is a name in backticks on a `home:` line, or in the
-//! Home cell of a table's row.
+//! names a type, no type's name is defined twice, every operation names a function, and
+//! every filling is in its shape.  A type is a struct, an enum, a union, a trait or a
+//! type alias outside tests, wherever it is defined and whatever its visibility; a home
+//! is a name in backticks on a `home:` line, or in the Home cell of a table's row.  Also
+//! `kernel_changes`, which `make kernel-unchanged` runs.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -18,6 +19,11 @@ struct Undeclared {
     homes: BTreeSet<String>,
     /// The names of types defined more than once, which one home cannot tell apart.
     duplicates: BTreeSet<String>,
+    /// The functions that an operations item names and that do not exist, or are not
+    /// visible outside their module, or serve tests only.
+    operations: BTreeSet<String>,
+    /// The lines that would fill a home or an operations list but are not in its shape.
+    malformed: BTreeSet<String>,
 }
 
 /// What a walk of the sources' syntax trees finds defined.
@@ -25,6 +31,9 @@ struct Undeclared {
 struct Definitions {
     names: BTreeSet<String>,
     duplicates: BTreeSet<String>,
+    /// The functions that an operations item may name: `name` for a free function,
+    /// `Type::name` for one of `Type`'s, each visible outside its module.
+    functions: BTreeSet<String>,
 }
 
 impl Definitions {
@@ -50,6 +59,12 @@ impl<'ast> Visit<'ast> for Definitions {
 
     fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
         self.record(&item.attrs, &item.ident);
+        let visible = !matches!(item.vis, syn::Visibility::Inherited) && !test_only(&item.attrs);
+        let methods = item.items.iter().filter_map(|member| match member {
+            syn::TraitItem::Fn(method) if visible && !test_only(&method.attrs) => Some(&method.sig.ident),
+            _ => None,
+        });
+        self.functions.extend(methods.map(|method| format!("{}::{method}", item.ident)));
     }
 
     fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
@@ -64,41 +79,67 @@ impl<'ast> Visit<'ast> for Definitions {
 
     fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
         if !test_only(&item.attrs) {
+            if !matches!(item.vis, syn::Visibility::Inherited) {
+                self.functions.insert(item.sig.ident.to_string());
+            }
             syn::visit::visit_item_fn(self, item);
         }
     }
 
+    /// A method of a trait's `impl` is visible wherever the trait is; one of an inherent
+    /// `impl` must say so.
     fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
-        if !test_only(&item.attrs) {
-            syn::visit::visit_item_impl(self, item);
+        if test_only(&item.attrs) {
+            return;
         }
+        if let syn::Type::Path(owner) = &*item.self_ty
+            && let Some(owner) = owner.path.segments.last()
+        {
+            let methods = item.items.iter().filter_map(|member| match member {
+                syn::ImplItem::Fn(method)
+                    if !test_only(&method.attrs)
+                        && (item.trait_.is_some() || !matches!(method.vis, syn::Visibility::Inherited)) =>
+                {
+                    Some(&method.sig.ident)
+                }
+                _ => None,
+            });
+            self.functions.extend(methods.map(|method| format!("{}::{method}", owner.ident)));
+        }
+        syn::visit::visit_item_impl(self, item);
     }
 }
 
-/// Whether `attrs` hold `#[cfg(test)]`.
+/// Whether `attrs` hold `#[cfg(test)]` or `#[test]`.
 fn test_only(attrs: &[syn::Attribute]) -> bool {
-    attrs
-        .iter()
-        .any(|attr| attr.path().is_ident("cfg") && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "test"))
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr.path().is_ident("cfg") && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "test")
+    })
 }
 
 /// The types of `sources` that no home of `concepts` names, the homes that name no type,
-/// and the names defined twice.
+/// the names defined twice, the operations that name no function, and the fillings out
+/// of their shape.
 fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
-    let mut types = Definitions::default();
+    let mut definitions = Definitions::default();
     for source in sources {
-        types.visit_file(&syn::parse_file(source).expect("a source file parses"));
+        definitions.visit_file(&syn::parse_file(source).expect("a source file parses"));
     }
-    let homes: BTreeSet<String> = (read_concepts(concepts).fillings.into_iter())
-        .filter_map(|(_, filling)| match filling {
-            Filling::Home(name) => Some(name),
-            Filling::Item(_) => None,
-        })
-        .collect();
+    let read = read_concepts(concepts);
+    let (mut homes, mut operations) = (BTreeSet::new(), BTreeSet::new());
+    for (_, filling) in read.fillings {
+        match filling {
+            Filling::Home(name) => _ = homes.insert(name),
+            Filling::Item(item) => operations.extend(item.split('`').nth(1).map(str::to_string)),
+        }
+    }
     Undeclared {
-        types: types.names.difference(&homes).cloned().collect(),
-        homes: homes.difference(&types.names).cloned().collect(),
-        duplicates: types.duplicates,
+        types: definitions.names.difference(&homes).cloned().collect(),
+        homes: homes.difference(&definitions.names).cloned().collect(),
+        duplicates: definitions.duplicates,
+        operations: operations.difference(&definitions.functions).cloned().collect(),
+        malformed: read.malformed.into_iter().collect(),
     }
 }
 
@@ -111,23 +152,29 @@ enum Filling {
 }
 
 /// `docs/concepts.md` read apart: its skeleton, the file line for line with its fillings
-/// set aside, and each filling with its entry.
+/// set aside, each filling with its entry, and the lines that would be fillings but are
+/// not in their shape.
 #[derive(Default)]
 struct Concepts {
     skeleton: Vec<String>,
     fillings: BTreeSet<(String, Filling)>,
+    malformed: Vec<String>,
 }
 
 impl Concepts {
     /// Records `fillings` under `entry` and keeps `blank`, if any, in the skeleton; or,
-    /// when `fillings` is none because `line` is not in its shape, keeps `line` itself.
+    /// when `fillings` is none because `line` is not in its shape, keeps `line` itself in
+    /// the skeleton and records it as malformed.
     fn fill(&mut self, entry: &str, fillings: Option<Vec<Filling>>, line: &str, blank: Option<String>) {
         match fillings {
             Some(fillings) => {
                 self.fillings.extend(fillings.into_iter().map(|filling| (entry.to_string(), filling)));
                 self.skeleton.extend(blank);
             }
-            None => self.skeleton.push(line.to_string()),
+            None => {
+                self.skeleton.push(line.to_string());
+                self.malformed.push(line.to_string());
+            }
         }
     }
 }
@@ -135,16 +182,17 @@ impl Concepts {
 /// `concepts` read apart.  A home line is `- home: none yet.` or names in backticks
 /// separated by `, `, then `.`; a Home cell is empty or such names; an operations line is
 /// `- operations: none yet.`, or `- operations:` followed by items, each one line
-/// `` - `name`: what it does ``, indented by two spaces.  An entry is the nearest `## `
-/// heading, and for a table row the heading and the row's first cell.  A line that would
-/// be a filling but is not in its shape stays in the skeleton.
+/// `` - `name`: what it does ``, indented by two spaces; a line indented by four among
+/// them, an item wrapped, is in no shape.  An entry is the nearest `## ` heading, and for
+/// a table row the heading and the row's first cell.  A line that would be a filling but
+/// is not in its shape stays in the skeleton.
 fn read_concepts(concepts: &str) -> Concepts {
     let mut read = Concepts::default();
     let (mut entry, mut home_column, mut listing) = (String::new(), None, false);
     for line in concepts.lines() {
         let cells: Vec<&str> =
             line.strip_prefix('|').map(|row| row.split('|').map(str::trim).collect()).unwrap_or_default();
-        let item = line.strip_prefix("  - ").filter(|_| listing);
+        let item = (line.strip_prefix("  - ").or(line.strip_prefix("    ").map(|_| ""))).filter(|_| listing);
         listing = item.is_some() || line == "- operations:";
         entry = line.strip_prefix("## ").map_or(entry, str::to_string);
         home_column = cells.iter().position(|cell| *cell == "Home").or(home_column.filter(|_| !cells.is_empty()));
@@ -409,4 +457,99 @@ fn kernel_unchanged() {
     };
     let changes = kernel_changes(&read("SQL_LINEAGE_CONCEPTS_BASE"), &read("SQL_LINEAGE_CONCEPTS_HEAD"));
     assert!(changes.is_empty(), "docs/concepts.md changed beyond fillings:\n{}", changes.join("\n"));
+}
+
+/// An entry that lists two operations: `Answer::of`, one of `Answer`'s, and `answer_all`,
+/// a free function.
+const OPERATIONS: &str = "\
+## Answer
+
+- home: `Answer`.
+- operations:
+  - `Answer::of`: builds one.
+  - `answer_all`: answers every write.
+";
+
+fn operations_of(source: &str) -> BTreeSet<String> {
+    undeclared(&[source.to_string()], OPERATIONS).operations
+}
+
+#[test]
+fn concepts_find_an_operation_in_an_impl() {
+    assert_eq!(
+        operations_of("pub struct Answer; impl Answer { pub fn of() -> Self { Answer } }"),
+        names(&["answer_all"])
+    );
+}
+
+#[test]
+fn concepts_find_a_free_function_operation() {
+    assert_eq!(operations_of("pub struct Answer; pub fn answer_all() {}"), names(&["Answer::of"]));
+}
+
+#[test]
+fn concepts_report_an_operation_with_no_function() {
+    assert_eq!(operations_of("pub struct Answer;"), names(&["Answer::of", "answer_all"]));
+}
+
+#[test]
+fn concepts_report_an_operation_of_another_type() {
+    let source = "pub struct Answer; pub struct Other; impl Other { pub fn of() {} } pub fn answer_all() {}";
+    assert_eq!(operations_of(source), names(&["Answer::of"]));
+}
+
+#[test]
+fn concepts_report_a_method_named_as_a_free_function() {
+    let source = "pub struct Answer; impl Answer { pub fn of() {} pub fn answer_all() {} }";
+    assert_eq!(operations_of(source), names(&["answer_all"]));
+}
+
+#[test]
+fn concepts_report_a_private_operation() {
+    let source = "pub struct Answer; impl Answer { fn of() {} } pub fn answer_all() {}";
+    assert_eq!(operations_of(source), names(&["Answer::of"]));
+}
+
+#[test]
+fn concepts_report_a_test_only_operation() {
+    let source = "pub struct Answer; impl Answer { #[cfg(test)] pub fn of() {} } #[test] pub fn answer_all() {}";
+    assert_eq!(operations_of(source), names(&["Answer::of", "answer_all"]));
+}
+
+#[test]
+fn concepts_report_a_malformed_filling() {
+    let concepts = "\
+## Answer
+
+- home: `Answer`; and from now on a CTE is a relation.
+- operations:
+  - Answer::of builds one.
+  - `answer_all`: answers every write.
+    And it decides the dialect.
+";
+    let found = undeclared(&["pub struct Answer; pub fn answer_all() {}".to_string()], concepts);
+    let malformed = names(&[
+        "- home: `Answer`; and from now on a CTE is a relation.",
+        "  - Answer::of builds one.",
+        "    And it decides the dialect.",
+    ]);
+    assert_eq!(found.malformed, malformed);
+}
+
+#[test]
+fn every_operation_names_a_function() {
+    let (sources, concepts) = repository();
+    let found = undeclared(&sources, &concepts);
+    assert!(
+        found.operations.is_empty(),
+        "operations in docs/concepts.md that name no function: {:?}",
+        found.operations
+    );
+}
+
+#[test]
+fn every_filling_has_its_shape() {
+    let (sources, concepts) = repository();
+    let found = undeclared(&sources, &concepts);
+    assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
 }
