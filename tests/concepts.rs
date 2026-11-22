@@ -108,6 +108,12 @@ impl<'ast> Visit<'ast> for Definitions {
         }
         syn::visit::visit_item_impl(self, item);
     }
+
+    fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
+        if !test_only(&method.attrs) {
+            syn::visit::visit_impl_item_fn(self, method);
+        }
+    }
 }
 
 /// Whether `attrs` hold `#[cfg(test)]` or `#[test]`.
@@ -338,7 +344,8 @@ fn concepts_ignore_test_types() {
 #[test]
 fn concepts_ignore_test_impls() {
     let source = "struct Answer; struct Request;
-        #[cfg(test)] impl Answer { fn fixture() { struct Local; } }";
+        #[cfg(test)] impl Answer { fn fixture() { struct Local; } }
+        impl Request { #[cfg(test)] fn fixture() { struct Inner; } }";
     assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
 }
 
