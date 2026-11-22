@@ -4,13 +4,15 @@
 mod describe;
 mod dialect;
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 use describe::Description;
 
 fn main() -> ExitCode {
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if arguments == ["--describe"] {
+    // An argument need not be Unicode; it is refused like any other.
+    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if matches!(arguments.as_slice(), [only] if only == "--describe") {
         let description = Description::of_build(include_str!("../Cargo.lock"));
         println!("{}", serde_json::to_string(&description).expect("a description serialises"));
         return ExitCode::SUCCESS;
