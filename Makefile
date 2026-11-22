@@ -19,13 +19,15 @@ clippy:
 	@cargo clippy --locked -j $(CARGO_JOBS) --all-targets -- -D warnings
 
 # Each tracked source and build file opens with its SPDX line: after `// ` in
-# Rust, after `# ` elsewhere.
+# Rust, after `# ` elsewhere. Either list empty, as outside a git repository,
+# is a failure, not a pass.
 licence:
-	@status=0; \
-	for file in $$(git ls-files '*.rs'); do \
+	@status=0; rust=$$(git ls-files '*.rs') && build=$$(git ls-files '*.toml' Makefile flake.nix) \
+		&& [ -n "$$rust" ] && [ -n "$$build" ] || { echo "licence: no file to check"; exit 1; }; \
+	for file in $$rust; do \
 		[ "$$(head -n 1 "$$file")" = "// SPDX-License-Identifier: EUPL-1.2" ] || { echo "$$file: no SPDX line"; status=1; }; \
 	done; \
-	for file in $$(git ls-files '*.toml' Makefile flake.nix); do \
+	for file in $$build; do \
 		[ "$$(head -n 1 "$$file")" = "# SPDX-License-Identifier: EUPL-1.2" ] || { echo "$$file: no SPDX line"; status=1; }; \
 	done; \
 	exit $$status
