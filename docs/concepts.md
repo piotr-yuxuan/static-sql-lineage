@@ -2,8 +2,8 @@
 
 The kernel of `sql-lineage`: the few concepts from which every other term, type and
 command is defined. Each entry says what the concept means, what it is not, the words
-it rejects, its home in the code, and scenarios with a verdict. A scenario's identifier
-is carried by the test that checks it.
+it rejects, its home in the code, its operations, and scenarios with a verdict. A
+scenario's identifier is carried by the test that checks it.
 
 - A kernel concept holds a fact that no other concept holds. A derived term holds none:
   it is defined from the kernel, and overlap between derived terms is harmless.
@@ -12,8 +12,18 @@ is carried by the test that checks it.
   whose `home` line or Home cell names it in backticks. The concept check,
   `tests/concepts.rs`, fails otherwise, on a home that names no type, and on a type's
   name defined twice.
+- An entry's `operations` lists, one line each, the functions through which other
+  modules should act on the concept, so that code elsewhere calls them and does not
+  repeat them. An item opens with the function in backticks, `name` for a free
+  function or `Type::name` for one that `Type` defines, visible outside its module and
+  outside tests, then says in a few words what it does. The list is chosen, not
+  complete. The concept check fails on an item that names no such function.
+- A `home` line holds `none yet.` or names in backticks separated by commas, a Home
+  cell nothing or such names, and an operations item one line. The concept check
+  fails on any other shape.
 - This file changes only through a plan whose section *Concepts* declares the change,
-  approved by the owner. It is never edited to make a check pass.
+  approved by the owner. It is never edited to make a check pass. `AGENTS.md`, under
+  Workflow, says which fillings of a home or an operations list need no declaration.
 - Definitions are timeless. Where the code differs from one goes in
   `docs/differences.md`, not here.
 
@@ -53,6 +63,7 @@ have. A reject scenario names an answer that must not be given.
 - avoid: object, dataset, node, model, source; view, for relations in general; field
   and attribute, for a column.
 - home: none yet.
+- operations: none yet.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -88,6 +99,7 @@ have. A reject scenario names an answer that must not be given.
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
 - home: none yet.
+- operations: none yet.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
@@ -126,6 +138,7 @@ have. A reject scenario names an answer that must not be given.
   column.
 - avoid: link, flow, dependency, mapping.
 - home: none yet.
+- operations: none yet.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.
 - accept `edge.coalesce-is-derive`: query `select coalesce(a, 0) as a from s`: the
@@ -156,6 +169,7 @@ have. A reject scenario names an answer that must not be given.
 - avoid: result, report, output; response, which carries all the answers to one
   request.
 - home: none yet.
+- operations: none yet.
 - accept `answer.unknown-star`: query `select * from r`, with no catalog: an
   `unknown_relation` gap for `r` and a `wildcard` gap; no edge.
 - reject `answer.silent-none`: for that query, no edge and no gap.
@@ -181,6 +195,7 @@ have. A reject scenario names an answer that must not be given.
   has.
 - avoid: schema, which is also a part of a name; metadata, information schema, sources.
 - home: none yet.
+- operations: none yet.
 - accept `catalog.unknown-relation`: query `select a from r`, with no catalog: an
   `unknown_relation` gap for `r`; no edge.
 - reject `catalog.columns-guessed`: for that query, the edge `r.a -> t.a`, as if the
@@ -195,6 +210,8 @@ have. A reject scenario names an answer that must not be given.
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
 - home: `Dialect`.
+- operations:
+  - `Dialect::built`: the dialects that the build includes.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
@@ -220,6 +237,14 @@ have. A reject scenario names an answer that must not be given.
 | response | one answer per write of the request, on standard output | |
 | protocol | the number of the request's and response's format; either side refuses another | |
 | describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
+
+## Kept apart
+
+Look-alike types or functions that stay apart, because they belong to different
+concepts or change for independent reasons, one line each: `<one>` and `<other>`:
+why. Only the owner adds a line, through a plan.
+
+None yet.
 
 ## Not yet modelled
 

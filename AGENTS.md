@@ -12,7 +12,8 @@ this repository: plans are `docs/work/plans/NNN-slug.md`, not tracked; the check
 `make check`, run in `nix develop`.
 
 Each plan has a section *Concepts*, which the review of its draft checks against
-`docs/concepts.md` and against the other open plans:
+`docs/concepts.md`, against the other open plans, and, for its line *Reuses*, against
+the code at the base:
 
 ```markdown
 ## Concepts
@@ -21,6 +22,7 @@ Adds: <concepts or derived terms>
 Changes: <and how>
 Retires: <and what replaces them>
 Relies on: <concepts used unchanged>
+Reuses: <operations and types at the base that the steps call or extend>
 ```
 
 - Every type belongs to a concept whose `home` names it. The concept check, the test
@@ -29,7 +31,9 @@ Relies on: <concepts used unchanged>
   blocking finding.
 - `docs/concepts.md` changes only in a plan that declares the change, and the
   pre-merge summary shows the diff of its kernel. It is never edited to make a check
-  pass.
+  pass. Adding to an existing concept's `home` or `operations` a type or a function
+  that serves it is not a change to declare. The pre-merge summary lists each, with why
+  it serves that concept, and the review checks the reasons.
 - Where the code differs from a definition goes in `docs/differences.md`, created at
   the first difference, each classed as a defect of the code, a defect of the
   definition, an aspiration or an intended gap.
@@ -40,6 +44,52 @@ Relies on: <concepts used unchanged>
   `docs/decisions.md`, drawn with the skill `diagram-design:diagram-design`; a plan
   that changes what one shows redraws it.
 - Tracked SQL is synthetic.
+
+## Reuse before repetition
+
+- Before writing a function or a type, look for one with the same job in the code at
+  the base: in the `operations` lists of `docs/concepts.md`, then in codegraph's index
+  where it is available, else in the signatures of the modules concerned. A worktree
+  has an index of its own, made by `codegraph init` when the worktree is added, so
+  the index answers from the branch, not from the primary checkout.
+- A change to existing code that lets the request reuse it, rather than repeat it,
+  traces to the request. It extracts what the existing use and the new one share,
+  rather than adding a flag or a branch; it is a commit of its own, right before the
+  commit that uses it; and the existing tests pass unchanged. Until that next commit
+  the extracted code has one caller, which the rule against single-use helpers allows.
+  The pre-merge summary lists each such commit with the tests that cover the code it
+  moved. This rule prevails over the shared rule that every changed line traces to the
+  request, and over the Karpathy guideline *Surgical changes*.
+- A rule that several places must agree on lives in one type whose constructor
+  applies it and whose fields are private, so that no place builds or compares one
+  otherwise; the names of relations and columns are the first case, as the Relation
+  entry of `docs/concepts.md` says.
+- Each plan's acceptance criteria include one for the review, manual since no command
+  can check it: no new function or type repeats behaviour that exists at the base,
+  unless *Kept apart* in `docs/concepts.md` lists the two, or the plan's notes propose
+  them for it, with why; a repetition only proposed blocks the merge until the owner
+  rules. This rule prevails over the reviewer's default preference for duplication
+  over a wrong abstraction.
+
+## Plans built while the owner is away
+
+A plan that the owner approves to be built in their absence, as in a chain of plans
+overnight:
+
+- waits on no open question of `docs/decisions.md`: each one that it needs is closed
+  before the plan is approved;
+- only adds to `docs/concepts.md`, and only names to `home` lines and Home cells and
+  items to `operations` lists, in the shapes that file gives. Its `NNN-checks.sh`
+  runs `make kernel-unchanged`, which compares the file with its state where the
+  branch began and fails otherwise, and the review of the plan's draft checks that it
+  does. A plan that needs more, such as a type that serves no existing concept, stops
+  and leaves its branch.
+
+When such a chain ends, an agent whose only task is to find behaviour repeated across
+`src/` and `tests/`, rather than in one diff, writes what it finds to
+`docs/work/consolidation/`, which the owner reads with the chain's results. Each
+repetition becomes a step of the next plan drafted after it or, on the owner's ruling,
+a line of *Kept apart*.
 
 ## The kernel
 
