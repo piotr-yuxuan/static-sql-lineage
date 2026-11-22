@@ -137,7 +137,7 @@ fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
     for (_, filling) in read.fillings {
         match filling {
             Filling::Home(name) => _ = homes.insert(name),
-            Filling::Item(item) => operations.extend(item.split('`').nth(1).map(str::to_string)),
+            Filling::Item(item) => operations.extend(operation_in(&item).map(str::to_string)),
         }
     }
     Undeclared {
@@ -196,31 +196,42 @@ fn read_concepts(concepts: &str) -> Concepts {
     let mut read = Concepts::default();
     let (mut entry, mut home_column, mut listing) = (String::new(), None, false);
     for line in concepts.lines() {
-        let cells: Vec<&str> =
-            line.strip_prefix('|').map(|row| row.split('|').map(str::trim).collect()).unwrap_or_default();
-        let item = (line.strip_prefix("  - ").or(line.strip_prefix("    ").map(|_| ""))).filter(|_| listing);
-        listing = item.is_some() || line == "- operations:";
+        // A separator row, `|---|` or `| :-- |`, has no cells.
+        let cells: Vec<&str> = (line.strip_prefix('|').filter(|row| !row.trim_start().starts_with(['-', ':'])))
+            .map(|row| row.split('|').map(str::trim).collect())
+            .unwrap_or_default();
+        let item = listing && line.starts_with("  ");
+        listing = item || line == "- operations:";
         entry = line.strip_prefix("## ").map_or(entry, str::to_string);
-        home_column = cells.iter().position(|cell| *cell == "Home").or(home_column.filter(|_| !cells.is_empty()));
-        let home_cell = (home_column.and_then(|column| cells.get(column)))
-            .filter(|cell| **cell != "Home" && !line.starts_with("|-"));
+        // The column found in the header serves the rows after it, so the header itself
+        // has no Home cell; it serves while the lines are the table's.
+        let home_cell = home_column.and_then(|column| cells.get(column));
+        home_column = cells.iter().position(|cell| *cell == "Home").or(home_column.filter(|_| line.starts_with('|')));
         if let Some(home) = line.strip_prefix("- home: ") {
             read.fill(&entry, home.strip_suffix('.').and_then(names_in), line, Some("- home:".to_string()));
         } else if let Some(rest) = line.strip_prefix("- operations:") {
             read.fill(&entry, ["", " none yet."].contains(&rest).then(Vec::new), line, Some("- operations:".into()));
-        } else if let Some(text) = item {
-            let named = text.strip_prefix('`').and_then(|rest| rest.split_once("`: "));
-            let shaped = named.filter(|(name, what)| name.split("::").all(is_identifier) && !what.is_empty());
-            read.fill(&entry, shaped.map(|_| vec![Filling::Item(line.to_string())]), line, None);
+        } else if item {
+            read.fill(&entry, operation_in(line).map(|_| vec![Filling::Item(line.to_string())]), line, None);
         } else if let Some(cell) = home_cell {
-            let blank: Vec<&str> =
-                cells.iter().enumerate().map(|(i, other)| if Some(i) == home_column { "" } else { other }).collect();
-            read.fill(&format!("{entry} / {}", cells[0]), names_in(cell), line, Some(blank.join(" | ")));
+            let others: Vec<&str> = (cells.iter().enumerate())
+                .filter(|(column, _)| Some(*column) != home_column)
+                .map(|(_, other)| *other)
+                .collect();
+            read.fill(&format!("{entry} / {}", cells[0]), names_in(cell), line, Some(others.join(" | ")));
         } else {
             read.skeleton.push(line.to_string());
         }
     }
     read
+}
+
+/// The function that an operations item names, when `line` is one in its shape:
+/// `` - `name`: what it does ``, indented by two spaces, `name` an identifier or
+/// `Type::name`.
+fn operation_in(line: &str) -> Option<&str> {
+    let (name, what) = line.strip_prefix("  - `")?.split_once("`: ")?;
+    (name.split("::").all(is_identifier) && !what.is_empty()).then_some(name)
 }
 
 /// The names of a home: none for an empty text or `none yet`, else names in backticks
@@ -559,4 +570,13 @@ fn every_filling_has_its_shape() {
     let (sources, concepts) = repository();
     let found = undeclared(&sources, &concepts);
     assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
+}
+
+#[test]
+fn concepts_read_any_separator_row() {
+    for separator in ["|---|---|---|", "| --- | --- | --- |", "|:--|:--|:--|"] {
+        let concepts = format!("| Term | Defined as | Home |\n{separator}\n| answer | one per write | `Answer` |\n");
+        let found = undeclared(&["struct Answer;".to_string()], &concepts);
+        assert_eq!(found, Undeclared::default(), "with the separator {separator}");
+    }
 }
