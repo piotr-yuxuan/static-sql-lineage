@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: EUPL-1.2
 # The checks of sql-lineage.  Run them from the repository's root in
 # `nix develop`, which provides every tool but a C linker.  Four workers by
 # default, to keep a laptop cool: `make test CARGO_JOBS=8 TEST_THREADS=8`

@@ -1,9 +1,11 @@
+# SPDX-License-Identifier: EUPL-1.2
 [package]
 name = "sql-lineage"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"
 description = "The column lineage of SQL that writes relations"
+license = "EUPL-1.2"
 publish = false
 
 [features]

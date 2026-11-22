@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: EUPL-1.2
 //! What this build is, as `--describe` says it.
 
 use serde::Serialize;

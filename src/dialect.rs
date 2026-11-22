@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: EUPL-1.2
 //! The dialects of this build.
 
 use serde::Serialize;

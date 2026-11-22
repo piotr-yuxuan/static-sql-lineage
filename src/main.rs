@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: EUPL-1.2
 //! `sql-lineage`: the column lineage of SQL that writes relations.  How to run it is in
 //! `docs/protocol.md`.
 

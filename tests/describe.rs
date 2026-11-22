@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: EUPL-1.2
 //! `--describe` and the uses the binary refuses, as `docs/protocol.md` gives them.
 
 use std::collections::BTreeSet;
