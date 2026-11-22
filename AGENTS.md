@@ -23,10 +23,10 @@ Retires: <and what replaces them>
 Relies on: <concepts used unchanged>
 ```
 
-- Every public type belongs to a concept whose `home` names it. Each plan's acceptance
-  criteria include the concept check, so that a type outside `docs/concepts.md` is a
-  blocking finding. The first plan makes the check a script that `make check` runs;
-  until then, the review checks it.
+- Every type belongs to a concept whose `home` names it. The concept check, the test
+  `tests/concepts.rs` that `make check` runs, fails otherwise, and each plan's
+  acceptance criteria include it, so that a type outside `docs/concepts.md` is a
+  blocking finding.
 - `docs/concepts.md` changes only in a plan that declares the change, and the
   pre-merge summary shows the diff of its kernel. It is never edited to make a check
   pass.
