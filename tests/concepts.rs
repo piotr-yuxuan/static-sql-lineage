@@ -89,6 +89,16 @@ fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
     for source in sources {
         types.visit_file(&syn::parse_file(source).expect("a source file parses"));
     }
+    let homes = read_concepts(concepts);
+    Undeclared {
+        types: types.names.difference(&homes).cloned().collect(),
+        homes: homes.difference(&types.names).cloned().collect(),
+        duplicates: types.duplicates,
+    }
+}
+
+/// The names of the homes in `concepts`.
+fn read_concepts(concepts: &str) -> BTreeSet<String> {
     let mut homes = BTreeSet::new();
     let mut home_column = None;
     for line in concepts.lines() {
@@ -106,11 +116,7 @@ fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
             homes.extend(backticked(cell));
         }
     }
-    Undeclared {
-        types: types.names.difference(&homes).cloned().collect(),
-        homes: homes.difference(&types.names).cloned().collect(),
-        duplicates: types.duplicates,
-    }
+    homes
 }
 
 /// The names in backticks in `text`.
