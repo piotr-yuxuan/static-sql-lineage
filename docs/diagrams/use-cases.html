@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<!-- A view of docs/decisions.md, its use cases: light variant, sanityinc-tomorrow profile, system fonts. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three use cases, one kernel</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f7f7f7;
+      --color-ink:     #4d4d4c;
+      --color-muted:   #5e605c;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    h1 .mono { font-family: var(--font-mono); font-size: 0.82em; letter-spacing: -0.03em; }
+    svg { width: 100%; height: auto; min-width: 1040px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Decisions · use cases</p>
+    <h1>Three use cases, one kernel in <span class="mono">sql-lineage</span></h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1040 600" width="1040" height="600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="use-cases-title use-cases-desc">
+        <title id="use-cases-title">Three use cases, one kernel in sql-lineage</title>
+        <desc id="use-cases-desc">Swimlane of the three use cases: dbt-lsp-plus sends compiled models through the protocol and shows lineage in dbt-mode; an agent porting legacy SQL asks graph, trace, uses and outline; a later refactoring use fingerprints units of logic rooted through copy edges; all three go through the same kernel.</desc>
+        <defs>
+          <marker id="use-cases-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0,0 L 10,5 L 0,10 z" fill="#5e605c"/>
+          </marker>
+        </defs>
+        <rect width="100%" height="100%" fill="#f7f7f7"/>
+
+        <!-- Lane dividers -->
+        <line x1="40" y1="80" x2="1000" y2="80" stroke="rgba(77,77,76,0.12)" stroke-width="1"/>
+        <line x1="40" y1="212" x2="1000" y2="212" stroke="rgba(77,77,76,0.12)" stroke-width="1"/>
+        <line x1="40" y1="344" x2="1000" y2="344" stroke="rgba(77,77,76,0.12)" stroke-width="1"/>
+        <line x1="40" y1="476" x2="1000" y2="476" stroke="rgba(77,77,76,0.12)" stroke-width="1"/>
+
+        <!-- The kernel's zone, across the lanes -->
+        <rect x="476" y="48" width="272" height="436" rx="8" fill="rgba(137,89,168,0.05)" stroke="#8959a8" stroke-width="1"/>
+        <text x="492" y="68" fill="#8959a8" font-size="11" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace">sql-lineage</text>
+        <text x="580" y="68" fill="#8959a8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">ONE KERNEL</text>
+
+        <!-- Column headings -->
+        <text x="212" y="68" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">WHAT THE CALLER HAS</text>
+        <text x="788" y="68" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">WHAT THE ANSWERS BECOME</text>
+
+        <!-- Lane labels -->
+        <text x="40" y="140" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">U1 · COLUMN LINEAGE</text>
+        <text x="40" y="158" fill="#4d4d4c" font-size="11" font-family="'Geist Mono', ui-monospace, monospace">dbt-lsp-plus</text>
+        <text x="40" y="272" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">U2 · PORTING</text>
+        <text x="40" y="290" fill="#4d4d4c" font-size="11" font-family="'Geist', system-ui, sans-serif">an agent, or a person</text>
+        <text x="40" y="404" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">U3 · REFACTORING</text>
+        <text x="40" y="422" fill="#4d4d4c" font-size="11" font-family="'Geist', system-ui, sans-serif">later: the owner</text>
+
+        <!-- Flows, behind the steps -->
+        <path d="M 436,146 H 490" fill="none" stroke="#5e605c" stroke-width="1" marker-end="url(#use-cases-arrow)"/>
+        <path d="M 732,146 H 786" fill="none" stroke="#5e605c" stroke-width="1" marker-end="url(#use-cases-arrow)"/>
+        <path d="M 436,278 H 490" fill="none" stroke="#5e605c" stroke-width="1" marker-end="url(#use-cases-arrow)"/>
+        <path d="M 732,278 H 786" fill="none" stroke="#5e605c" stroke-width="1" marker-end="url(#use-cases-arrow)"/>
+        <path d="M 436,410 H 490" fill="none" stroke="#5e605c" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#use-cases-arrow)"/>
+        <path d="M 732,410 H 786" fill="none" stroke="#5e605c" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#use-cases-arrow)"/>
+
+        <!-- U1 -->
+        <rect x="212" y="102" width="224" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="212" y="102" width="224" height="88" rx="6" fill="rgba(94,96,92,0.10)" stroke="#6a6c68" stroke-width="1"/>
+        <text x="228" y="120" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">INPUT</text>
+        <text x="228" y="140" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Compiled models</text>
+        <text x="228" y="162" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">in dependency order</text>
+        <text x="228" y="178" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">catalog: YAML, catalog.json, seeds</text>
+
+        <rect x="492" y="102" width="240" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="492" y="102" width="240" height="88" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <text x="508" y="120" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">PROTOCOL</text>
+        <text x="508" y="140" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">One request, one response</text>
+        <text x="508" y="162" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">replace writes against the catalog</text>
+        <text x="508" y="178" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">an answer per write</text>
+
+        <rect x="788" y="102" width="212" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="788" y="102" width="212" height="88" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <text x="804" y="120" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">OUTPUT</text>
+        <text x="804" y="140" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Lineage in <tspan font-family="'Geist Mono', ui-monospace, monospace" font-weight="500">dbt-mode</tspan></text>
+        <text x="804" y="162" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">relations mapped to dbt nodes</text>
+        <text x="804" y="178" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">checked against dbt's lineage</text>
+
+        <!-- U2 -->
+        <rect x="212" y="234" width="224" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="212" y="234" width="224" height="88" rx="6" fill="rgba(94,96,92,0.10)" stroke="#6a6c68" stroke-width="1"/>
+        <text x="228" y="252" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">INPUT</text>
+        <text x="228" y="272" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Legacy SQL files</text>
+        <text x="228" y="294" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">views, CTAS, inserts, merges</text>
+        <text x="228" y="310" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">routines once step 5 lands</text>
+
+        <rect x="492" y="234" width="240" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="492" y="234" width="240" height="88" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <text x="508" y="252" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">COMMANDS</text>
+        <text x="508" y="272" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Questions across writes</text>
+        <text x="508" y="294" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">graph · trace · uses · outline</text>
+        <text x="508" y="310" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">derived terms, read from answers</text>
+
+        <rect x="788" y="234" width="212" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="788" y="234" width="212" height="88" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <text x="804" y="252" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">OUTPUT</text>
+        <text x="804" y="272" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">A port to Snowflake</text>
+        <text x="804" y="294" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">in migration order</text>
+        <text x="804" y="310" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">sources and readers of a column</text>
+
+        <!-- U3, later -->
+        <rect x="212" y="366" width="224" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="212" y="366" width="224" height="88" rx="6" fill="rgba(77,77,76,0.02)" stroke="rgba(77,77,76,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="228" y="384" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">INPUT</text>
+        <text x="228" y="404" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Compiled models</text>
+        <text x="228" y="426" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">as in U1</text>
+
+        <rect x="492" y="366" width="240" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="492" y="366" width="240" height="88" rx="6" fill="rgba(77,77,76,0.02)" stroke="rgba(77,77,76,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="508" y="384" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">LATER</text>
+        <text x="508" y="404" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Fingerprints</text>
+        <text x="508" y="426" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">units rooted through copy edges</text>
+        <text x="508" y="442" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">concepts declared by their plan</text>
+
+        <rect x="788" y="366" width="212" height="88" rx="6" fill="#f7f7f7"/>
+        <rect x="788" y="366" width="212" height="88" rx="6" fill="rgba(77,77,76,0.02)" stroke="rgba(77,77,76,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="804" y="384" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">OUTPUT</text>
+        <text x="804" y="404" fill="#4d4d4c" font-size="12" font-weight="600" font-family="'Geist', system-ui, sans-serif">Duplicates and conflicts</text>
+        <text x="804" y="426" fill="#5e605c" font-size="9" font-family="'Geist Mono', ui-monospace, monospace">grouped, for the owner to rule</text>
+
+        <!-- Legend strip -->
+        <line x1="40" y1="508" x2="1000" y2="508" stroke="rgba(77,77,76,0.1)" stroke-width="0.8"/>
+        <text x="40" y="524" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+        <rect x="40" y="536" width="14" height="10" rx="2" fill="rgba(137,89,168,0.05)" stroke="#8959a8" stroke-width="1"/>
+        <text x="60" y="545" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">The kernel, behind every interface</text>
+        <rect x="224" y="536" width="14" height="10" rx="2" fill="rgba(94,96,92,0.10)" stroke="#6a6c68" stroke-width="1"/>
+        <text x="244" y="545" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">What a caller has</text>
+        <rect x="336" y="536" width="14" height="10" rx="2" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <text x="356" y="545" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Step</text>
+        <rect x="396" y="536" width="14" height="10" rx="2" fill="rgba(77,77,76,0.02)" stroke="rgba(77,77,76,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="416" y="545" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Later, after its plan</text>
+        <line x1="516" y1="541" x2="544" y2="541" stroke="#5e605c" stroke-width="1" marker-end="url(#use-cases-arrow)"/>
+        <text x="552" y="545" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Flow</text>
+        <text x="40" y="564" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Each use case is an interface over the same writes, catalog and answers. A linter and a warehouse check would join the same way, one plan each (decisions.md, Widening).</text>
+        <text x="40" y="578" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif"><tspan font-family="'Geist Mono', ui-monospace, monospace">polyglot-sql</tspan> parses behind the kernel and can be replaced; <tspan font-family="'Geist Mono', ui-monospace, monospace">sql-lineage</tspan> never connects to a database.</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

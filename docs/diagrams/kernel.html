@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<!-- A view of docs/concepts.md: light variant, sanityinc-tomorrow profile, system fonts. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The kernel of sql-lineage</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f7f7f7;
+      --color-ink:     #4d4d4c;
+      --color-muted:   #5e605c;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1080px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    h1 .mono { font-family: var(--font-mono); font-size: 0.82em; letter-spacing: -0.03em; }
+    svg { width: 100%; height: auto; min-width: 1040px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Concepts · the kernel</p>
+    <h1>The kernel of <span class="mono">sql-lineage</span></h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1040 632" width="1040" height="632" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="kernel-title kernel-desc">
+        <title id="kernel-title">The kernel of sql-lineage</title>
+        <desc id="kernel-desc">Entity-relationship view of the six kernel concepts: each Write, read under one Dialect and against the Catalog, has exactly one Answer, which holds Edges and updates the Catalog for later writes; a Write has one target Relation and reads others, and the Catalog knows Relations.</desc>
+        <rect width="100%" height="100%" fill="#f7f7f7"/>
+
+        <!-- Relationships, behind the entities -->
+        <path d="M 280,92 H 400" fill="none" stroke="#5e605c" stroke-width="1"/>
+        <path d="M 640,116 H 760" fill="none" stroke="#8959a8" stroke-width="1.2"/>
+        <path d="M 400,140 H 348 Q 340,140 340,148 V 340 Q 340,348 332,348 H 280" fill="none" stroke="#5e605c" stroke-width="1"/>
+        <path d="M 280,392 H 400" fill="none" stroke="#5e605c" stroke-width="1"/>
+        <path d="M 480,192 V 304" fill="none" stroke="#5e605c" stroke-width="1"/>
+        <path d="M 560,192 V 304" fill="none" stroke="#5e605c" stroke-width="1"/>
+        <path d="M 880,192 V 304" fill="none" stroke="#5e605c" stroke-width="1"/>
+        <path d="M 1000,116 H 1016 Q 1024,116 1024,124 V 484 Q 1024,492 1016,492 H 168 Q 160,492 160,484 V 436" fill="none" stroke="#5e605c" stroke-width="1"/>
+
+        <!-- Relationship labels -->
+        <rect x="322" y="72" width="36" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="340" y="81" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">UNDER</text>
+        <rect x="664" y="96" width="72" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="700" y="105" fill="#8959a8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">ANSWERED BY</text>
+        <rect x="348" y="228" width="76" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="386" y="237" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">READ AGAINST</text>
+        <rect x="428" y="252" width="44" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="450" y="261" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">TARGET</text>
+        <rect x="568" y="252" width="36" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="586" y="261" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">READS</text>
+        <rect x="322" y="372" width="36" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="340" y="381" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">KNOWS</text>
+        <rect x="888" y="242" width="36" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="906" y="251" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">HOLDS</text>
+        <rect x="568" y="500" width="48" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="592" y="509" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.12em">UPDATES</text>
+
+        <!-- Cardinalities -->
+        <rect x="286" y="100" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="292" y="110" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+        <rect x="362" y="100" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="378" y="110" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..N</text>
+        <rect x="646" y="124" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="652" y="134" fill="#8959a8" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+        <rect x="742" y="124" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="748" y="134" fill="#8959a8" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+        <rect x="362" y="148" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="378" y="158" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..N</text>
+        <rect x="286" y="356" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="292" y="366" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+        <rect x="286" y="400" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="302" y="410" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..1</text>
+        <rect x="362" y="400" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="378" y="410" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..N</text>
+        <rect x="440" y="198" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="456" y="208" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..N</text>
+        <rect x="462" y="286" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="468" y="296" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+        <rect x="568" y="198" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="584" y="208" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..N</text>
+        <rect x="568" y="286" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="584" y="296" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1..N</text>
+        <rect x="862" y="198" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="868" y="208" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+        <rect x="842" y="286" width="32" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="858" y="296" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">0..N</text>
+        <rect x="1002" y="96" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="1008" y="106" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">N</text>
+        <rect x="168" y="446" width="12" height="12" rx="2" fill="#f7f7f7"/>
+        <text x="174" y="456" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">1</text>
+
+        <!-- Entity: Dialect -->
+        <rect x="40" y="40" width="240" height="132" rx="6" fill="#f7f7f7"/>
+        <rect x="40" y="40" width="240" height="132" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <rect x="40" y="40" width="240" height="40" rx="6" fill="rgba(77,77,76,0.04)"/>
+        <rect x="40" y="72" width="240" height="8" fill="rgba(77,77,76,0.04)"/>
+        <line x1="40" y1="80" x2="280" y2="80" stroke="rgba(77,77,76,0.22)" stroke-width="1"/>
+        <text x="56" y="56" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">VALUE · ONE PER REQUEST</text>
+        <text x="56" y="72" fill="#4d4d4c" font-size="14" font-weight="600" font-family="'Geist', system-ui, sans-serif">Dialect</text>
+        <text x="56" y="100" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace"># name</text>
+        <text x="264" y="100" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">snowflake·tsql·duckdb</text>
+        <text x="56" y="120" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">reads</text>
+        <text x="264" y="120" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">every name and write</text>
+        <text x="56" y="140" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">rules</text>
+        <text x="264" y="140" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">quoting and case</text>
+        <text x="56" y="160" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">not built</text>
+        <text x="264" y="160" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">refused as a whole</text>
+
+        <!-- Entity: Write (focal) -->
+        <rect x="400" y="40" width="240" height="152" rx="6" fill="#f7f7f7"/>
+        <rect x="400" y="40" width="240" height="152" rx="6" fill="rgba(137,89,168,0.04)" stroke="#8959a8" stroke-width="1.2"/>
+        <rect x="400" y="40" width="240" height="40" rx="6" fill="rgba(137,89,168,0.08)"/>
+        <rect x="400" y="72" width="240" height="8" fill="rgba(137,89,168,0.08)"/>
+        <line x1="400" y1="80" x2="640" y2="80" stroke="rgba(137,89,168,0.35)" stroke-width="1"/>
+        <text x="416" y="56" fill="#8959a8" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">ENTITY · ONE STATEMENT</text>
+        <text x="416" y="72" fill="#4d4d4c" font-size="14" font-weight="600" font-family="'Geist', system-ui, sans-serif">Write</text>
+        <text x="416" y="100" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace"># id</text>
+        <text x="624" y="100" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">given, echoed</text>
+        <text x="416" y="120" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">target</text>
+        <text x="624" y="120" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">one relation</text>
+        <text x="416" y="140" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">mode</text>
+        <text x="624" y="140" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">replace·contribute</text>
+        <text x="416" y="160" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">query</text>
+        <text x="624" y="160" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">over relations</text>
+        <text x="416" y="180" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">location</text>
+        <text x="624" y="180" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">line·column</text>
+
+        <!-- Entity: Answer -->
+        <rect x="760" y="40" width="240" height="152" rx="6" fill="#f7f7f7"/>
+        <rect x="760" y="40" width="240" height="152" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <rect x="760" y="40" width="240" height="40" rx="6" fill="rgba(77,77,76,0.04)"/>
+        <rect x="760" y="72" width="240" height="8" fill="rgba(77,77,76,0.04)"/>
+        <line x1="760" y1="80" x2="1000" y2="80" stroke="rgba(77,77,76,0.22)" stroke-width="1"/>
+        <text x="776" y="56" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">VALUE · ONE PER WRITE</text>
+        <text x="776" y="72" fill="#4d4d4c" font-size="14" font-weight="600" font-family="'Geist', system-ui, sans-serif">Answer</text>
+        <text x="776" y="100" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">write</text>
+        <text x="984" y="100" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">its id, echoed</text>
+        <text x="776" y="120" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">edges</text>
+        <text x="984" y="120" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">0..N</text>
+        <text x="776" y="140" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">gaps</text>
+        <text x="984" y="140" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">reason·where</text>
+        <text x="776" y="160" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">refusal</text>
+        <text x="984" y="160" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">0..1, nothing traced</text>
+        <text x="776" y="180" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">unknown</text>
+        <text x="984" y="180" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">is not none</text>
+
+        <!-- Entity: Catalog -->
+        <rect x="40" y="304" width="240" height="132" rx="6" fill="#f7f7f7"/>
+        <rect x="40" y="304" width="240" height="132" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <rect x="40" y="304" width="240" height="40" rx="6" fill="rgba(77,77,76,0.04)"/>
+        <rect x="40" y="336" width="240" height="8" fill="rgba(77,77,76,0.04)"/>
+        <line x1="40" y1="344" x2="280" y2="344" stroke="rgba(77,77,76,0.22)" stroke-width="1"/>
+        <text x="56" y="320" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">STATE · ONE PER REQUEST</text>
+        <text x="56" y="336" fill="#4d4d4c" font-size="14" font-weight="600" font-family="'Geist', system-ui, sans-serif">Catalog</text>
+        <text x="56" y="364" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">relations</text>
+        <text x="264" y="364" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">names·columns</text>
+        <text x="56" y="384" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">starts</text>
+        <text x="264" y="384" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">as the request says</text>
+        <text x="56" y="404" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">read</text>
+        <text x="264" y="404" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">as it is before a write</text>
+        <text x="56" y="424" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">never</text>
+        <text x="264" y="424" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">the warehouse</text>
+
+        <!-- Entity: Relation -->
+        <rect x="400" y="304" width="240" height="132" rx="6" fill="#f7f7f7"/>
+        <rect x="400" y="304" width="240" height="132" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <rect x="400" y="304" width="240" height="40" rx="6" fill="rgba(77,77,76,0.04)"/>
+        <rect x="400" y="336" width="240" height="8" fill="rgba(77,77,76,0.04)"/>
+        <line x1="400" y1="344" x2="640" y2="344" stroke="rgba(77,77,76,0.22)" stroke-width="1"/>
+        <text x="416" y="320" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">ENTITY · NAMED BY SQL</text>
+        <text x="416" y="336" fill="#4d4d4c" font-size="14" font-weight="600" font-family="'Geist', system-ui, sans-serif">Relation</text>
+        <text x="416" y="364" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace"># name</text>
+        <text x="624" y="364" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">SQL text, normalised</text>
+        <text x="416" y="384" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">columns</text>
+        <text x="624" y="384" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">named the same way</text>
+        <text x="416" y="404" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">is</text>
+        <text x="624" y="404" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">any named set of rows</text>
+        <text x="416" y="424" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">not</text>
+        <text x="624" y="424" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">a CTE or subquery</text>
+
+        <!-- Entity: Edge -->
+        <rect x="760" y="304" width="240" height="132" rx="6" fill="#f7f7f7"/>
+        <rect x="760" y="304" width="240" height="132" rx="6" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <rect x="760" y="304" width="240" height="40" rx="6" fill="rgba(77,77,76,0.04)"/>
+        <rect x="760" y="336" width="240" height="8" fill="rgba(77,77,76,0.04)"/>
+        <line x1="760" y1="344" x2="1000" y2="344" stroke="rgba(77,77,76,0.22)" stroke-width="1"/>
+        <text x="776" y="320" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">VALUE · IN AN ANSWER</text>
+        <text x="776" y="336" fill="#4d4d4c" font-size="14" font-weight="600" font-family="'Geist', system-ui, sans-serif">Edge</text>
+        <text x="776" y="364" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">parent</text>
+        <text x="984" y="364" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">a read relation·column</text>
+        <text x="776" y="384" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">child</text>
+        <text x="984" y="384" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">the target·column</text>
+        <text x="776" y="404" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">kind</text>
+        <text x="984" y="404" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">copy·derive·rows</text>
+        <text x="776" y="424" fill="#4d4d4c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace">one</text>
+        <text x="984" y="424" fill="#5e605c" font-size="10" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="end">per pair, per write</text>
+
+        <!-- Legend strip -->
+        <line x1="40" y1="540" x2="1000" y2="540" stroke="rgba(77,77,76,0.1)" stroke-width="0.8"/>
+        <text x="40" y="556" fill="#5e605c" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.18em">LEGEND</text>
+        <rect x="40" y="568" width="14" height="10" rx="2" fill="rgba(137,89,168,0.04)" stroke="#8959a8" stroke-width="1"/>
+        <text x="60" y="577" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Focal entity</text>
+        <rect x="140" y="568" width="14" height="10" rx="2" fill="#ffffff" stroke="#4d4d4c" stroke-width="1"/>
+        <text x="160" y="577" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Entity, value or state</text>
+        <line x1="280" y1="573" x2="308" y2="573" stroke="#8959a8" stroke-width="1.2"/>
+        <text x="316" y="577" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">ANSWERED BY: exactly one answer per write</text>
+        <line x1="600" y1="573" x2="628" y2="573" stroke="#5e605c" stroke-width="1"/>
+        <text x="636" y="577" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Relationship</text>
+        <text x="724" y="577" fill="#5e605c" font-size="10" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace">0..N</text>
+        <text x="760" y="577" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Cardinality at each end</text>
+        <text x="40" y="596" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">An answer depends on its write, on the catalog when the write is read, and on the dialect: the same write read against another catalog has another answer.</text>
+        <text x="40" y="610" fill="#5e605c" font-size="9" font-family="'Geist', system-ui, sans-serif">Graph, trace, uses, migration order and outline are read from answers. View and table are labels of a relation; routines and functions are not yet modelled.</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
