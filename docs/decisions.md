@@ -50,6 +50,15 @@ Ruled on 2026-11-22.
 - R8. Plans and their notes are untracked, under `docs/work/`, as in the owner's other
   repositories.
 
+Ruled on 2026-11-22, later.
+
+- R9. Licence: EUPL-1.2, the text in `LICENSE`, and an SPDX line in each source and
+  build file, which `make check` keeps.
+- R10. Name: `sql-lineage`, kept when the tool widens to the other use cases.
+- R11. Names of relations: a request may give a default database and schema, and every
+  partly qualified name of its catalog and writes is completed with them, under the
+  dialect's rules, before any comparison.
+
 ## Widening, in order
 
 Each step reuses what the steps before it built, so that the cheapest concepts come
@@ -59,16 +68,16 @@ drafted at a time, and the owner may reorder for value.
 1. The skeleton: the crate, `make check`, the concept check and `--describe`. No new
    concept.
 2. Protocol 1 and replace writes: the request read, refused at its boundary and
-   traced, with the evidence of R7; Q5 and Q7 first. Reading a request without
-   tracing it would need a stub answer or fields that nothing reads, so the two come
-   together. Serves U1.
+   traced, with the evidence of R7 and the names of R11; Q7 first. Reading a request
+   without tracing it would need a stub answer or fields that nothing reads, so the two
+   come together. Serves U1.
 3. Contribute writes; Q1 probed, and Q3 and Q4 ruled first. Serves U1 and U2.
 4. `graph`, `trace`, `uses` and `outline`, from answers alone: derived terms, no new
    kernel concept; Q9 first. Serves U2.
 5. Routines and functions: the facts that `concepts.md` lists as not yet modelled; Q2
    probed and Q6 ruled first. Serves U2.
 6. Duplicated logic: units of logic and their fingerprints, rooted through `copy`
-   edges; Q10 first. Serves U3.
+   edges. Serves U3.
 7. A linter of migration traps and design smells: findings read from the syntax tree
    rather than from answers. Serves U2.
 8. A check of a translation against a warehouse: the only command that would connect
@@ -114,12 +123,10 @@ foreseen to ask.
 | Q2 | How it reads T-SQL routines and functions: `BEGIN ... END`, `#t` and `@t`, `IF ... ELSE`, dynamic SQL run by `EXEC`, inline and multi-statement table functions, `CROSS APPLY`, a scalar function whose body reads a table | a probe | 5 |
 | Q3 | A relation's lineage when several writes reach it: the union of their edges, which kind when two writes give one pair of columns different kinds, and what a refused contribute write does to its target | the owner, on scenarios | 3 |
 | Q4 | Whether `DELETE ... WHERE`, and `MERGE`'s matching condition, give `rows` edges to every column of the target | the owner | 3 |
-| Q5 | How a partly qualified name is completed: a default database and schema per request or per write, T-SQL's `dbo` | the owner | 2 |
 | Q6 | Whether every branch of a routine counts, so that lineage says what may happen; whether answers about a routine show its temporary relations or pass through them | the owner | 5 |
 | Q7 | Carrying a defined column's exact case to later writes needs to know whether each output name was quoted, which polyglot-sql's projection facts do not say | a probe: an upstream request, or a walk of the syntax tree | 2 |
-| Q8 | The licence, MIT recommended for a thin adapter over MIT code, and whether the repository will be public | the owner | the first release |
+| Q8 | Whether the repository will be public | the owner | the first release |
 | Q9 | Whether a `CREATE TABLE` with a column list feeds the catalog, for the porting use, which reads files rather than a request | the owner | 4 |
-| Q10 | The name: `sql-lineage` is exact while the tool answers lineage; at the first command beyond it, keep it or move to a wider one such as `sql-analysis` | the owner | 6 |
 
 ## Provenance
 

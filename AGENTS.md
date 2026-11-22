@@ -109,6 +109,7 @@ for relations in general; query, for a write; field, link, result.
 ## Layout
 
 ```
+LICENSE            the EUPL 1.2
 docs/decisions.md  what the tool is for: users, rulings, promises, scope, open questions
 docs/concepts.md   the kernel, its derived terms, and scenarios with their verdicts
 docs/diagrams/     views of the two documents above: the kernel, the use cases

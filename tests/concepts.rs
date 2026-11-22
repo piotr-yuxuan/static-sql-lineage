@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: EUPL-1.2
 //! The concept check: every type in `src/` has a home in `docs/concepts.md`, every home
 //! names a type, no type's name is defined twice, every operation names a function, and
 //! every filling is in its shape.  A type is a struct, an enum, a union, a trait or a
