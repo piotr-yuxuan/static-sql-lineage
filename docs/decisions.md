@@ -36,9 +36,8 @@ Ruled on 2026-11-22.
 - R5. Evidence: tracked SQL is synthetic. Real projects are read locally, and nothing
   of them is committed.
 - R6. The kernel is `concepts.md`. A plan declares the concepts it adds, changes,
-  retires and relies on. The concept check, a script that the first plan creates and
-  `make check` runs, refuses a public type that maps to no concept; until it exists,
-  the review of each plan checks this.
+  retires and relies on. The concept check, the test `tests/concepts.rs` that
+  `make check` runs, refuses a type that maps to no concept.
 - R7. The proof of concept's evidence is carried over as tests: the definition of an
   edge with its catalogue of clauses, the protocol, the 25 Snowflake cases, and the
   comparisons with dbt's lineage on the fixture, the probes and jaffle-shop. On
@@ -57,9 +56,12 @@ Each step reuses what the steps before it built, so that the cheapest concepts c
 first and the commands that share least with lineage come last. Only the next plan is
 drafted at a time, and the owner may reorder for value.
 
-1. The skeleton: the crate, `make check`, the concept check, `--describe`, and a
-   request read and refused at its boundary. No new concept.
-2. Replace writes, with the evidence of R7; Q5 and Q7 first. Serves U1.
+1. The skeleton: the crate, `make check`, the concept check and `--describe`. No new
+   concept.
+2. Protocol 1 and replace writes: the request read, refused at its boundary and
+   traced, with the evidence of R7; Q5 and Q7 first. Reading a request without
+   tracing it would need a stub answer or fields that nothing reads, so the two come
+   together. Serves U1.
 3. Contribute writes; Q1 probed, and Q3 and Q4 ruled first. Serves U1 and U2.
 4. `graph`, `trace`, `uses` and `outline`, from answers alone: derived terms, no new
    kernel concept; Q9 first. Serves U2.
@@ -76,7 +78,7 @@ drafted at a time, and the owner may reorder for value.
 ## Promises
 
 The protocol keeps these promises of the proof of concept's contract. Its shape, a
-catalog and writes, is the first plan's, as protocol 1, since nothing reads the proof of
+catalog and writes, is step 2's, as protocol 1, since nothing reads the proof of
 concept's yet.
 
 - One request in, one response out, then exit: status 0 with a response; status 2,

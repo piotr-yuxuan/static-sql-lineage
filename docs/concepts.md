@@ -7,8 +7,11 @@ is carried by the test that checks it.
 
 - A kernel concept holds a fact that no other concept holds. A derived term holds none:
   it is defined from the kernel, and overlap between derived terms is harmless.
-- Every public type in the code belongs to one concept, kernel or derived, whose `home`
-  names it.
+- Every type in the code, a struct, an enum, a union, a trait or a type alias outside
+  tests, wherever it is defined and whatever its visibility, belongs to one concept,
+  whose `home` line or Home cell names it in backticks. The concept check,
+  `tests/concepts.rs`, fails otherwise, on a home that names no type, and on a type's
+  name defined twice.
 - This file changes only through a plan whose section *Concepts* declares the change,
   approved by the owner. It is never edited to make a check pass.
 - Definitions are timeless. Where the code differs from one goes in
@@ -191,32 +194,32 @@ have. A reject scenario names an answer that must not be given.
 - not: the engine that parses it, polyglot-sql, which can be replaced behind the
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
-- home: none yet.
+- home: `Dialect`.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
 
 ## Derived terms
 
-| Term | Defined as |
-|---|---|
-| base relation | a relation that no write of the request has as its target; its columns come from the catalog. Avoid: source |
-| lineage | the edges of all the answers to one request |
-| graph | the relations and the writes between them: a write links its target to each relation its query reads |
-| trace | a column's edges upstream, followed through earlier writes to base relations |
-| uses | a column's edges downstream |
-| migration order | an order of the writes in which each comes after the writes of the relations it reads; a cycle is reported |
-| outline | a short text form of one write's answer, with its locations |
+| Term | Defined as | Home |
+|---|---|---|
+| base relation | a relation that no write of the request has as its target; its columns come from the catalog. Avoid: source | |
+| lineage | the edges of all the answers to one request | |
+| graph | the relations and the writes between them: a write links its target to each relation its query reads | |
+| trace | a column's edges upstream, followed through earlier writes to base relations | |
+| uses | a column's edges downstream | |
+| migration order | an order of the writes in which each comes after the writes of the relations it reads; a cycle is reported | |
+| outline | a short text form of one write's answer, with its locations | |
 
 ## Context
 
-| Term | Defined as |
-|---|---|
-| view, materialised view, dynamic table, table made by `CREATE TABLE ... AS` | a relation with one replace write; the kind of object is a label from its statement |
-| request | one JSON document on standard input: a protocol number, the dialect, the catalog, and the writes in dependency order |
-| response | one answer per write of the request, on standard output |
-| protocol | the number of the request's and response's format; either side refuses another |
-| describe | what the build is: its version, protocols, engine and dialects |
+| Term | Defined as | Home |
+|---|---|---|
+| view, materialised view, dynamic table, table made by `CREATE TABLE ... AS` | a relation with one replace write; the kind of object is a label from its statement | |
+| request | one JSON document on standard input: a protocol number, the dialect, the catalog, and the writes in dependency order | |
+| response | one answer per write of the request, on standard output | |
+| protocol | the number of the request's and response's format; either side refuses another | |
+| describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
 
 ## Not yet modelled
 
