@@ -20,14 +20,14 @@ struct Undeclared {
     duplicates: BTreeSet<String>,
 }
 
-/// The types that a walk of the sources' syntax trees finds.
+/// What a walk of the sources' syntax trees finds defined.
 #[derive(Default)]
-struct Types {
+struct Definitions {
     names: BTreeSet<String>,
     duplicates: BTreeSet<String>,
 }
 
-impl Types {
+impl Definitions {
     fn record(&mut self, attrs: &[syn::Attribute], name: &syn::Ident) {
         if !test_only(attrs) && !self.names.insert(name.to_string()) {
             self.duplicates.insert(name.to_string());
@@ -35,7 +35,7 @@ impl Types {
     }
 }
 
-impl<'ast> Visit<'ast> for Types {
+impl<'ast> Visit<'ast> for Definitions {
     fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
         self.record(&item.attrs, &item.ident);
     }
@@ -85,7 +85,7 @@ fn test_only(attrs: &[syn::Attribute]) -> bool {
 /// The types of `sources` that no home of `concepts` names, the homes that name no type,
 /// and the names defined twice.
 fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
-    let mut types = Types::default();
+    let mut types = Definitions::default();
     for source in sources {
         types.visit_file(&syn::parse_file(source).expect("a source file parses"));
     }
