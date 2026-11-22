@@ -1,8 +1,9 @@
 //! The concept check: every type in `src/` has a home in `docs/concepts.md`, every home
-//! names a type, and no type's name is defined twice.  A type is a struct, an enum, a
-//! union, a trait or a type alias outside `#[cfg(test)]`, wherever it is defined and
-//! whatever its visibility; a home is a name in backticks on a `home:` line, or in the
-//! Home cell of a table's row.
+//! names a type, no type's name is defined twice, every operation names a function, and
+//! every filling is in its shape.  A type is a struct, an enum, a union, a trait or a
+//! type alias outside tests, wherever it is defined and whatever its visibility; a home
+//! is a name in backticks on a `home:` line, or in the Home cell of a table's row.  Also
+//! `kernel_changes`, which `make kernel-unchanged` runs.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -18,16 +19,24 @@ struct Undeclared {
     homes: BTreeSet<String>,
     /// The names of types defined more than once, which one home cannot tell apart.
     duplicates: BTreeSet<String>,
+    /// The functions that an operations item names and that do not exist, or are not
+    /// visible outside their module, or serve tests only.
+    operations: BTreeSet<String>,
+    /// The lines that would fill a home or an operations list but are not in its shape.
+    malformed: BTreeSet<String>,
 }
 
-/// The types that a walk of the sources' syntax trees finds.
+/// What a walk of the sources' syntax trees finds defined.
 #[derive(Default)]
-struct Types {
+struct Definitions {
     names: BTreeSet<String>,
     duplicates: BTreeSet<String>,
+    /// The functions that an operations item may name: `name` for a free function,
+    /// `Type::name` for one of `Type`'s, each visible outside its module.
+    functions: BTreeSet<String>,
 }
 
-impl Types {
+impl Definitions {
     fn record(&mut self, attrs: &[syn::Attribute], name: &syn::Ident) {
         if !test_only(attrs) && !self.names.insert(name.to_string()) {
             self.duplicates.insert(name.to_string());
@@ -35,7 +44,7 @@ impl Types {
     }
 }
 
-impl<'ast> Visit<'ast> for Types {
+impl<'ast> Visit<'ast> for Definitions {
     fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
         self.record(&item.attrs, &item.ident);
     }
@@ -50,6 +59,12 @@ impl<'ast> Visit<'ast> for Types {
 
     fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
         self.record(&item.attrs, &item.ident);
+        let visible = !matches!(item.vis, syn::Visibility::Inherited) && !test_only(&item.attrs);
+        let methods = item.items.iter().filter_map(|member| match member {
+            syn::TraitItem::Fn(method) if visible && !test_only(&method.attrs) => Some(&method.sig.ident),
+            _ => None,
+        });
+        self.functions.extend(methods.map(|method| format!("{}::{method}", item.ident)));
     }
 
     fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
@@ -64,52 +79,195 @@ impl<'ast> Visit<'ast> for Types {
 
     fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
         if !test_only(&item.attrs) {
+            if !matches!(item.vis, syn::Visibility::Inherited) {
+                self.functions.insert(item.sig.ident.to_string());
+            }
             syn::visit::visit_item_fn(self, item);
         }
     }
+
+    /// A method of a trait's `impl` is visible wherever the trait is; one of an inherent
+    /// `impl` must say so.
+    fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        if test_only(&item.attrs) {
+            return;
+        }
+        if let syn::Type::Path(owner) = &*item.self_ty
+            && let Some(owner) = owner.path.segments.last()
+        {
+            let methods = item.items.iter().filter_map(|member| match member {
+                syn::ImplItem::Fn(method)
+                    if !test_only(&method.attrs)
+                        && (item.trait_.is_some() || !matches!(method.vis, syn::Visibility::Inherited)) =>
+                {
+                    Some(&method.sig.ident)
+                }
+                _ => None,
+            });
+            self.functions.extend(methods.map(|method| format!("{}::{method}", owner.ident)));
+        }
+        syn::visit::visit_item_impl(self, item);
+    }
+
+    fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
+        if !test_only(&method.attrs) {
+            syn::visit::visit_impl_item_fn(self, method);
+        }
+    }
 }
 
-/// Whether `attrs` hold `#[cfg(test)]`.
+/// Whether `attrs` hold `#[cfg(test)]` or `#[test]`.
 fn test_only(attrs: &[syn::Attribute]) -> bool {
-    attrs
-        .iter()
-        .any(|attr| attr.path().is_ident("cfg") && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "test"))
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr.path().is_ident("cfg") && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "test")
+    })
 }
 
 /// The types of `sources` that no home of `concepts` names, the homes that name no type,
-/// and the names defined twice.
+/// the names defined twice, the operations that name no function, and the fillings out
+/// of their shape.
 fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
-    let mut types = Types::default();
+    let mut definitions = Definitions::default();
     for source in sources {
-        types.visit_file(&syn::parse_file(source).expect("a source file parses"));
+        definitions.visit_file(&syn::parse_file(source).expect("a source file parses"));
     }
-    let mut homes = BTreeSet::new();
-    let mut home_column = None;
-    for line in concepts.lines() {
-        if let Some(home) = line.strip_prefix("- home:") {
-            homes.extend(backticked(home));
-            continue;
-        }
-        let cells: Vec<&str> =
-            line.strip_prefix('|').map(|row| row.split('|').map(str::trim).collect()).unwrap_or_default();
-        if cells.is_empty() {
-            home_column = None;
-        } else if let Some(column) = cells.iter().position(|cell| *cell == "Home") {
-            home_column = Some(column);
-        } else if let Some(cell) = home_column.and_then(|column| cells.get(column)) {
-            homes.extend(backticked(cell));
+    let read = read_concepts(concepts);
+    let (mut homes, mut operations) = (BTreeSet::new(), BTreeSet::new());
+    for (_, filling) in read.fillings {
+        match filling {
+            Filling::Home(name) => _ = homes.insert(name),
+            Filling::Item(item) => operations.extend(operation_in(&item).map(str::to_string)),
         }
     }
     Undeclared {
-        types: types.names.difference(&homes).cloned().collect(),
-        homes: homes.difference(&types.names).cloned().collect(),
-        duplicates: types.duplicates,
+        types: definitions.names.difference(&homes).cloned().collect(),
+        homes: homes.difference(&definitions.names).cloned().collect(),
+        duplicates: definitions.duplicates,
+        operations: operations.difference(&definitions.functions).cloned().collect(),
+        malformed: read.malformed.into_iter().collect(),
     }
 }
 
-/// The names in backticks in `text`.
-fn backticked(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.split('`').skip(1).step_by(2).map(str::to_string)
+/// A filling of `docs/concepts.md`: the name of a home, or an item of an operations
+/// list, by its whole text.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Filling {
+    Home(String),
+    Item(String),
+}
+
+/// `docs/concepts.md` read apart: its skeleton, the file line for line with its fillings
+/// set aside, each filling with its entry, and the lines that would be fillings but are
+/// not in their shape.
+#[derive(Default)]
+struct Concepts {
+    skeleton: Vec<String>,
+    fillings: BTreeSet<(String, Filling)>,
+    malformed: Vec<String>,
+}
+
+impl Concepts {
+    /// Records `fillings` under `entry` and keeps `blank`, if any, in the skeleton; or,
+    /// when `fillings` is none because `line` is not in its shape, keeps `line` itself in
+    /// the skeleton and records it as malformed.
+    fn fill(&mut self, entry: &str, fillings: Option<Vec<Filling>>, line: &str, blank: Option<String>) {
+        match fillings {
+            Some(fillings) => {
+                self.fillings.extend(fillings.into_iter().map(|filling| (entry.to_string(), filling)));
+                self.skeleton.extend(blank);
+            }
+            None => {
+                self.skeleton.push(line.to_string());
+                self.malformed.push(line.to_string());
+            }
+        }
+    }
+}
+
+/// `concepts` read apart.  A home line is `- home: none yet.` or names in backticks
+/// separated by `, `, then `.`; a Home cell is empty or such names; an operations line is
+/// `- operations: none yet.`, or `- operations:` followed by items, each one line
+/// `` - `name`: what it does ``, indented by two spaces; a line indented by four among
+/// them, an item wrapped, is in no shape.  An entry is the nearest `## ` heading, and for
+/// a table row the heading and the row's first cell.  A line that would be a filling but
+/// is not in its shape stays in the skeleton.
+fn read_concepts(concepts: &str) -> Concepts {
+    let mut read = Concepts::default();
+    let (mut entry, mut home_column, mut listing) = (String::new(), None, false);
+    for line in concepts.lines() {
+        // A separator row, `|---|` or `| :-- |`, has no cells.
+        let cells: Vec<&str> = (line.strip_prefix('|').filter(|row| !row.trim_start().starts_with(['-', ':'])))
+            .map(|row| row.split('|').map(str::trim).collect())
+            .unwrap_or_default();
+        let item = listing && line.starts_with("  ");
+        listing = item || line == "- operations:";
+        entry = line.strip_prefix("## ").map_or(entry, str::to_string);
+        // The column found in the header serves the rows after it, so the header itself
+        // has no Home cell; it serves while the lines are the table's.
+        let home_cell = home_column.and_then(|column| cells.get(column));
+        home_column = cells.iter().position(|cell| *cell == "Home").or(home_column.filter(|_| line.starts_with('|')));
+        if let Some(home) = line.strip_prefix("- home: ") {
+            read.fill(&entry, home.strip_suffix('.').and_then(names_in), line, Some("- home:".to_string()));
+        } else if let Some(rest) = line.strip_prefix("- operations:") {
+            read.fill(&entry, ["", " none yet."].contains(&rest).then(Vec::new), line, Some("- operations:".into()));
+        } else if item {
+            read.fill(&entry, operation_in(line).map(|_| vec![Filling::Item(line.to_string())]), line, None);
+        } else if let Some(cell) = home_cell {
+            let others: Vec<&str> = (cells.iter().enumerate())
+                .filter(|(column, _)| Some(*column) != home_column)
+                .map(|(_, other)| *other)
+                .collect();
+            read.fill(&format!("{entry} / {}", cells[0]), names_in(cell), line, Some(others.join(" | ")));
+        } else {
+            read.skeleton.push(line.to_string());
+        }
+    }
+    read
+}
+
+/// The function that an operations item names, when `line` is one in its shape:
+/// `` - `name`: what it does ``, indented by two spaces, `name` an identifier or
+/// `Type::name`.
+fn operation_in(line: &str) -> Option<&str> {
+    let (name, what) = line.strip_prefix("  - `")?.split_once("`: ")?;
+    (name.split("::").all(is_identifier) && !what.is_empty()).then_some(name)
+}
+
+/// The names of a home: none for an empty text or `none yet`, else names in backticks
+/// separated by `, `; none at all when `text` is in no such shape.
+fn names_in(text: &str) -> Option<Vec<Filling>> {
+    if text.is_empty() || text == "none yet" {
+        return Some(Vec::new());
+    }
+    (text.split(", "))
+        .map(|part| part.strip_prefix('`')?.strip_suffix('`').filter(|name| is_identifier(name)))
+        .map(|name| name.map(|name| Filling::Home(name.to_string())))
+        .collect()
+}
+
+fn is_identifier(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// What `head` changes in `docs/concepts.md` beyond fillings, against `base`: the first
+/// line of the skeletons that differs, then each filling of `base` that `head` lost from
+/// its entry.
+fn kernel_changes(base: &str, head: &str) -> Vec<String> {
+    let (base, head) = (read_concepts(base), read_concepts(head));
+    let mut changes = Vec::new();
+    if base.skeleton != head.skeleton {
+        let at = (base.skeleton.iter().zip(&head.skeleton).position(|(old, new)| old != new))
+            .unwrap_or(base.skeleton.len().min(head.skeleton.len()));
+        changes.push(format!("{:?} became {:?}", base.skeleton.get(at), head.skeleton.get(at)));
+    }
+    for (entry, filling) in base.fillings.difference(&head.fillings) {
+        changes.push(match filling {
+            Filling::Home(name) => format!("{entry} lost the home `{name}`"),
+            Filling::Item(item) => format!("{entry} lost the item {item:?}"),
+        });
+    }
+    changes
 }
 
 /// The repository's sources, and its `docs/concepts.md`.
@@ -195,6 +353,14 @@ fn concepts_ignore_test_types() {
 }
 
 #[test]
+fn concepts_ignore_test_impls() {
+    let source = "struct Answer; struct Request;
+        #[cfg(test)] impl Answer { fn fixture() { struct Local; } }
+        impl Request { #[cfg(test)] fn fixture() { struct Inner; } }";
+    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
+}
+
+#[test]
 fn concepts_find_types_in_inline_modules() {
     let source = "struct Answer; mod inner { pub struct Request; type Stray = u8; }";
     let found = undeclared(&[source.to_string()], CONCEPTS);
@@ -223,4 +389,194 @@ fn every_home_names_a_type() {
     assert!(!sources.is_empty(), "no source file was read");
     let found = undeclared(&sources, &concepts);
     assert!(found.homes.is_empty(), "homes in docs/concepts.md that name no type: {:?}", found.homes);
+}
+
+/// A file of concepts for the tests of `kernel_changes`.
+const KERNEL: &str = "\
+## Answer
+
+- home: none yet.
+- operations: none yet.
+
+## Request
+
+- home: `Request`.
+- operations:
+  - `Request::read`: reads one request.
+
+| Term | Defined as | Home |
+|---|---|---|
+| request | one JSON document | |
+| protocol | its number | |
+";
+
+#[test]
+fn kernel_allows_a_first_fill() {
+    let head = (KERNEL.replace("- home: none yet.", "- home: `Answer`."))
+        .replace("- operations: none yet.", "- operations:\n  - `Answer::of`: builds one.")
+        .replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
+    assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+}
+
+#[test]
+fn kernel_allows_an_added_item() {
+    let head = KERNEL.replace("reads one request.\n", "reads one request.\n  - `Request::write`: writes one.\n");
+    assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+}
+
+#[test]
+fn kernel_refuses_a_removed_name() {
+    let changes = kernel_changes(KERNEL, &KERNEL.replace("- home: `Request`.", "- home: none yet."));
+    assert!(matches!(changes.as_slice(), [change] if change.contains("Request") && change.contains("`Request`")));
+}
+
+#[test]
+fn kernel_refuses_a_name_moved_to_another_entry() {
+    let base = KERNEL.replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
+    let head = KERNEL.replace("| protocol | its number | |", "| protocol | its number | `Request` |");
+    let changes = kernel_changes(&base, &head);
+    assert!(matches!(changes.as_slice(), [change] if change.contains("Request / request")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_a_reworded_item() {
+    let changes = kernel_changes(KERNEL, &KERNEL.replace("reads one request.", "reads a request."));
+    assert!(matches!(changes.as_slice(), [change] if change.contains("reads one request")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_a_changed_line() {
+    let changes = kernel_changes(KERNEL, &KERNEL.replace("| its number |", "| its version |"));
+    assert!(matches!(changes.as_slice(), [change] if change.contains("its version")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_prose_in_a_home() {
+    let head = KERNEL.replace("- home: `Request`.", "- home: `Request`; and a CTE is also a relation.");
+    let changes = kernel_changes(KERNEL, &head);
+    assert!(changes.iter().any(|change| change.contains("a CTE is also a relation")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_prose_in_an_item() {
+    let head = KERNEL.replace("reads one request.\n", "reads one request.\n    And a write may have no target.\n");
+    let changes = kernel_changes(KERNEL, &head);
+    assert!(changes.iter().any(|change| change.contains("a write may have no target")), "{changes:?}");
+}
+
+/// `docs/concepts.md` where the branch began against `HEAD`, as `make kernel-unchanged`
+/// gives them.
+#[test]
+#[ignore = "make kernel-unchanged runs it, with the two files"]
+fn kernel_unchanged() {
+    let read = |variable: &str| {
+        let path = std::env::var(variable).unwrap_or_else(|_| panic!("{variable} is unset: run make kernel-unchanged"));
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"))
+    };
+    let changes = kernel_changes(&read("SQL_LINEAGE_CONCEPTS_BASE"), &read("SQL_LINEAGE_CONCEPTS_HEAD"));
+    assert!(changes.is_empty(), "docs/concepts.md changed beyond fillings:\n{}", changes.join("\n"));
+}
+
+/// An entry that lists two operations: `Answer::of`, one of `Answer`'s, and `answer_all`,
+/// a free function.
+const OPERATIONS: &str = "\
+## Answer
+
+- home: `Answer`.
+- operations:
+  - `Answer::of`: builds one.
+  - `answer_all`: answers every write.
+";
+
+fn operations_of(source: &str) -> BTreeSet<String> {
+    undeclared(&[source.to_string()], OPERATIONS).operations
+}
+
+#[test]
+fn concepts_find_an_operation_in_an_impl() {
+    assert_eq!(
+        operations_of("pub struct Answer; impl Answer { pub fn of() -> Self { Answer } }"),
+        names(&["answer_all"])
+    );
+}
+
+#[test]
+fn concepts_find_a_free_function_operation() {
+    assert_eq!(operations_of("pub struct Answer; pub fn answer_all() {}"), names(&["Answer::of"]));
+}
+
+#[test]
+fn concepts_report_an_operation_with_no_function() {
+    assert_eq!(operations_of("pub struct Answer;"), names(&["Answer::of", "answer_all"]));
+}
+
+#[test]
+fn concepts_report_an_operation_of_another_type() {
+    let source = "pub struct Answer; pub struct Other; impl Other { pub fn of() {} } pub fn answer_all() {}";
+    assert_eq!(operations_of(source), names(&["Answer::of"]));
+}
+
+#[test]
+fn concepts_report_a_method_named_as_a_free_function() {
+    let source = "pub struct Answer; impl Answer { pub fn of() {} pub fn answer_all() {} }";
+    assert_eq!(operations_of(source), names(&["answer_all"]));
+}
+
+#[test]
+fn concepts_report_a_private_operation() {
+    let source = "pub struct Answer; impl Answer { fn of() {} } pub fn answer_all() {}";
+    assert_eq!(operations_of(source), names(&["Answer::of"]));
+}
+
+#[test]
+fn concepts_report_a_test_only_operation() {
+    let source = "pub struct Answer; impl Answer { #[cfg(test)] pub fn of() {} } #[test] pub fn answer_all() {}";
+    assert_eq!(operations_of(source), names(&["Answer::of", "answer_all"]));
+}
+
+#[test]
+fn concepts_report_a_malformed_filling() {
+    let concepts = "\
+## Answer
+
+- home: `Answer`; and from now on a CTE is a relation.
+- operations:
+  - Answer::of builds one.
+  - `answer_all`: answers every write.
+    And it decides the dialect.
+";
+    let found = undeclared(&["pub struct Answer; pub fn answer_all() {}".to_string()], concepts);
+    let malformed = names(&[
+        "- home: `Answer`; and from now on a CTE is a relation.",
+        "  - Answer::of builds one.",
+        "    And it decides the dialect.",
+    ]);
+    assert_eq!(found.malformed, malformed);
+}
+
+#[test]
+fn every_operation_names_a_function() {
+    let (sources, concepts) = repository();
+    let found = undeclared(&sources, &concepts);
+    assert!(
+        found.operations.is_empty(),
+        "operations in docs/concepts.md that name no function: {:?}",
+        found.operations
+    );
+}
+
+#[test]
+fn every_filling_has_its_shape() {
+    let (sources, concepts) = repository();
+    let found = undeclared(&sources, &concepts);
+    assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
+}
+
+#[test]
+fn concepts_read_any_separator_row() {
+    for separator in ["|---|---|---|", "| --- | --- | --- |", "|:--|:--|:--|"] {
+        let concepts = format!("| Term | Defined as | Home |\n{separator}\n| answer | one per write | `Answer` |\n");
+        let found = undeclared(&["struct Answer;".to_string()], &concepts);
+        assert_eq!(found, Undeclared::default(), "with the separator {separator}");
+    }
 }
