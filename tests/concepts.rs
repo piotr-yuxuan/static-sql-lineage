@@ -67,6 +67,12 @@ impl<'ast> Visit<'ast> for Types {
             syn::visit::visit_item_fn(self, item);
         }
     }
+
+    fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        if !test_only(&item.attrs) {
+            syn::visit::visit_item_impl(self, item);
+        }
+    }
 }
 
 /// Whether `attrs` hold `#[cfg(test)]`.
@@ -191,6 +197,13 @@ fn concepts_ignore_test_types() {
         #[cfg(test)] struct Helper;
         #[cfg(test)] mod tests { struct Fixture; }
         #[cfg(test)] fn fixture() { struct Local; }";
+    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
+}
+
+#[test]
+fn concepts_ignore_test_impls() {
+    let source = "struct Answer; struct Request;
+        #[cfg(test)] impl Answer { fn fixture() { struct Local; } }";
     assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
 }
 
