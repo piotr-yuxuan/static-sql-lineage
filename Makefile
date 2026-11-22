@@ -24,7 +24,7 @@ test:
 # branch left BASE, as a plan built while the owner is away may change it.
 kernel-unchanged:
 	@mkdir -p target
-	@git show $$(git merge-base $(BASE) HEAD):docs/concepts.md > target/concepts-at-base.md
+	@base=$$(git merge-base $(BASE) HEAD) && git show "$$base":docs/concepts.md > target/concepts-at-base.md
 	@git show HEAD:docs/concepts.md > target/concepts-at-head.md
 	@SQL_LINEAGE_CONCEPTS_BASE=target/concepts-at-base.md SQL_LINEAGE_CONCEPTS_HEAD=target/concepts-at-head.md \
 		cargo test --locked -j $(CARGO_JOBS) --test concepts -- --test-threads=$(TEST_THREADS) --ignored --exact kernel_unchanged
