@@ -193,7 +193,7 @@ have. A reject scenario names an answer that must not be given.
 - not: the engine that parses it, polyglot-sql, which can be replaced behind the
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
-- home: none yet.
+- home: `Dialect`.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
@@ -218,7 +218,7 @@ have. A reject scenario names an answer that must not be given.
 | request | one JSON document on standard input: a protocol number, the dialect, the catalog, and the writes in dependency order | |
 | response | one answer per write of the request, on standard output | |
 | protocol | the number of the request's and response's format; either side refuses another | |
-| describe | what the build is: its version, protocols, engine and dialects | |
+| describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
 
 ## Not yet modelled
 
