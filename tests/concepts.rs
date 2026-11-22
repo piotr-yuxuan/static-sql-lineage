@@ -1,10 +1,13 @@
-//! The concept check: every type in `src/` has a home in `docs/concepts.md`, and every
-//! home names a type.  A type is a struct, an enum, a trait or a type alias outside
-//! `#[cfg(test)]`, whatever its visibility; a home is a name in backticks on a `home:`
-//! line, or in the Home cell of a table's row.
+//! The concept check: every type in `src/` has a home in `docs/concepts.md`, every home
+//! names a type, and no type's name is defined twice.  A type is a struct, an enum, a
+//! union, a trait or a type alias outside `#[cfg(test)]`, wherever it is defined and
+//! whatever its visibility; a home is a name in backticks on a `home:` line, or in the
+//! Home cell of a table's row.
 
 use std::collections::BTreeSet;
 use std::path::Path;
+
+use syn::visit::Visit;
 
 /// What the check finds wrong.
 #[derive(Debug, Default, PartialEq)]
@@ -13,14 +16,72 @@ struct Undeclared {
     types: BTreeSet<String>,
     /// The names in a home that are no type.
     homes: BTreeSet<String>,
+    /// The names of types defined more than once, which one home cannot tell apart.
+    duplicates: BTreeSet<String>,
 }
 
-/// The types of `sources` that no home of `concepts` names, and the homes that name no
-/// type.
+/// The types that a walk of the sources' syntax trees finds.
+#[derive(Default)]
+struct Types {
+    names: BTreeSet<String>,
+    duplicates: BTreeSet<String>,
+}
+
+impl Types {
+    fn record(&mut self, attrs: &[syn::Attribute], name: &syn::Ident) {
+        if !test_only(attrs) && !self.names.insert(name.to_string()) {
+            self.duplicates.insert(name.to_string());
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for Types {
+    fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+        self.record(&item.attrs, &item.ident);
+    }
+
+    fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+        self.record(&item.attrs, &item.ident);
+    }
+
+    fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
+        self.record(&item.attrs, &item.ident);
+    }
+
+    fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+        self.record(&item.attrs, &item.ident);
+    }
+
+    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+        self.record(&item.attrs, &item.ident);
+    }
+
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if !test_only(&item.attrs) {
+            syn::visit::visit_item_mod(self, item);
+        }
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if !test_only(&item.attrs) {
+            syn::visit::visit_item_fn(self, item);
+        }
+    }
+}
+
+/// Whether `attrs` hold `#[cfg(test)]`.
+fn test_only(attrs: &[syn::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("cfg") && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "test"))
+}
+
+/// The types of `sources` that no home of `concepts` names, the homes that name no type,
+/// and the names defined twice.
 fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
-    let mut types = BTreeSet::new();
+    let mut types = Types::default();
     for source in sources {
-        collect(&syn::parse_file(source).expect("a source file parses").items, &mut types);
+        types.visit_file(&syn::parse_file(source).expect("a source file parses"));
     }
     let mut homes = BTreeSet::new();
     let mut home_column = None;
@@ -40,33 +101,9 @@ fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
         }
     }
     Undeclared {
-        types: types.difference(&homes).cloned().collect(),
-        homes: homes.difference(&types).cloned().collect(),
-    }
-}
-
-/// Adds to `types` the types that `items` define, in inline modules too, except under
-/// `#[cfg(test)]`.
-fn collect(items: &[syn::Item], types: &mut BTreeSet<String>) {
-    for item in items {
-        let (attrs, name, inner) = match item {
-            syn::Item::Struct(item) => (&item.attrs, Some(&item.ident), None),
-            syn::Item::Enum(item) => (&item.attrs, Some(&item.ident), None),
-            syn::Item::Trait(item) => (&item.attrs, Some(&item.ident), None),
-            syn::Item::Type(item) => (&item.attrs, Some(&item.ident), None),
-            syn::Item::Mod(item) => (&item.attrs, None, item.content.as_ref().map(|(_, items)| items)),
-            _ => continue,
-        };
-        let test_only = attrs
-            .iter()
-            .any(|attr| attr.path().is_ident("cfg") && attr.parse_args::<syn::Ident>().is_ok_and(|arg| arg == "test"));
-        if test_only {
-            continue;
-        }
-        types.extend(name.map(ToString::to_string));
-        if let Some(inner) = inner {
-            collect(inner, types);
-        }
+        types: types.names.difference(&homes).cloned().collect(),
+        homes: homes.difference(&types.names).cloned().collect(),
+        duplicates: types.duplicates,
     }
 }
 
@@ -113,14 +150,22 @@ const CONCEPTS: &str = "\
 
 #[test]
 fn concepts_report_a_type_with_no_home() {
-    let found = undeclared(&["struct Answer; struct Request; enum Stray {}".to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { types: names(&["Stray"]), homes: names(&[]) });
+    let source = "struct Answer; struct Request; enum Stray {} union Loose { a: u8 }";
+    let found = undeclared(&[source.to_string()], CONCEPTS);
+    assert_eq!(found, Undeclared { types: names(&["Loose", "Stray"]), ..Undeclared::default() });
 }
 
 #[test]
 fn concepts_report_a_home_with_no_type() {
     let found = undeclared(&["struct Answer;".to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { types: names(&[]), homes: names(&["Request"]) });
+    assert_eq!(found, Undeclared { homes: names(&["Request"]), ..Undeclared::default() });
+}
+
+#[test]
+fn concepts_report_a_name_defined_twice() {
+    let sources = ["struct Answer; struct Request;".to_string(), "mod other { pub enum Request {} }".to_string()];
+    let found = undeclared(&sources, CONCEPTS);
+    assert_eq!(found, Undeclared { duplicates: names(&["Request"]), ..Undeclared::default() });
 }
 
 #[test]
@@ -144,7 +189,8 @@ fn concepts_ignore_comments() {
 fn concepts_ignore_test_types() {
     let source = "struct Answer; struct Request;
         #[cfg(test)] struct Helper;
-        #[cfg(test)] mod tests { struct Fixture; }";
+        #[cfg(test)] mod tests { struct Fixture; }
+        #[cfg(test)] fn fixture() { struct Local; }";
     assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
 }
 
@@ -152,7 +198,14 @@ fn concepts_ignore_test_types() {
 fn concepts_find_types_in_inline_modules() {
     let source = "struct Answer; mod inner { pub struct Request; type Stray = u8; }";
     let found = undeclared(&[source.to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { types: names(&["Stray"]), homes: names(&[]) });
+    assert_eq!(found, Undeclared { types: names(&["Stray"]), ..Undeclared::default() });
+}
+
+#[test]
+fn concepts_find_types_in_function_bodies() {
+    let source = "struct Answer; struct Request; fn main() { struct Hidden; }";
+    let found = undeclared(&[source.to_string()], CONCEPTS);
+    assert_eq!(found, Undeclared { types: names(&["Hidden"]), ..Undeclared::default() });
 }
 
 #[test]
@@ -161,6 +214,7 @@ fn every_type_has_a_home() {
     assert!(!sources.is_empty(), "no source file was read");
     let found = undeclared(&sources, &concepts);
     assert!(found.types.is_empty(), "types with no home in docs/concepts.md: {:?}", found.types);
+    assert!(found.duplicates.is_empty(), "type names defined twice: {:?}", found.duplicates);
 }
 
 #[test]

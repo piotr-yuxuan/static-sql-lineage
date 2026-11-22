@@ -7,10 +7,11 @@ is carried by the test that checks it.
 
 - A kernel concept holds a fact that no other concept holds. A derived term holds none:
   it is defined from the kernel, and overlap between derived terms is harmless.
-- Every type in the code, a struct, an enum, a trait or a type alias outside tests,
-  whatever its visibility, belongs to one concept, whose `home` line or Home cell names
-  it in backticks. The concept check, `tests/concepts.rs`, fails otherwise, and on a
-  home that names no type.
+- Every type in the code, a struct, an enum, a union, a trait or a type alias outside
+  tests, wherever it is defined and whatever its visibility, belongs to one concept,
+  whose `home` line or Home cell names it in backticks. The concept check,
+  `tests/concepts.rs`, fails otherwise, on a home that names no type, and on a type's
+  name defined twice.
 - This file changes only through a plan whose section *Concepts* declares the change,
   approved by the owner. It is never edited to make a check pass.
 - Definitions are timeless. Where the code differs from one goes in
