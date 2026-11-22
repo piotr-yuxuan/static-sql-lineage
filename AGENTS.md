@@ -9,7 +9,7 @@ what it is for and what it leaves out; `docs/concepts.md` defines its terms.
 
 Every change follows the skill `workflow:plans`; load it before the first edit. In
 this repository: plans are `docs/work/plans/NNN-slug.md`, not tracked; the check is
-`make check`, which the first plan creates.
+`make check`, run in `nix develop`.
 
 Each plan has a section *Concepts*, which the review of its draft checks against
 `docs/concepts.md` and against the other open plans:

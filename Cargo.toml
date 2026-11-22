@@ -1,0 +1,28 @@
+[package]
+name = "sql-lineage"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+description = "The column lineage of SQL that writes relations"
+publish = false
+
+[features]
+default = ["snowflake", "tsql", "duckdb"]
+snowflake = ["polyglot-sql/dialect-snowflake"]
+tsql = ["polyglot-sql/dialect-tsql"]
+duckdb = ["polyglot-sql/dialect-duckdb"]
+
+[dependencies]
+# semantic: lineage, validation, analysis; generate: analyze_query needs it;
+# stacker: deep expressions do not overflow the stack.
+polyglot-sql = { version = "=0.14.3", default-features = false, features = ["semantic", "generate", "stacker"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The concept check parses the sources, so that comments and associated types
+# are not taken for types.
+syn = { version = "2", features = ["full"] }
+
+[lints.clippy]
+cognitive_complexity = "warn"

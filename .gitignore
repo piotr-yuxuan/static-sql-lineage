@@ -1,3 +1,9 @@
 /.codegraph/
-/docs/work/
 /target/
+
+# Plans and notes, and one linked worktree per plan
+/docs/work/
+/.worktree/
+
+# A binary commits its lock file, whatever a global ignore says.
+!/Cargo.lock
