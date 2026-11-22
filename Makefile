@@ -8,15 +8,27 @@ CARGO_JOBS ?= 4
 TEST_THREADS ?= 4
 BASE ?= main
 
-.PHONY: check fmt clippy test kernel-unchanged
+.PHONY: check fmt clippy licence test kernel-unchanged
 
-check: fmt clippy test
+check: fmt clippy licence test
 
 fmt:
 	@cargo fmt --check
 
 clippy:
 	@cargo clippy --locked -j $(CARGO_JOBS) --all-targets -- -D warnings
+
+# Each tracked source and build file opens with its SPDX line: after `// ` in
+# Rust, after `# ` elsewhere.
+licence:
+	@status=0; \
+	for file in $$(git ls-files '*.rs'); do \
+		[ "$$(head -n 1 "$$file")" = "// SPDX-License-Identifier: EUPL-1.2" ] || { echo "$$file: no SPDX line"; status=1; }; \
+	done; \
+	for file in $$(git ls-files '*.toml' Makefile flake.nix); do \
+		[ "$$(head -n 1 "$$file")" = "# SPDX-License-Identifier: EUPL-1.2" ] || { echo "$$file: no SPDX line"; status=1; }; \
+	done; \
+	exit $$status
 
 test:
 	@cargo test --locked -j $(CARGO_JOBS) -- --test-threads=$(TEST_THREADS)
