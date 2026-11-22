@@ -89,7 +89,12 @@ fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
     for source in sources {
         types.visit_file(&syn::parse_file(source).expect("a source file parses"));
     }
-    let homes = read_concepts(concepts);
+    let homes: BTreeSet<String> = (read_concepts(concepts).fillings.into_iter())
+        .filter_map(|(_, filling)| match filling {
+            Filling::Home(name) => Some(name),
+            Filling::Item(_) => None,
+        })
+        .collect();
     Undeclared {
         types: types.names.difference(&homes).cloned().collect(),
         homes: homes.difference(&types.names).cloned().collect(),
@@ -97,31 +102,107 @@ fn undeclared(sources: &[String], concepts: &str) -> Undeclared {
     }
 }
 
-/// The names of the homes in `concepts`.
-fn read_concepts(concepts: &str) -> BTreeSet<String> {
-    let mut homes = BTreeSet::new();
-    let mut home_column = None;
-    for line in concepts.lines() {
-        if let Some(home) = line.strip_prefix("- home:") {
-            homes.extend(backticked(home));
-            continue;
-        }
-        let cells: Vec<&str> =
-            line.strip_prefix('|').map(|row| row.split('|').map(str::trim).collect()).unwrap_or_default();
-        if cells.is_empty() {
-            home_column = None;
-        } else if let Some(column) = cells.iter().position(|cell| *cell == "Home") {
-            home_column = Some(column);
-        } else if let Some(cell) = home_column.and_then(|column| cells.get(column)) {
-            homes.extend(backticked(cell));
-        }
-    }
-    homes
+/// A filling of `docs/concepts.md`: the name of a home, or an item of an operations
+/// list, by its whole text.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Filling {
+    Home(String),
+    Item(String),
 }
 
-/// The names in backticks in `text`.
-fn backticked(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.split('`').skip(1).step_by(2).map(str::to_string)
+/// `docs/concepts.md` read apart: its skeleton, the file line for line with its fillings
+/// set aside, and each filling with its entry.
+#[derive(Default)]
+struct Concepts {
+    skeleton: Vec<String>,
+    fillings: BTreeSet<(String, Filling)>,
+}
+
+impl Concepts {
+    /// Records `fillings` under `entry` and keeps `blank`, if any, in the skeleton; or,
+    /// when `fillings` is none because `line` is not in its shape, keeps `line` itself.
+    fn fill(&mut self, entry: &str, fillings: Option<Vec<Filling>>, line: &str, blank: Option<String>) {
+        match fillings {
+            Some(fillings) => {
+                self.fillings.extend(fillings.into_iter().map(|filling| (entry.to_string(), filling)));
+                self.skeleton.extend(blank);
+            }
+            None => self.skeleton.push(line.to_string()),
+        }
+    }
+}
+
+/// `concepts` read apart.  A home line is `- home: none yet.` or names in backticks
+/// separated by `, `, then `.`; a Home cell is empty or such names; an operations line is
+/// `- operations: none yet.`, or `- operations:` followed by items, each one line
+/// `` - `name`: what it does ``, indented by two spaces.  An entry is the nearest `## `
+/// heading, and for a table row the heading and the row's first cell.  A line that would
+/// be a filling but is not in its shape stays in the skeleton.
+fn read_concepts(concepts: &str) -> Concepts {
+    let mut read = Concepts::default();
+    let (mut entry, mut home_column, mut listing) = (String::new(), None, false);
+    for line in concepts.lines() {
+        let cells: Vec<&str> =
+            line.strip_prefix('|').map(|row| row.split('|').map(str::trim).collect()).unwrap_or_default();
+        let item = line.strip_prefix("  - ").filter(|_| listing);
+        listing = item.is_some() || line == "- operations:";
+        entry = line.strip_prefix("## ").map_or(entry, str::to_string);
+        home_column = cells.iter().position(|cell| *cell == "Home").or(home_column.filter(|_| !cells.is_empty()));
+        let home_cell = (home_column.and_then(|column| cells.get(column)))
+            .filter(|cell| **cell != "Home" && !line.starts_with("|-"));
+        if let Some(home) = line.strip_prefix("- home: ") {
+            read.fill(&entry, home.strip_suffix('.').and_then(names_in), line, Some("- home:".to_string()));
+        } else if let Some(rest) = line.strip_prefix("- operations:") {
+            read.fill(&entry, ["", " none yet."].contains(&rest).then(Vec::new), line, Some("- operations:".into()));
+        } else if let Some(text) = item {
+            let named = text.strip_prefix('`').and_then(|rest| rest.split_once("`: "));
+            let shaped = named.filter(|(name, what)| name.split("::").all(is_identifier) && !what.is_empty());
+            read.fill(&entry, shaped.map(|_| vec![Filling::Item(line.to_string())]), line, None);
+        } else if let Some(cell) = home_cell {
+            let blank: Vec<&str> =
+                cells.iter().enumerate().map(|(i, other)| if Some(i) == home_column { "" } else { other }).collect();
+            read.fill(&format!("{entry} / {}", cells[0]), names_in(cell), line, Some(blank.join(" | ")));
+        } else {
+            read.skeleton.push(line.to_string());
+        }
+    }
+    read
+}
+
+/// The names of a home: none for an empty text or `none yet`, else names in backticks
+/// separated by `, `; none at all when `text` is in no such shape.
+fn names_in(text: &str) -> Option<Vec<Filling>> {
+    if text.is_empty() || text == "none yet" {
+        return Some(Vec::new());
+    }
+    (text.split(", "))
+        .map(|part| part.strip_prefix('`')?.strip_suffix('`').filter(|name| is_identifier(name)))
+        .map(|name| name.map(|name| Filling::Home(name.to_string())))
+        .collect()
+}
+
+fn is_identifier(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// What `head` changes in `docs/concepts.md` beyond fillings, against `base`: the first
+/// line of the skeletons that differs, then each filling of `base` that `head` lost from
+/// its entry.
+fn kernel_changes(base: &str, head: &str) -> Vec<String> {
+    let (base, head) = (read_concepts(base), read_concepts(head));
+    let mut changes = Vec::new();
+    if base.skeleton != head.skeleton {
+        let at = (base.skeleton.iter().zip(&head.skeleton).position(|(old, new)| old != new))
+            .unwrap_or(base.skeleton.len().min(head.skeleton.len()));
+        changes.push(format!("{:?} became {:?}", base.skeleton.get(at), head.skeleton.get(at)));
+    }
+    for (entry, filling) in base.fillings.difference(&head.fillings) {
+        changes.push(match filling {
+            Filling::Home(name) => format!("{entry} lost the home `{name}`"),
+            Filling::Item(item) => format!("{entry} lost the item {item:?}"),
+        });
+    }
+    changes
 }
 
 /// The repository's sources, and its `docs/concepts.md`.
@@ -242,4 +323,90 @@ fn every_home_names_a_type() {
     assert!(!sources.is_empty(), "no source file was read");
     let found = undeclared(&sources, &concepts);
     assert!(found.homes.is_empty(), "homes in docs/concepts.md that name no type: {:?}", found.homes);
+}
+
+/// A file of concepts for the tests of `kernel_changes`.
+const KERNEL: &str = "\
+## Answer
+
+- home: none yet.
+- operations: none yet.
+
+## Request
+
+- home: `Request`.
+- operations:
+  - `Request::read`: reads one request.
+
+| Term | Defined as | Home |
+|---|---|---|
+| request | one JSON document | |
+| protocol | its number | |
+";
+
+#[test]
+fn kernel_allows_a_first_fill() {
+    let head = (KERNEL.replace("- home: none yet.", "- home: `Answer`."))
+        .replace("- operations: none yet.", "- operations:\n  - `Answer::of`: builds one.")
+        .replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
+    assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+}
+
+#[test]
+fn kernel_allows_an_added_item() {
+    let head = KERNEL.replace("reads one request.\n", "reads one request.\n  - `Request::write`: writes one.\n");
+    assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+}
+
+#[test]
+fn kernel_refuses_a_removed_name() {
+    let changes = kernel_changes(KERNEL, &KERNEL.replace("- home: `Request`.", "- home: none yet."));
+    assert!(matches!(changes.as_slice(), [change] if change.contains("Request") && change.contains("`Request`")));
+}
+
+#[test]
+fn kernel_refuses_a_name_moved_to_another_entry() {
+    let base = KERNEL.replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
+    let head = KERNEL.replace("| protocol | its number | |", "| protocol | its number | `Request` |");
+    let changes = kernel_changes(&base, &head);
+    assert!(matches!(changes.as_slice(), [change] if change.contains("Request / request")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_a_reworded_item() {
+    let changes = kernel_changes(KERNEL, &KERNEL.replace("reads one request.", "reads a request."));
+    assert!(matches!(changes.as_slice(), [change] if change.contains("reads one request")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_a_changed_line() {
+    let changes = kernel_changes(KERNEL, &KERNEL.replace("| its number |", "| its version |"));
+    assert!(matches!(changes.as_slice(), [change] if change.contains("its version")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_prose_in_a_home() {
+    let head = KERNEL.replace("- home: `Request`.", "- home: `Request`; and a CTE is also a relation.");
+    let changes = kernel_changes(KERNEL, &head);
+    assert!(changes.iter().any(|change| change.contains("a CTE is also a relation")), "{changes:?}");
+}
+
+#[test]
+fn kernel_refuses_prose_in_an_item() {
+    let head = KERNEL.replace("reads one request.\n", "reads one request.\n    And a write may have no target.\n");
+    let changes = kernel_changes(KERNEL, &head);
+    assert!(changes.iter().any(|change| change.contains("a write may have no target")), "{changes:?}");
+}
+
+/// `docs/concepts.md` where the branch began against `HEAD`, as `make kernel-unchanged`
+/// gives them.
+#[test]
+#[ignore = "make kernel-unchanged runs it, with the two files"]
+fn kernel_unchanged() {
+    let read = |variable: &str| {
+        let path = std::env::var(variable).unwrap_or_else(|_| panic!("{variable} is unset: run make kernel-unchanged"));
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path}: {error}"))
+    };
+    let changes = kernel_changes(&read("SQL_LINEAGE_CONCEPTS_BASE"), &read("SQL_LINEAGE_CONCEPTS_HEAD"));
+    assert!(changes.is_empty(), "docs/concepts.md changed beyond fillings:\n{}", changes.join("\n"));
 }
