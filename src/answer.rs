@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! What is said of one write: its output columns, its edges, its gaps and its refusal.
 
+use std::fmt;
+
 use polyglot_sql::expressions::Expression;
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::validation::{SchemaValidationOptions, validate_with_schema};
@@ -19,19 +21,19 @@ pub struct Answer {
     write: String,
     /// The output columns, when they are all known and the write is not refused.
     pub columns: Option<Vec<Name>>,
-    edges: Vec<Edge>,
-    gaps: Vec<Gap>,
-    refusal: Option<Refusal>,
+    pub edges: Vec<Edge>,
+    pub gaps: Vec<Gap>,
+    pub refusal: Option<Refusal>,
 }
 
 /// A place where an edge may be missing, and why.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Gap {
-    reason: GapReason,
+    pub reason: GapReason,
     /// The relation it concerns, as the write's SQL spells it.
-    relation: Option<String>,
-    /// The output column it concerns.
-    column: Option<String>,
+    pub relation: Option<String>,
+    /// The output column it concerns, as the write's SQL spells it.
+    pub column: Option<String>,
     detail: String,
 }
 
@@ -47,6 +49,14 @@ impl Gap {
             relation: Some(relation.to_string()),
             ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
         }
+    }
+}
+
+impl fmt::Display for Gap {
+    /// Its reason, its relation and its output column, `-` for none.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let (reason, relation, column) = (spelled(&self.reason), spelled(&self.relation), spelled(&self.column));
+        write!(formatter, "{reason} {relation} {column}")
     }
 }
 
@@ -67,6 +77,14 @@ pub enum GapReason {
 pub struct Refusal {
     pub reason: RefusalReason,
     pub detail: String,
+}
+
+impl fmt::Display for Refusal {
+    /// Its reason, then its detail on one line.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let detail = self.detail.split_whitespace().collect::<Vec<_>>().join(" ");
+        write!(formatter, "{} {detail}", spelled(&self.reason))
+    }
 }
 
 /// The reasons of a refusal.
@@ -101,7 +119,8 @@ impl Answer {
                 return (answer.refused(refusal), replaces);
             }
         };
-        let mut answers = pieces.iter().map(|piece| Answer::of_piece(write, &found, piece, catalog, dialect, defaults));
+        let mut answers =
+            pieces.iter().map(|piece| Answer::of_piece(write, target, &found, piece, catalog, dialect, defaults));
         if replaces {
             return (answers.next().expect("a replace write is one piece"), true);
         }
@@ -126,19 +145,23 @@ impl Answer {
             None => mapped.cloned().collect(),
         };
         let ends: Vec<End> =
-            columns.iter().map(|column| End { relation: write.target.clone(), column: column.to_string() }).collect();
+            columns.iter().map(|column| End { relation: target.clone(), column: column.clone() }).collect();
         let place = |edge: &Edge| ends.iter().position(|end| *end == edge.child);
-        edges.sort_by(|one, other| (place(one), one).cmp(&(place(other), other)));
+        edges.sort_by_cached_key(|edge| {
+            let (parent, child) = (&edge.parent, &edge.child);
+            (place(edge), parent.relation.to_string(), parent.column.to_string(), child.column.to_string(), edge.kind)
+        });
         edges.dedup_by(|one, other| one.child == other.child && one.parent == other.parent);
         (Answer { columns: known.map(|_| columns), edges, ..answer }.ended(gaps), false)
     }
 
-    /// The answer to `piece`, one of `write`'s, whose target the statement names `target`,
-    /// against `catalog`: its output columns, or its target's columns onto which they map,
-    /// its edges and its gaps, or its refusal.
+    /// The answer to `piece`, one of `write`'s, whose target is `target`, which the statement
+    /// names `found`, against `catalog`: its output columns, or its target's columns onto which
+    /// they map, its edges and its gaps, or its refusal.
     pub fn of_piece(
         write: &Write,
         target: &RelationName,
+        found: &RelationName,
         piece: &Piece,
         catalog: &Catalog,
         dialect: Dialect,
@@ -224,12 +247,12 @@ impl Answer {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
         let children: Vec<End> =
-            outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
+            outputs.iter().map(|output| End { relation: target.clone(), column: output.clone() }).collect();
         let holders = Write::holders(sql, &query, dialect);
         let keys = Write::keys(sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&text, &query, &holders, keys.as_deref(), &order, &schema, dialect);
         let reach = Reach::of(sql, &query, outputs.len(), holders, keys, steps, dialect);
-        let own = piece.own.then_some(target);
+        let own = piece.own.then_some(found);
         let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog, own);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)
@@ -247,4 +270,10 @@ impl Answer {
         self.gaps = gaps;
         self
     }
+}
+
+/// The text of `value`, a part of an answer, as protocol 1 spells it; `-` for none.
+pub fn spelled(value: &impl Serialize) -> String {
+    let value = serde_json::to_value(value).expect("a part of an answer serialises");
+    value.as_str().unwrap_or("-").to_string()
 }

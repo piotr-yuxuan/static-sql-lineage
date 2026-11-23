@@ -19,9 +19,9 @@ pub struct Graph {
     pub skipped: usize,
 }
 
-/// Tarjan's search for the strongly connected components of the writes, by `depends`, the
-/// writes that each depends on.
-struct Search<'a> {
+/// Tarjan's search for the strongly connected components of nodes, such as writes, by
+/// `depends`, the nodes that each depends on.
+pub struct Search<'a> {
     depends: &'a [Vec<usize>],
     /// Each write's place in the search, none before it is searched, `usize::MAX` once it
     /// is in a component.
@@ -36,6 +36,21 @@ struct Search<'a> {
 }
 
 impl Search<'_> {
+    /// The strongly connected components of the nodes by `depends`, the nodes that each
+    /// depends on: each node's component, and the components, each after those that it
+    /// depends on, its nodes in order.
+    pub fn components(depends: &[Vec<usize>]) -> (Vec<usize>, Vec<Vec<usize>>) {
+        let count = depends.len();
+        let (places, component) = (vec![None; count], vec![0; count]);
+        let mut search = Search { depends, places, searched: 0, stack: Vec::new(), component, components: Vec::new() };
+        for write in 0..count {
+            if search.places[write].is_none() {
+                search.connect(write);
+            }
+        }
+        (search.component, search.components)
+    }
+
     /// Searches from `write`, closing each component that it finds; the lowest place that
     /// it reaches.
     fn connect(&mut self, write: usize) -> usize {
@@ -89,16 +104,7 @@ impl Graph {
                 read.chain(writing(&write.target).take_while(|&earlier| earlier < at)).collect()
             })
             .collect();
-        let count = writes.len();
-        let (places, component) = (vec![None; count], vec![0; count]);
-        let mut search =
-            Search { depends: &depends, places, searched: 0, stack: Vec::new(), component, components: Vec::new() };
-        for write in 0..count {
-            if search.places[write].is_none() {
-                search.connect(write);
-            }
-        }
-        let Search { component, components, .. } = search;
+        let (component, components) = Search::components(&depends);
         // The dependencies of each component on the others, which it waits on.
         let mut waiting = vec![0; components.len()];
         let mut waiters = vec![Vec::new(); components.len()];
@@ -137,5 +143,21 @@ impl Graph {
         let order = sequence.iter().flat_map(|&at| &components[at]);
         let writes = order.map(|&at| slots[at].take().expect("each write in one component")).collect();
         Graph { writes, findings, skipped }
+    }
+
+    /// The graph as JSON, or as text: one line per write in migration order,
+    /// `<id> <target> <- <relation>, ...`; one per finding; then the number of statements
+    /// skipped.
+    pub fn printed(&self, json: bool) -> String {
+        if json {
+            return serde_json::to_string(self).expect("a graph serialises");
+        }
+        let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let writes = (self.writes.iter()).map(|write| {
+            format!("{} {} <- {}", write.id, write.target, names(&write.reads).join(", ")).trim_end().to_string()
+        });
+        let findings = self.findings.iter().map(ToString::to_string);
+        let skipped = format!("skipped: {}", self.skipped);
+        writes.chain(findings).chain([skipped]).collect::<Vec<_>>().join("\n")
     }
 }

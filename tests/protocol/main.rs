@@ -30,6 +30,20 @@ fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
     binary().args(arguments).output().expect("the binary runs")
 }
 
+/// The binary's output for the command line `arguments`, run from the repository's root.
+fn command(arguments: &[&str]) -> Output {
+    binary().current_dir(env!("CARGO_MANIFEST_DIR")).args(arguments).output().expect("the binary runs")
+}
+
+/// The lines that the command line `arguments` prints, which the binary does not refuse.
+fn lines(arguments: &[&str]) -> Vec<String> {
+    let output = command(arguments);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
+}
+
 /// The binary's output for `input` on its standard input.
 fn answers(input: &[u8]) -> Output {
     let mut child = (binary().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))

@@ -9,6 +9,7 @@ mod describe;
 mod dialect;
 mod edge;
 mod graph;
+mod lineage;
 mod relation;
 mod request;
 mod script;
@@ -17,7 +18,7 @@ mod write;
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-use command::Command;
+use command::{Command, Verb};
 use describe::Description;
 use request::Request;
 
@@ -36,8 +37,13 @@ fn main() -> ExitCode {
             Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
                 .expect("a description serialises"))
         }
-        [command, rest @ ..] if command == "graph" => Command::read(rest).and_then(|command| command.run()),
-        _ => Err(format!("given {arguments:?}; the uses are --describe, graph, or a request on standard input")),
+        [command, rest @ ..] => match Verb::ALL.into_iter().find(|verb| command == verb.name()) {
+            Some(verb) => Command::read(verb, rest).and_then(|command| command.run()),
+            None => {
+                let names = Verb::ALL.map(Verb::name).join(", ");
+                Err(format!("given {arguments:?}; the uses are --describe, {names}, or a request on standard input"))
+            }
+        },
     };
     match output {
         Ok(output) => {

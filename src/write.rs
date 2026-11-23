@@ -12,13 +12,20 @@ use polyglot_sql::expressions::{
 use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
 use polyglot_sql::traversal::{ExpressionWalk, get_merge_target};
 use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
-use polyglot_sql::{ColumnUseContext, LineageNode, TokenType, generate, lineage_at_with_schema, parse_one};
+use polyglot_sql::{ColumnUseContext, LineageNode, Token, TokenType, generate, lineage_at_with_schema, parse_one};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName, repeated};
+
+/// The words that open a clause of a statement, but `WITH`, `GROUP BY`, `ORDER BY` and a join.
+const CLAUSES: &str =
+    "SELECT INTO FROM WHERE HAVING QUALIFY WINDOW LIMIT UNION EXCEPT INTERSECT SET VALUES OUTPUT WHEN ON USING";
+
+/// The words of a join before its `JOIN` or `APPLY`.
+const JOINS: &str = "INNER LEFT RIGHT FULL CROSS OUTER NATURAL";
 
 /// The request's form of a write: its id, its target and its SQL, a query or a statement.
 #[derive(Deserialize)]
@@ -543,6 +550,40 @@ impl Write {
             |place| lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok();
         order.iter().map(|&at| lineage(at)).collect()
     }
+
+    /// The clauses of the statement that `sql` holds, each its words and the offset of its
+    /// first: outside parentheses and `CASE`, `WITH` as the statement's first word or after
+    /// `AS`, `GROUP BY`, `ORDER BY`, a join from its first word to its `JOIN` or `APPLY`, and
+    /// each word of [`CLAUSES`]. Words in strings and quoted names are none.
+    pub fn clauses(sql: &str, dialect: Dialect) -> Vec<(String, usize)> {
+        let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(sql).unwrap_or_default();
+        let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
+        let word = |at: usize| {
+            let token = tokens.get(at).filter(|token| !quoted.contains(&token.token_type));
+            token.map_or_else(String::new, |token| token.text.to_uppercase())
+        };
+        let (mut depth, mut cases, mut found) = (0, 0, Vec::new());
+        for (at, token) in tokens.iter().enumerate() {
+            let (here, before) = (word(at), at.checked_sub(1).map(word).unwrap_or_default());
+            depth += nesting(token);
+            cases += i32::from(here == "CASE") - i32::from(here == "END" && cases > 0);
+            let first = match here.as_str() {
+                "WITH" if at == 0 || before == "AS" => at,
+                "BY" if before == "GROUP" || before == "ORDER" => at - 1,
+                "JOIN" | "APPLY" => {
+                    let joined =
+                        (0..at).rev().take_while(|&earlier| JOINS.split(' ').any(|join| join == word(earlier)));
+                    joined.last().unwrap_or(at)
+                }
+                clause if CLAUSES.split(' ').any(|other| other == clause) => at,
+                _ => continue,
+            };
+            if depth == 0 && cases == 0 {
+                found.push(((first..=at).map(word).collect::<Vec<_>>().join(" "), tokens[first].span.start));
+            }
+        }
+        found
+    }
 }
 
 /// Every scope of `root`, the engine's scopes of a query, with its path as the engine
@@ -911,4 +952,9 @@ fn with(mut query: Expression, with: Option<With>) -> Expression {
         _ => {}
     }
     query
+}
+
+/// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
+pub fn nesting(token: &Token) -> i32 {
+    i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
 }
