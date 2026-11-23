@@ -29,7 +29,7 @@ pub struct Command {
 
 impl Command {
     /// The names of the commands.
-    pub const NAMES: [&str; 3] = ["graph", "trace", "uses"];
+    pub const NAMES: [&str; 4] = ["graph", "trace", "uses", "outline"];
 
     /// The command `name` that `arguments`, those after its name, give: `--dialect`, a
     /// dialect of the build; `--database` and `--schema`, the defaults, a database without
@@ -67,14 +67,16 @@ impl Command {
     }
 
     /// What the command prints, or why it cannot run: a path that does not read, or an
-    /// argument that names no column of the scripts. Each path is read in the order given,
-    /// a directory's files ending `.sql`, in any case, sorted by path, into the graph of their
-    /// writes and the catalog of their declarations. As JSON, or as text: for `graph`, one
+    /// argument that names no column or write of the scripts. Each path is read in the order
+    /// given, a directory's files ending `.sql`, in any case, sorted by path, into the graph of
+    /// their writes and the catalog of their declarations. As JSON, or as text: for `graph`, one
     /// line per write in migration order, `<id> <target> <- <relation>, ...`, one per finding,
     /// after its kind and a colon, then the number of statements skipped; for `trace` and
     /// `uses`, one line per edge of the walk from the argument's column, upstream or
     /// downstream, `<relation>.<column> <kind> <id>, ...` of the end that it reaches, indented
-    /// by its depth, then the gaps, the refusals and the cycles that it meets.
+    /// by its depth, then the gaps, the refusals and the cycles that it meets; for `outline`,
+    /// the argument's write in brief, one field per line, its answer's edges, gaps and
+    /// refusal, then the words and the place of each of its clauses.
     pub fn run(&self) -> Result<String, String> {
         let unread = |path: &PathBuf, error: std::io::Error| format!("{} does not read: {error}", path.display());
         let (mut scripts, mut catalog) = (Vec::new(), Catalog::default());
@@ -105,8 +107,9 @@ impl Command {
         }
         let graph = Graph::of(scripts);
         let listed = |items: &[String]| items.join(", ");
-        // A value's text, as its JSON spells it, `-` for none.
+        // A value's text, as its JSON spells it, `-` for none; a detail's, on one line.
         let named = |value: Value| value.as_str().unwrap_or("-").to_string();
+        let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
         let argument = self.argument.as_deref().unwrap_or_default();
         let (json, lines): (String, Vec<String>) = match self.name.as_str() {
             "graph" => {
@@ -115,7 +118,6 @@ impl Command {
                 let writes = (graph.writes.iter()).map(|write| {
                     format!("{} {} <- {}", write.id, write.target, names(&write.reads)).trim_end().to_string()
                 });
-                let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
                 let findings = graph.findings.iter().map(|finding| match finding {
                     Finding::Refused { place, detail } => format!("refused: {place} {}", line(detail)),
                     Finding::NotRead { place, detail } => format!("not_read: {place} {}", line(detail)),
@@ -130,6 +132,41 @@ impl Command {
                     serde_json::to_string(&graph).expect("a graph serialises"),
                     writes.chain(findings).chain([skipped]).collect(),
                 )
+            }
+            "outline" => {
+                let at = graph.writes.iter().position(|write| write.id == argument);
+                let at = at.ok_or_else(|| format!("no script has the write {argument}"))?;
+                let lineage = Lineage::of(&graph.writes, catalog, self.dialect);
+                let (write, answer) = (&graph.writes[at], &lineage.answers[at]);
+                let mode = if write.replaces { "replace" } else { "contribute" };
+                let names = |columns: &Vec<Name>| listed(&columns.iter().map(ToString::to_string).collect::<Vec<_>>());
+                let fields = [
+                    format!("id: {}", write.id),
+                    format!("target: {}", write.target),
+                    format!("mode: {mode}"),
+                    format!("place: {}", write.place),
+                    format!("columns: {}", answer.columns.as_ref().map_or_else(|| "-".to_string(), names)),
+                ];
+                let edges = (answer.edges.iter())
+                    .map(|edge| format!("edge: {} -> {} {}", edge.parent, edge.child, named(json!(edge.kind))));
+                let gaps = answer.gaps.iter().map(|gap| {
+                    let (relation, column) = (named(json!(gap.relation)), named(json!(gap.column)));
+                    format!("gap: {} {relation} {column}", named(json!(gap.reason)))
+                });
+                let refusal = (answer.refusal.iter())
+                    .map(|refusal| format!("refused: {} {}", named(json!(refusal.reason)), line(&refusal.detail)));
+                let clauses = write.clauses.iter().map(|(words, place)| format!("clause: {words} {place}"));
+                let json = json!({
+                    "id": write.id,
+                    "target": write.target,
+                    "mode": mode,
+                    "place": write.place.to_string(),
+                    "clauses": write.clauses.iter().map(|(words, place)| {
+                        json!({"keyword": words, "place": place.to_string()})
+                    }).collect::<Vec<_>>(),
+                    "answer": answer,
+                });
+                (json.to_string(), fields.into_iter().chain(edges).chain(gaps).chain(refusal).chain(clauses).collect())
             }
             _ => {
                 // The argument's last part is its column, the rest its relation.

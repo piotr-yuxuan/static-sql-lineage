@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-//! The commands `graph`, `trace` and `uses`, run as a caller runs them on the scripts of
+//! The commands `graph`, `trace`, `uses` and `outline`, run as a caller runs them on the scripts of
 //! `tests/scripts/`, as `docs/protocol.md` gives them. Expectations from plans 008 and 009,
 //! the probe's observations of the scripts of SQL Server's tools, the rulings and the Edge
 //! entry of `docs/concepts.md`.
@@ -8,7 +8,7 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, command, lines, run};
+use super::{assert_refused, command, lines, read, run};
 
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
 fn graph(arguments: &[&str]) -> Output {
@@ -667,4 +667,105 @@ fn an_unknown_column_is_refused() {
     assert_refused(&command(&["trace", "--dialect", "tsql", "Total", LINEAGE]), "Total");
     // A known column with no edge downstream gives an empty walk.
     assert_eq!(walked("uses", "dbo.vTop.Total", &[LINEAGE]), [""]);
+}
+
+/// The lines that `outline` prints for the write `id` in the scripts at `paths` in T-SQL.
+fn outlined(id: &str, paths: &[&str]) -> Vec<String> {
+    lines(&[&["outline", "--dialect", "tsql", id], paths].concat())
+}
+
+#[test]
+fn outline_gives_a_write_in_brief() {
+    // A replace write and its answer; a contribute write, refused, its detail text for a person.
+    let expected = [
+        format!("id: {}", view(3)),
+        "target: dbo.vBase".to_string(),
+        "mode: replace".to_string(),
+        "place: 3:1".to_string(),
+        "columns: id, Total".to_string(),
+        "edge: [dbo].[Fact].[Id] -> dbo.vBase.id copy".to_string(),
+        "edge: [dbo].[Fact].[Amount] -> dbo.vBase.Total copy".to_string(),
+        "clause: SELECT 3:26".to_string(),
+        "clause: FROM 3:53".to_string(),
+    ];
+    assert_eq!(outlined(&view(3), &[LINEAGE]), expected);
+    let refused = outlined(&load(4), &[LINEAGE]);
+    let fields = [format!("id: {}", load(4)), "target: dbo.Fact".to_string(), "mode: contribute".to_string()];
+    assert_eq!(refused[..3], fields);
+    assert_eq!(refused[3..5], ["place: 4:1", "columns: -"]);
+    assert!(refused[5].starts_with("refused: invalid "), "{refused:?}");
+}
+
+#[test]
+fn outline_places_clauses() {
+    // Outside parentheses and `CASE`: not `CASE`'s `WHEN`, the function `LEFT`, `WITHIN
+    // GROUP (ORDER BY ...)`, nor `FROM` in a string; a join at its first word.
+    let path = "tests/scripts/tsql/21-clauses.sql";
+    let clauses = |id: &str| -> Vec<String> {
+        outlined(id, &[path]).into_iter().filter_map(|line| line.strip_prefix("clause: ").map(str::to_string)).collect()
+    };
+    let view = ["WITH 3:1", "SELECT 4:1", "FROM 7:1", "LEFT OUTER JOIN 8:1", "ON 8:33", "CROSS APPLY 9:1"];
+    let view = [view.as_slice(), &["WHERE 10:1", "GROUP BY 11:1", "HAVING 12:1"]].concat();
+    assert_eq!(clauses(&format!("{path}:1:1")), view);
+    let merge = ["INTO 14:7", "USING 15:1", "ON 15:22", "WHEN 16:1", "SET 16:26", "WHEN 17:1", "VALUES 17:41"];
+    assert_eq!(clauses(&format!("{path}:14:1")), merge);
+}
+
+#[test]
+fn outline_places_clauses_inside_an_existence_check() {
+    // The write is at its `EXEC`; its clauses in the file, past the string's start and each
+    // doubled quote before them.
+    let path = "tests/scripts/tsql/22-existence-quotes.sql";
+    let file = read(path);
+    let line = file.lines().nth(1).expect("the script's second line");
+    let place = |words: &str| format!("clause: {words} 2:{}", line.find(words).expect("the words are on the line") + 1);
+    let found = outlined(&format!("{path}:2:1"), &[path]);
+    assert_eq!(found[3], "place: 2:1");
+    let clauses = ["SELECT", "FROM", "WHERE", "GROUP BY"].map(place);
+    assert_eq!(found[found.len() - 4..], clauses);
+}
+
+#[test]
+fn an_unknown_write_is_refused() {
+    let id = format!("{LINEAGE}/2-load.sql:9:1");
+    assert_refused(&command(&["outline", "--dialect", "tsql", &id, LINEAGE]), &id);
+    assert_refused(&command(&["outline", "--dialect", "tsql", LINEAGE]), "outline");
+}
+
+#[test]
+fn commands_give_json_on_request() {
+    let json = |arguments: &[&str]| -> Value {
+        serde_json::from_str(&lines(&[arguments, &["--json", LINEAGE]].concat()).join("\n")).expect("JSON")
+    };
+    let end = |relation: &str, column: &str| json!({"relation": relation, "column": column});
+    let trace = json(&["trace", "--dialect", "tsql", "dbo.vTop.Total"]);
+    assert_eq!(trace["column"], end("dbo.vTop", "Total"));
+    let first = json!({
+        "parent": end("dbo.vBase", "Total"),
+        "child": end("dbo.vTop", "Total"),
+        "kind": "copy",
+        "writes": [view(1)],
+        "depth": 1,
+    });
+    assert_eq!(trace["edges"][0], first);
+    assert_eq!(trace["edges"].as_array().map(Vec::len), Some(4));
+    assert_eq!((&trace["gaps"], &trace["cycles"]), (&json!([]), &json!([])));
+    assert_eq!(trace["refusals"], json!([{"write": load(4), "reason": "invalid"}]));
+    let uses = json(&["uses", "--dialect", "tsql", "dbo.vOther.Id"]);
+    // The join's condition decides the rows of `Total`; `Id` is selected.
+    let both = |column: &str, kind: &str| json!({"parent": end("dbo.vOther", "Id"), "child": end("dbo.vBoth", column), "kind": kind, "writes": [view(7)], "depth": 1});
+    assert_eq!(uses["edges"], json!([both("Total", "rows"), both("Id", "copy")]));
+    let gap = json!({"write": view(5), "reason": "unknown_relation", "relation": "dbo.Missing", "column": null});
+    assert_eq!(json(&["trace", "--dialect", "tsql", "dbo.vOther.Id"])["gaps"], json!([gap]));
+    let outline = json(&["outline", "--dialect", "tsql", &view(5)]);
+    let clauses = json!([{"keyword": "SELECT", "place": "5:27"}, {"keyword": "FROM", "place": "5:37"}]);
+    let answer = json!({
+        "write": view(5),
+        "columns": ["Id"],
+        "edges": [],
+        "gaps": [{"reason": "unknown_relation", "relation": "dbo.Missing", "column": null, "detail": "unknown to the catalog"}],
+        "refusal": null,
+    });
+    let expected = json!({"id": view(5), "target": "dbo.vOther", "mode": "replace", "place": "5:1", "clauses": clauses, "answer": answer});
+    assert_eq!(outline, expected);
 }

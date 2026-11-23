@@ -134,6 +134,7 @@ have. A reject scenario names an answer that must not be given.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
+  - `Write::clauses`: the words and the offset of each clause of a statement, its location part.
   - `Place::at`: the line and the column of an offset in a text of SQL.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
@@ -317,7 +318,7 @@ have. A reject scenario names an answer that must not be given.
 | trace | a column's edges upstream, followed through earlier writes to base relations | |
 | uses | a column's edges downstream | |
 | migration order | an order of the writes in which each comes after every write of each relation that it reads, other than its own target, and after the writes of its own target that precede it in reading order; among the strongly connected components of these dependencies whose dependencies are all ordered, the one with the earliest write in reading order comes next, its writes in reading order; a component of more than one write is a cycle, reported with its writes and the relations that they write, and a relation with more than one replace write is reported with those writes | |
-| outline | a short text form of one write's answer, with its locations | |
+| outline | a short form of one write's answer, with its locations, text or JSON | |
 
 ## Context
 

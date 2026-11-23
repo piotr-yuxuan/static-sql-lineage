@@ -44,8 +44,9 @@ const WRITES: [(TokenType, &[TokenType], &[TokenType]); 9] = [
 
 /// A write found in a script: its id, the place of its first token in its file; its
 /// target, as its statement names it; whether it replaces its target; the relations that
-/// its pieces read, as they name them, without repeats; and, for its answer, its statement's
-/// text and the defaults in force there.
+/// its pieces read, as they name them, without repeats; for its answer, its statement's text
+/// and the defaults in force there; and its place, with the words and the place of each of
+/// its clauses, as [`Write::clauses`] finds them.
 #[derive(Serialize)]
 pub struct Scripted {
     pub id: String,
@@ -57,6 +58,10 @@ pub struct Scripted {
     pub text: String,
     #[serde(skip)]
     pub defaults: Vec<Name>,
+    #[serde(skip)]
+    pub place: Place,
+    #[serde(skip)]
+    pub clauses: Vec<(String, Place)>,
 }
 
 /// What the reading of scripts finds besides their writes: a statement refused, with
@@ -197,19 +202,20 @@ impl Script {
                     }
                     error => error.to_string(),
                 };
-                let place = Place::at(&starts, start);
+                // The place in the file of an offset in the statement.
+                let at = |offset: usize| Place::at(&starts, start + offset);
                 match (cut, parsed) {
                     (Some(cut), _) => {
                         let head: String = chars[start..tokens[cut - 1].span.end].iter().collect();
                         let parsed = parse(&head, dialect).map_err(detail);
-                        script.statement(parsed, &head, &tokens[from..cut], place, dialect);
+                        script.statement(parsed, &head, &tokens[from..cut], &at, dialect);
                         (from, next) = (cut, next - 1);
                     }
                     // A window that fails at its last token ran out of text: it grows.
                     (None, Err(error))
                         if !hard && error.start().is_some_and(|at| start + at >= tokens[to - 1].span.start) => {}
                     (None, parsed) => {
-                        script.statement(parsed.map_err(detail), &window, &tokens[from..to], place, dialect);
+                        script.statement(parsed.map_err(detail), &window, &tokens[from..to], &at, dialect);
                         from = to + usize::from(hard);
                     }
                 }
@@ -218,19 +224,21 @@ impl Script {
         script
     }
 
-    /// Reads `parsed`, the parse of `text`, a statement of the script at `place` whose
-    /// tokens are `tokens`, as [`Script::parsed`] reads its tree. One that does not parse is
-    /// refused, reported when its first words make it a write or a declaration.
+    /// Reads `parsed`, the parse of `text`, a statement of the script whose tokens are
+    /// `tokens` and whose offsets are at the places that `at` gives, as [`Script::parsed`]
+    /// reads its tree. One that does not parse is refused, reported when its first words make
+    /// it a write or a declaration.
     fn statement(
         &mut self,
         parsed: Result<Expression, String>,
         text: &str,
         tokens: &[Token],
-        place: Place,
+        at: &dyn Fn(usize) -> Place,
         dialect: Dialect,
     ) {
+        let place = at(0);
         let error = match parsed {
-            Ok(tree) => return self.parsed(tree, text, tokens, place, dialect),
+            Ok(tree) => return self.parsed(tree, text, tokens, place, at, dialect),
             Err(error) => error,
         };
         let mut depth = 0;
@@ -252,13 +260,23 @@ impl Script {
     }
 
     /// Reads `tree`, the tree of `text`, a statement of the script at `place` whose tokens
-    /// are `tokens`: a write; a declaration, a `CREATE TABLE` with a column list and no
+    /// are `tokens` and whose offsets are at the places that `at` gives: a write, with the
+    /// places of its clauses; a declaration, a `CREATE TABLE` with a column list and no
     /// query, which goes to the catalog, refused when it breaks the catalog's rule, and
     /// reported when it declares its relation again; a `USE`, which sets the defaults;
     /// SSMS's existence check, `sp_executesql` of a national string as `@statement` that
-    /// parses, read as that statement; any other dynamic SQL, not read; any other statement,
+    /// parses, read as that statement, at the places of its characters between the string's
+    /// quotes, each doubled quote once; any other dynamic SQL, not read; any other statement,
     /// skipped.
-    fn parsed(&mut self, tree: Expression, text: &str, tokens: &[Token], place: Place, dialect: Dialect) {
+    fn parsed(
+        &mut self,
+        tree: Expression,
+        text: &str,
+        tokens: &[Token],
+        place: Place,
+        at: &dyn Fn(usize) -> Place,
+        dialect: Dialect,
+    ) {
         let id = format!("{}:{place}", self.path);
         let sql: Vec<char> = text.chars().collect();
         let defaults = self.defaults.read(dialect).expect("the defaults read, as they did when given");
@@ -276,8 +294,10 @@ impl Script {
             });
             let mut seen = HashSet::new();
             let reads = reads.filter(|relation| seen.insert(relation.clone())).collect();
+            let clauses =
+                Write::clauses(text, dialect).into_iter().map(|(words, offset)| (words, at(offset))).collect();
             let text = text.to_string();
-            self.writes.push(Scripted { id, target, replaces: read.replaces, reads, text, defaults });
+            self.writes.push(Scripted { id, target, replaces: read.replaces, reads, text, defaults, place, clauses });
             return;
         }
         // Dynamic SQL: `EXEC` of a string or a variable, or of `sp_executesql`, bare or under
@@ -289,18 +309,27 @@ impl Script {
             Expression::Table(table) => RelationName::of(table, &sql, dialect, &dbo) == executesql,
             _ => false,
         };
+        let base = tokens.first().map_or(0, |token| token.span.start);
         let run = |execute: &ExecuteStatement| {
             let given =
                 execute.parameters.iter().find(|parameter| parameter.name.eq_ignore_ascii_case("@statement"))?;
             let Expression::Literal(literal) = &given.value else { return None };
             let Literal::NationalString(statement) = literal.as_ref() else { return None };
-            Some((parse(statement, dialect).ok()?, statement.clone()))
+            // The offset in this statement of each character of that one: past `N'`, and past
+            // each doubled quote's first.
+            let mut string = tokens.iter().skip_while(|token| !token.text.eq_ignore_ascii_case("@statement"));
+            let string = string.find(|token| token.token_type == TokenType::NationalString)?;
+            let offsets = statement.chars().scan(string.span.start - base + 2, |next, char| {
+                let offset = *next;
+                *next += 1 + usize::from(char == '\'');
+                Some(offset)
+            });
+            Some((parse(statement, dialect).ok()?, statement.clone(), offsets.collect::<Vec<_>>()))
         };
         // `LIKE` and `CLONE` give a table no list of columns.
         let like = |constraint: &TableConstraint| matches!(constraint, TableConstraint::Like { .. });
         match &tree {
             Expression::Use(used) => {
-                let base = tokens.first().map_or(0, |token| token.span.start);
                 let named = tokens.iter().skip(1);
                 let named = named.filter(|token| {
                     !matches!(token.token_type, TokenType::Database | TokenType::Schema | TokenType::Dot)
@@ -313,7 +342,9 @@ impl Script {
                 }
             }
             Expression::Execute(execute) if dynamic(execute) => match run(execute) {
-                Some((statement, text)) => self.parsed(statement, &text, &[], place, dialect),
+                Some((statement, text, offsets)) => {
+                    self.parsed(statement, &text, &[], place, &|offset| at(offsets[offset]), dialect)
+                }
                 None => self.findings.push(Finding::NotRead { place: id, detail: "dynamic SQL".to_string() }),
             },
             Expression::CreateTable(create)
