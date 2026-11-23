@@ -149,6 +149,16 @@ fn tsql_a_cte_named_in_another_case_is_read() {
 }
 
 #[test]
+fn tsql_a_filter_branch_in_a_cte_reads_bracketed_names() {
+    let catalog: &[(&str, &[&str])] = &[("s", &["[Amount]"]), ("u", &["[Amount]"])];
+    // polyglot-sql's lineage of the piece's own text does not follow `x` to `[X]`.
+    for reader in ["select amount from c", "select x.amount from c as [X]"] {
+        let sql = format!("with c as (select [Amount] from s intersect select [Amount] from u) {reader}");
+        assert_eq!(traced(catalog, &sql), ["s.[Amount] -> t.amount copy", "u.[Amount] -> t.amount rows"], "{reader}");
+    }
+}
+
+#[test]
 fn tsql_edges_keep_their_spellings() {
     let catalog: &[(&str, &[&str])] = &[("[dbo].[Orders]", &["[OrderId]", "Amount"])];
     let writes = [("t", "select ORDERID as [Id], [amount] from DBO.ORDERS"), ("u", "select * from dbo.orders")];
