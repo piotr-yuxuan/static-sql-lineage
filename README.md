@@ -21,88 +21,122 @@ no running pipeline.
 
 ## See it
 
-[`examples/shop/`](examples/shop/) holds four DuckDB scripts of a made-up shop.
-`tables.sql` declares two tables. `load.sql` fills `sales` from `order_line` with
-`INSERT ... SELECT`. `views.sql` defines two views over `sales`, and `report.sql` one
-view over those two. Each command below runs from the root of a clone, and
-`--dialect duckdb` tells it to read the scripts as DuckDB's SQL.
+[`examples/tpch/`](examples/tpch/) holds five DuckDB scripts over the eight tables of
+TPC-H, the standard benchmark of orders, customers and suppliers. `tables.sql` declares
+the tables. `staging.sql` gives them plain names, `marts.sql` adds up orders, customers
+and suppliers, `reports.sql` builds what the business reads, and `loads.sql` fills a
+table of revenue by day. The tool needs only their text; to run them on data, DuckDB's
+`tpch` extension makes the tables with `CALL dbgen(sf = 0.01)`. Each command below runs
+from the root of a clone, and `--dialect duckdb` tells it to read the scripts as
+DuckDB's SQL.
 
 In what order should these statements run, so that each comes after the tables and
 views that it reads?
 
 ```console
-$ static-sql-lineage graph --dialect duckdb examples/shop
-examples/shop/load.sql:1:1 sales <- order_line
-examples/shop/views.sql:1:1 region_revenue <- sales
-examples/shop/views.sql:6:1 region_orders <- sales
-examples/shop/report.sql:1:1 region_report <- region_orders, region_revenue
+$ static-sql-lineage graph --dialect duckdb examples/tpch
+examples/tpch/staging.sql:3:1 stg_line <- lineitem
+examples/tpch/staging.sql:16:1 stg_order <- orders
+examples/tpch/marts.sql:3:1 order_revenue <- stg_line, stg_order
+examples/tpch/staging.sql:25:1 stg_customer <- customer, nation, region
+examples/tpch/loads.sql:3:1 revenue_by_day <- stg_customer, stg_line, stg_order
+examples/tpch/marts.sql:15:1 customer_revenue <- order_revenue, stg_customer
+examples/tpch/reports.sql:3:1 nation_revenue <- customer_revenue
+examples/tpch/reports.sql:8:1 region_report <- nation_revenue
+examples/tpch/reports.sql:13:1 top_customers <- customer_revenue
+examples/tpch/staging.sql:36:1 stg_supplier <- nation, supplier
+examples/tpch/marts.sql:27:1 supplier_margin <- partsupp, stg_line, stg_supplier
+examples/tpch/marts.sql:37:1 nation_party <- stg_customer, stg_supplier
 skipped: 0
 ```
 
 Each line is a statement: its file, line and column, then the table or view that it
-fills, then what it reads. `report.sql` comes before `views.sql` in the folder, but
-after it here, since its view reads the two views of `views.sql`. `tables.sql` only
-declares tables, so it has no line. The last line counts the statements that the tool
-skipped, such as stored procedures, which it does not read yet.
+fills, then what it reads. The order is not the files' order: `marts.sql` and
+`reports.sql` come before `staging.sql` in the folder, yet each of their views waits
+for the views that it reads. `tables.sql` only declares tables, so it has no line. The
+last line counts the statements that the tool skipped, such as stored procedures, which
+it does not read yet.
 
-Where does `revenue` in `region_revenue` come from?
+Where does `revenue` in `order_revenue` come from?
 
 ```console
-$ static-sql-lineage trace --dialect duckdb region_revenue.revenue examples/shop
-sales.amount -> region_revenue.revenue derive examples/shop/views.sql:1:1
-sales.region -> region_revenue.revenue rows examples/shop/views.sql:1:1
-  order_line.quantity -> sales.amount derive examples/shop/load.sql:1:1
-  order_line.status -> sales.amount rows examples/shop/load.sql:1:1
-  order_line.unit_price -> sales.amount derive examples/shop/load.sql:1:1
-  order_line.region -> sales.region copy examples/shop/load.sql:1:1
-  order_line.status -> sales.region rows examples/shop/load.sql:1:1
+$ static-sql-lineage trace --dialect duckdb order_revenue.revenue examples/tpch
+stg_line.net_price -> order_revenue.revenue derive examples/tpch/marts.sql:3:1
+stg_line.order_key -> order_revenue.revenue rows examples/tpch/marts.sql:3:1
+stg_line.returned -> order_revenue.revenue rows examples/tpch/marts.sql:3:1
+stg_order.customer_key -> order_revenue.revenue rows examples/tpch/marts.sql:3:1
+stg_order.order_date -> order_revenue.revenue rows examples/tpch/marts.sql:3:1
+stg_order.order_key -> order_revenue.revenue rows examples/tpch/marts.sql:3:1
+  lineitem.l_discount -> stg_line.net_price derive examples/tpch/staging.sql:3:1
+  lineitem.l_extendedprice -> stg_line.net_price derive examples/tpch/staging.sql:3:1
+  lineitem.l_linestatus -> stg_line.net_price rows examples/tpch/staging.sql:3:1
+  lineitem.l_linestatus -> stg_line.order_key rows examples/tpch/staging.sql:3:1
+  lineitem.l_orderkey -> stg_line.order_key copy examples/tpch/staging.sql:3:1
+  lineitem.l_linestatus -> stg_line.returned rows examples/tpch/staging.sql:3:1
+  lineitem.l_returnflag -> stg_line.returned derive examples/tpch/staging.sql:3:1
+  orders.o_custkey -> stg_order.customer_key copy examples/tpch/staging.sql:16:1
+  orders.o_orderstatus -> stg_order.customer_key rows examples/tpch/staging.sql:16:1
+  orders.o_orderdate -> stg_order.order_date copy examples/tpch/staging.sql:16:1
+  orders.o_orderstatus -> stg_order.order_date rows examples/tpch/staging.sql:16:1
+  orders.o_orderkey -> stg_order.order_key copy examples/tpch/staging.sql:16:1
+  orders.o_orderstatus -> stg_order.order_key rows examples/tpch/staging.sql:16:1
 ```
 
 Each line is an edge from one column to another, then its kind, then the statement
 that makes it. `copy` passes the value as it is. `derive` computes a new value from it,
-as `sum(amount)` does. `rows` only decides which rows there are, as `WHERE` and
-`GROUP BY` do. Each indent goes one step further back, until a table that no script
-fills, here `order_line`.
+as `sum(l.net_price)` does. `rows` only decides which rows there are, as `WHERE`,
+`JOIN ... ON` and `GROUP BY` do. Each indent goes one step further back, until a table
+that no script fills, here `lineitem` and `orders`. A column of a report has a longer
+story: `trace region_report.revenue` goes five steps back.
 
-What would a change to `unit_price` in `order_line` reach?
-
-```console
-$ static-sql-lineage uses --dialect duckdb order_line.unit_price examples/shop
-order_line.unit_price -> sales.amount derive examples/shop/load.sql:1:1
-  sales.amount -> region_revenue.revenue derive examples/shop/views.sql:1:1
-    region_revenue.revenue -> region_report.revenue copy examples/shop/report.sql:1:1
-    region_revenue.revenue -> region_report.average_order derive examples/shop/report.sql:1:1
-```
-
-The walk goes the other way here: each indent goes one step further forward.
-
-What does the `INSERT` of `load.sql` do, in brief?
+What would a change to `l_discount` in `lineitem` reach?
 
 ```console
-$ static-sql-lineage outline --dialect duckdb examples/shop/load.sql:1:1 examples/shop
-id: examples/shop/load.sql:1:1
-target: sales
-mode: contribute
-place: 1:1
-columns: order_id, region, amount
-edge: order_line.order_id -> sales.order_id copy
-edge: order_line.status -> sales.order_id rows
-edge: order_line.region -> sales.region copy
-edge: order_line.status -> sales.region rows
-edge: order_line.quantity -> sales.amount derive
-edge: order_line.status -> sales.amount rows
-edge: order_line.unit_price -> sales.amount derive
-clause: INTO 1:8
-clause: SELECT 2:1
-clause: FROM 3:1
-clause: WHERE 4:1
+$ static-sql-lineage uses --dialect duckdb lineitem.l_discount examples/tpch
+lineitem.l_discount -> stg_line.net_price derive examples/tpch/staging.sql:3:1
+lineitem.l_discount -> stg_line.gross_price derive examples/tpch/staging.sql:3:1
+  stg_line.net_price -> order_revenue.revenue derive examples/tpch/marts.sql:3:1
+  stg_line.net_price -> revenue_by_day.revenue derive examples/tpch/loads.sql:3:1
+  stg_line.net_price -> supplier_margin.margin derive examples/tpch/marts.sql:27:1
+    order_revenue.revenue -> customer_revenue.revenue derive examples/tpch/marts.sql:15:1
+      customer_revenue.revenue -> nation_revenue.revenue derive examples/tpch/reports.sql:3:1
+      customer_revenue.revenue -> top_customers.region rows examples/tpch/reports.sql:13:1
+      customer_revenue.revenue -> top_customers.customer rows examples/tpch/reports.sql:13:1
+      customer_revenue.revenue -> top_customers.revenue copy examples/tpch/reports.sql:13:1
+      customer_revenue.revenue -> top_customers.position derive examples/tpch/reports.sql:13:1
+        nation_revenue.revenue -> region_report.revenue derive examples/tpch/reports.sql:8:1
+        nation_revenue.revenue -> region_report.average_order derive examples/tpch/reports.sql:8:1
 ```
 
-The statement is named by the id that `graph` printed. `mode: contribute` says that it
-changes the rows of a table that is already there; a `CREATE VIEW` would say `replace`,
-since it replaces whatever was there. Each `clause` gives the line and the column where
-a keyword starts. Add `--json` to any of these commands for output that a program can
-read.
+The walk goes the other way here: each indent goes one step further forward, through
+the margins, the nightly load, the ranking of the top customers, and the report by
+region.
+
+What does `region_report` do, in brief?
+
+```console
+$ static-sql-lineage outline --dialect duckdb examples/tpch/reports.sql:8:1 examples/tpch
+id: examples/tpch/reports.sql:8:1
+target: region_report
+mode: replace
+place: 8:1
+columns: region, revenue, average_order
+edge: nation_revenue.region -> region_report.region copy
+edge: nation_revenue.region -> region_report.revenue rows
+edge: nation_revenue.revenue -> region_report.revenue derive
+edge: nation_revenue.orders -> region_report.average_order derive
+edge: nation_revenue.region -> region_report.average_order rows
+edge: nation_revenue.revenue -> region_report.average_order derive
+clause: SELECT 9:1
+clause: FROM 10:1
+clause: GROUP BY 11:1
+```
+
+The statement is named by the id that `graph` printed. `mode: replace` says that it
+replaces whatever was there, as a `CREATE VIEW` does; an `INSERT` would say
+`contribute`, since it changes the rows of a table that is already there. Each `clause`
+gives the line and the column where a keyword starts. Add `--json` to any of these
+commands for output that a program can read.
 
 ## Who it is for
 
@@ -111,7 +145,7 @@ port, the four commands above answer the questions that come up again and again:
 to port first, where a column comes from, what a change would reach, and what one
 statement does. They read T-SQL as SQL Server's tools script it: `GO` batches,
 bracketed names, statements without semicolons, UTF-16 files.
-[`examples/legacy-estate/`](examples/legacy-estate/) is the same shop in T-SQL:
+[`examples/legacy-estate/`](examples/legacy-estate/) is a small estate in T-SQL:
 
 ```console
 $ static-sql-lineage graph --dialect tsql examples/legacy-estate

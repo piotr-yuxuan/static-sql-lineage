@@ -113,8 +113,8 @@ for relations in general; query, for a write; field, link, result.
 ```
 LICENSE              the EUPL 1.2
 README.md            what the tool tells a user, and its examples, which a test runs
-examples/            synthetic scripts that the README reads: shop, of DuckDB, and
-                     legacy-estate, the same shop as SQL Server scripts it
+examples/            synthetic scripts that the README reads: tpch, of DuckDB over TPC-H's
+                     tables, and legacy-estate, of SQL Server
 docs/decisions.md    what the tool is for: users, rulings, promises, scope, open questions
 docs/concepts.md     the kernel, its derived terms, and scenarios with their verdicts
 docs/differences.md  where the code differs from a definition, each difference classed
