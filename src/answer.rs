@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! What is said of one write: its output columns, its edges, its gaps and its refusal.
 
+use std::fmt;
+
 use polyglot_sql::expressions::Expression;
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::validation::{SchemaValidationOptions, validate_with_schema};
@@ -50,6 +52,14 @@ impl Gap {
     }
 }
 
+impl fmt::Display for Gap {
+    /// Its reason, its relation and its output column, `-` for none.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let (reason, relation, column) = (spelled(&self.reason), spelled(&self.relation), spelled(&self.column));
+        write!(formatter, "{reason} {relation} {column}")
+    }
+}
+
 /// Why an edge may be missing; in the order of their names, by which gaps are ordered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +77,14 @@ pub enum GapReason {
 pub struct Refusal {
     pub reason: RefusalReason,
     pub detail: String,
+}
+
+impl fmt::Display for Refusal {
+    /// Its reason, then its detail on one line.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let detail = self.detail.split_whitespace().collect::<Vec<_>>().join(" ");
+        write!(formatter, "{} {detail}", spelled(&self.reason))
+    }
 }
 
 /// The reasons of a refusal.
@@ -252,4 +270,10 @@ impl Answer {
         self.gaps = gaps;
         self
     }
+}
+
+/// The text of `value`, a part of an answer, as protocol 1 spells it; `-` for none.
+pub fn spelled(value: &impl Serialize) -> String {
+    let value = serde_json::to_value(value).expect("a part of an answer serialises");
+    value.as_str().unwrap_or("-").to_string()
 }

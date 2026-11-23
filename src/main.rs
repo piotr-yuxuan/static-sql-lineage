@@ -18,7 +18,7 @@ mod write;
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-use command::Command;
+use command::{Command, Verb};
 use describe::Description;
 use request::Request;
 
@@ -37,12 +37,13 @@ fn main() -> ExitCode {
             Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
                 .expect("a description serialises"))
         }
-        [command, rest @ ..] if Command::NAMES.iter().any(|name| command == name) => {
-            Command::read(&command.to_string_lossy(), rest).and_then(|command| command.run())
-        }
-        _ => Err(format!("given {arguments:?}; the uses are --describe, {}, or a request on standard input", {
-            Command::NAMES.join(", ")
-        })),
+        [command, rest @ ..] => match Verb::ALL.into_iter().find(|verb| command == verb.name()) {
+            Some(verb) => Command::read(verb, rest).and_then(|command| command.run()),
+            None => {
+                let names = Verb::ALL.map(Verb::name).join(", ");
+                Err(format!("given {arguments:?}; the uses are --describe, {names}, or a request on standard input"))
+            }
+        },
     };
     match output {
         Ok(output) => {

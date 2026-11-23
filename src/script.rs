@@ -3,6 +3,7 @@
 //! DuckDB write them, and what its reader finds in it.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::ops::Range;
 
 use polyglot_sql::expressions::{ExecuteStatement, Expression, Literal, TableConstraint};
@@ -76,6 +77,26 @@ pub enum Finding {
     DeclaredTwice { place: String, relation: RelationName },
     Cycle { writes: Vec<String>, relations: Vec<RelationName> },
     ReplacedTwice { relation: RelationName, writes: Vec<String> },
+}
+
+impl fmt::Display for Finding {
+    /// Its kind and a colon, then its place and its detail on one line, its place and its
+    /// relation, its writes and their relations, or its relation and its writes.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
+        let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
+        match self {
+            Finding::Refused { place, detail } => write!(formatter, "refused: {place} {}", line(detail)),
+            Finding::NotRead { place, detail } => write!(formatter, "not_read: {place} {}", line(detail)),
+            Finding::DeclaredTwice { place, relation } => write!(formatter, "declared_twice: {place} {relation}"),
+            Finding::Cycle { writes, relations } => {
+                write!(formatter, "cycle: {} ({})", writes.join(", "), names(relations).join(", "))
+            }
+            Finding::ReplacedTwice { relation, writes } => {
+                write!(formatter, "replaced_twice: {relation} ({})", writes.join(", "))
+            }
+        }
+    }
 }
 
 /// A file read as a script: its writes, in reading order, its findings, and the number of

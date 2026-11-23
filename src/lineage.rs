@@ -4,7 +4,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::answer::{Answer, Gap, Refusal};
+use serde_json::json;
+
+use crate::answer::{Answer, Gap, Refusal, spelled};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::edge::{Edge, End};
@@ -24,10 +26,11 @@ pub struct Lineage<'w> {
     dialect: Dialect,
 }
 
-/// A walk over the lineage from a column: each edge that it follows, with the ids of its
-/// writes and the depth of its first reaching; the gaps and the refusals of the writes that
-/// it meets, each with its write's id; and the cycles among the columns that it follows.
+/// A walk over the lineage from a column, `from`: each edge that it follows, with the ids of
+/// its writes and the depth of its first reaching; the gaps and the refusals of the writes
+/// that it meets, each with its write's id; and the cycles among the columns that it follows.
 pub struct Walk<'l> {
+    pub from: &'l End,
     pub edges: Vec<(&'l Edge, &'l [String], usize)>,
     pub gaps: Vec<(&'l str, &'l Gap)>,
     pub refusals: Vec<(&'l str, &'l Refusal)>,
@@ -122,6 +125,41 @@ impl<'w> Lineage<'w> {
             gaps.extend(given.map(|gap| (write.id.as_str(), gap)));
             refusals.extend(answer.refusal.iter().map(|refusal| (write.id.as_str(), refusal)));
         }
-        Some(Walk { edges, gaps, refusals, cycles })
+        Some(Walk { from, edges, gaps, refusals, cycles })
+    }
+}
+
+impl Walk<'_> {
+    /// The walk as JSON, or as text: one line per edge, indented by two spaces for each depth
+    /// after the first, with the ids of its writes; then one line per gap, per refusal and per
+    /// cycle, after its kind and a colon.
+    pub fn printed(&self, json: bool) -> String {
+        if json {
+            let edges = self.edges.iter().map(|(edge, writes, depth)| {
+                let (parent, child, kind) = (&edge.parent, &edge.child, edge.kind);
+                json!({"parent": parent, "child": child, "kind": kind, "writes": writes, "depth": depth})
+            });
+            let gaps = self.gaps.iter().map(|(write, gap)| {
+                let (reason, relation, column) = (gap.reason, &gap.relation, &gap.column);
+                json!({"write": write, "reason": reason, "relation": relation, "column": column})
+            });
+            let refusals =
+                self.refusals.iter().map(|(write, refusal)| json!({"write": write, "reason": refusal.reason}));
+            let (edges, gaps, refusals): (Vec<_>, Vec<_>, Vec<_>) =
+                (edges.collect(), gaps.collect(), refusals.collect());
+            let (from, cycles) = (self.from, &self.cycles);
+            return json!({"column": from, "edges": edges, "gaps": gaps, "refusals": refusals, "cycles": cycles})
+                .to_string();
+        }
+        let edges = self
+            .edges
+            .iter()
+            .map(|(edge, writes, depth)| format!("{}{edge} {}", "  ".repeat(depth - 1), writes.join(", ")));
+        let gaps = self.gaps.iter().map(|(write, gap)| format!("gap: {write} {gap}"));
+        let refusals =
+            self.refusals.iter().map(|(write, refusal)| format!("refused: {write} {}", spelled(&refusal.reason)));
+        let cycles = (self.cycles.iter())
+            .map(|cycle| format!("cycle: {}", cycle.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+        edges.chain(gaps).chain(refusals).chain(cycles).collect::<Vec<_>>().join("\n")
     }
 }

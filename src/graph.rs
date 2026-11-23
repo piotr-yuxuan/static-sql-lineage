@@ -144,4 +144,20 @@ impl Graph {
         let writes = order.map(|&at| slots[at].take().expect("each write in one component")).collect();
         Graph { writes, findings, skipped }
     }
+
+    /// The graph as JSON, or as text: one line per write in migration order,
+    /// `<id> <target> <- <relation>, ...`; one per finding; then the number of statements
+    /// skipped.
+    pub fn printed(&self, json: bool) -> String {
+        if json {
+            return serde_json::to_string(self).expect("a graph serialises");
+        }
+        let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let writes = (self.writes.iter()).map(|write| {
+            format!("{} {} <- {}", write.id, write.target, names(&write.reads).join(", ")).trim_end().to_string()
+        });
+        let findings = self.findings.iter().map(ToString::to_string);
+        let skipped = format!("skipped: {}", self.skipped);
+        writes.chain(findings).chain([skipped]).collect::<Vec<_>>().join("\n")
+    }
 }

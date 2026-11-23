@@ -11,7 +11,7 @@ use polyglot_sql::{
 };
 use serde::Serialize;
 
-use crate::answer::{Gap, GapReason};
+use crate::answer::{Gap, GapReason, spelled};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName};
@@ -97,6 +97,13 @@ pub struct Edge {
     pub parent: End,
     pub child: End,
     pub kind: Kind,
+}
+
+impl fmt::Display for Edge {
+    /// `<parent> -> <child> <kind>`.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{} -> {} {}", self.parent, self.child, spelled(&self.kind))
+    }
 }
 
 impl Edge {
