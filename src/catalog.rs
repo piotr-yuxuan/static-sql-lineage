@@ -26,23 +26,30 @@ pub struct Catalog {
 impl Catalog {
     /// The catalog that the request declares, or why the request is refused.
     pub fn declared(declared: &[Declared], dialect: Dialect, defaults: &[Name]) -> Result<Catalog, String> {
-        let mut relations = HashMap::new();
+        let mut catalog = Catalog { relations: HashMap::new() };
         for entry in declared {
             let relation = RelationName::read(&entry.relation, dialect, defaults)?;
             let columns =
                 (entry.columns.iter()).map(|column| Name::read(column, dialect)).collect::<Result<Vec<_>, _>>()?;
-            if columns.is_empty() {
-                return Err(format!("the relation {relation} has no column"));
-            }
-            if let Some(column) = repeated(&columns) {
-                return Err(format!("the relation {relation} declares {column} twice"));
-            }
-            if relations.contains_key(&relation) {
+            if catalog.declare(&relation, columns)? {
                 return Err(format!("the catalog declares {relation} twice"));
             }
-            relations.insert(relation, columns);
         }
-        Ok(Catalog { relations })
+        Ok(catalog)
+    }
+
+    /// Declares `relation` with `columns`, in place of an earlier declaration, and says
+    /// whether there was one; or why it cannot: no column, or a column twice.
+    pub fn declare(&mut self, relation: &RelationName, columns: Vec<Name>) -> Result<bool, String> {
+        if columns.is_empty() {
+            return Err(format!("the relation {relation} has no column"));
+        }
+        if let Some(column) = repeated(&columns) {
+            return Err(format!("the relation {relation} declares {column} twice"));
+        }
+        let earlier = self.relations.remove(relation).is_some();
+        self.relations.insert(relation.clone(), columns);
+        Ok(earlier)
     }
 
     /// The relation as the catalog knows it, and its columns, if it knows it.
