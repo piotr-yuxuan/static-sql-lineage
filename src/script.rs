@@ -15,34 +15,10 @@ use crate::write::{Place, Write};
 
 /// The first words of T-SQL's statements, before which a window may end; not `WITH`, which
 /// also starts a table hint.
-const CUTS: [&str; 26] = [
-    "ALTER",
-    "BEGIN",
-    "CREATE",
-    "DECLARE",
-    "DELETE",
-    "DENY",
-    "DROP",
-    "ELSE",
-    "END",
-    "EXEC",
-    "EXECUTE",
-    "GRANT",
-    "IF",
-    "INSERT",
-    "MERGE",
-    "PRINT",
-    "RAISERROR",
-    "RETURN",
-    "REVOKE",
-    "SELECT",
-    "SET",
-    "THROW",
-    "TRUNCATE",
-    "UPDATE",
-    "USE",
-    "WHILE",
-];
+const CUTS: &str = "ALTER BACKUP BEGIN BREAK BULK CHECKPOINT CLOSE COMMIT CONTINUE CREATE DBCC DEALLOCATE \
+    DECLARE DELETE DENY DISABLE DROP ELSE ENABLE END EXEC EXECUTE FETCH GOTO GRANT IF INSERT KILL MERGE OPEN PRINT \
+    RAISERROR READTEXT RECONFIGURE RESTORE RETURN REVERT REVOKE ROLLBACK SAVE SELECT SET SETUSER THROW TRUNCATE \
+    UPDATE UPDATETEXT USE WAITFOR WHILE WRITETEXT";
 
 /// What a T-SQL batch creates or alters when it is one statement: a view or a routine.
 const ROUTINES: [TokenType; 4] = [TokenType::View, TokenType::Procedure, TokenType::Function, TokenType::Trigger];
@@ -169,7 +145,7 @@ impl Script {
                     token.token_type,
                     TokenType::QuotedIdentifier | TokenType::String | TokenType::NationalString
                 );
-                let cut = tsql && first(at) && word && CUTS.contains(&token.text.to_uppercase().as_str());
+                let cut = tsql && first(at) && word && CUTS.split(' ').any(|cut| token.text.eq_ignore_ascii_case(cut));
                 let semicolon = token.token_type == TokenType::Semicolon;
                 (!whole && depth == 0 && (semicolon || cut)).then_some((at, semicolon))
             });

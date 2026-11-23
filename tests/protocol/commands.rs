@@ -113,6 +113,19 @@ fn tsql_statements_without_semicolons_are_split() {
 }
 
 #[test]
+fn tsql_transaction_words_end_a_statement() {
+    // `COMMIT` and `WAITFOR` start statements: the `INSERT`s before them end there.
+    let path = "tests/scripts/tsql/15-transaction.sql";
+    let expected = [
+        format!("{path}:2:1 dbo.w <- dbo.u"),
+        format!("{path}:5:1 dbo.x <- dbo.w"),
+        format!("{path}:7:1 dbo.q <- dbo.x"),
+        "skipped: 3".to_string(),
+    ];
+    assert_eq!(tsql(&[path]), expected);
+}
+
+#[test]
 fn tsql_a_view_is_read_whole() {
     // So is a procedure, whose `INSERT` is no write of the script.
     let path = "tests/scripts/tsql/07-routines.sql";

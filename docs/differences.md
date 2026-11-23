@@ -98,3 +98,7 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   unresolved, so that the name that holds one completes the names after it, where the
   Relation entry completes them with the database that the variable names. Class: an
   intended gap.
+- In a script in T-SQL, a statement that starts with a word missing from the reader's
+  list of statements' first words does not end the statement before it, which is
+  refused and reported where it is a write, though the Write entry reads it. Class: a
+  defect of the code.
