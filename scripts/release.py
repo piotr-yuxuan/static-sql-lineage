@@ -140,12 +140,13 @@ def current_version(texts: Mapping[str, bytes]) -> str:
 def next_version(current: str, tags: Collection[str], bump: str) -> str:
     """The version to release after `current`, as `bump` asks.
 
-    The part that `bump` names is raised and the parts after it go back to zero.  A
-    version that has its tag already is never given twice.
+    The part that `bump` names is raised and the parts after it go back to zero, though
+    never below 0.1.0, so that the first release from 0.0.0 is 0.1.0.  A version that has
+    its tag already is never given twice.
     """
     raised = BUMPS.index(bump)
     numbers = [int(number) for number in VERSION.fullmatch(current).groups()]
-    numbers = [*numbers[:raised], numbers[raised] + 1, *[0] * (2 - raised)]
+    numbers = max([*numbers[:raised], numbers[raised] + 1, *[0] * (2 - raised)], [0, 1, 0])
     version = ".".join(str(number) for number in numbers)
     if version in tags:
         message = f"the tag {version} exists already"

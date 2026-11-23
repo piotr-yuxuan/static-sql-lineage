@@ -59,6 +59,11 @@ class NextVersion(unittest.TestCase):
             ("1.2.3", "minor", "1.3.0"),
             ("1.2.3", "major", "2.0.0"),
             ("9.9.9", "patch", "9.9.10"),
+            # Never below 0.1.0.
+            ("0.0.0", "patch", "0.1.0"),
+            ("0.0.0", "minor", "0.1.0"),
+            ("0.0.0", "major", "1.0.0"),
+            ("0.0.7", "patch", "0.1.0"),
         ):
             with self.subTest(current=current, bump=bump):
                 self.assertEqual(release.next_version(current, ["0.0.0-other"], bump), expected)
@@ -357,6 +362,14 @@ class FirstAndNext(Pipeline):
         self.assertEqual(body["tag_name"], "0.1.1")
         self.assertEqual(body["target_commitish"], self.origin_head())
         self.assertNotIn("compare", body["body"])
+
+    def test_from_0_0_0_the_first_release_is_0_1_0(self):
+        commit = self.push({**TREE, "Cargo.toml": manifest("0.0.0"), "Cargo.lock": lock("0.0.0")})
+        done = self.release(commit)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assert_version("0.1.0")
+        self.assertEqual(self.origin_tag("0.1.0"), self.origin_head())
+        self.assertEqual(self.release_body()["body"], "First release.\n")
 
     def test_the_next_is_a_patch_with_a_table_and_a_compare_link(self):
         self.release(self.push(TREE))
