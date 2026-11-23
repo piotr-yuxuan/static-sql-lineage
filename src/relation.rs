@@ -48,6 +48,11 @@ impl Name {
     pub fn reported_as(&self, text: &str) -> bool {
         self.text.to_lowercase() == text.to_lowercase()
     }
+
+    /// The normalised form, quoted, so that the engine keeps it as it is.
+    pub fn quoted(&self) -> String {
+        format!("\"{}\"", self.normalised.replace('"', "\"\""))
+    }
 }
 
 impl PartialEq for Name {
@@ -127,10 +132,9 @@ impl RelationName {
         self != other && self.reported_as(&other.text)
     }
 
-    /// The parts, completed and normalised, each quoted, so that the engine keeps them
-    /// as they are.
+    /// The parts, completed, each as [`Name::quoted`] gives it.
     pub fn quoted(&self) -> Vec<String> {
-        self.parts.iter().map(|part| format!("\"{}\"", part.normalised.replace('"', "\"\""))).collect()
+        self.parts.iter().map(Name::quoted).collect()
     }
 }
 
