@@ -1,0 +1,98 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: EUPL-1.2 -->
+<!--
+  Social media preview of static-sql-lineage, 1280 by 640 px.  From the
+  repository's root, rasterise with
+  chromium --headless --screenshot=docs/social-media-preview.png
+  --window-size=1280,640 --force-device-scale-factor=1 --hide-scrollbars
+  docs/social-media-preview.html
+  Fonts: EB Garamond for the name and the line below it; Cascadia Mono for
+  the picture.  After dbt-lsp-plus's preview: a dark warm ground, a cream
+  name, a short red rule, one line below; on the right, two relations whose
+  columns run into a third, each edge marked with its kind.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>static-sql-lineage social preview</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #161410; overflow: hidden; }
+  svg { display: block; }
+  .title { font-family: 'EB Garamond', serif; font-weight: 500; }
+  .sub { font-family: 'EB Garamond', serif; font-weight: 400; }
+  .mono { font-family: 'Cascadia Mono', monospace; font-weight: 600; }
+</style>
+</head>
+<body>
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="warm" cx="72%" cy="50%" r="60%">
+      <stop offset="0" stop-color="#2a241b" stop-opacity="1"/>
+      <stop offset="1" stop-color="#161410" stop-opacity="1"/>
+    </radialGradient>
+    <marker id="head-copy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#e6dcc8"/>
+    </marker>
+    <marker id="head-derive" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#cf4a2c"/>
+    </marker>
+    <marker id="head-rows" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#9a8f7a"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#warm)"/>
+
+  <!-- Name, rule, one line -->
+  <text class="title" x="84" y="300" font-size="88" fill="#f0e7d5">static-sql-lineage</text>
+  <rect x="88" y="336" width="96" height="4" fill="#cf4a2c"/>
+  <text class="sub" x="88" y="400" font-size="36" fill="#e6dcc8">Column lineage from the SQL text alone</text>
+
+  <!-- Edges, behind the relations: derive, rows and copy -->
+  <g fill="none" stroke-width="4">
+    <path d="M 912 178 H 988 Q 996 178 996 186 V 284 Q 996 292 1004 292 H 1044" stroke="#cf4a2c" marker-end="url(#head-derive)"/>
+    <path d="M 912 218 H 972 Q 980 218 980 226 V 304 Q 980 312 988 312 H 1044" stroke="#9a8f7a" stroke-dasharray="10 7" marker-end="url(#head-rows)"/>
+    <path d="M 912 498 H 1004 Q 1012 498 1012 490 V 350 Q 1012 342 1020 342 H 1044" stroke="#e6dcc8" marker-end="url(#head-copy)"/>
+  </g>
+  <g class="mono" font-size="20">
+    <text x="954" y="168" fill="#cf4a2c" text-anchor="middle">derive</text>
+    <text x="944" y="208" fill="#9a8f7a" text-anchor="middle">rows</text>
+    <text x="958" y="488" fill="#e6dcc8" text-anchor="middle">copy</text>
+  </g>
+
+  <!-- Two relations that the write reads -->
+  <g class="mono" font-size="22">
+    <g transform="translate(740 72)">
+      <rect width="170" height="176" rx="12" fill="#161410" stroke="#9a8f7a" stroke-width="3"/>
+      <path d="M 0 46 H 170" stroke="#9a8f7a" stroke-width="2"/>
+      <text x="18" y="31" fill="#e6dcc8">order_line</text>
+      <text x="18" y="73" fill="#6f6656">id</text>
+      <text x="18" y="113" fill="#e6dcc8">price</text>
+      <text x="18" y="153" fill="#e6dcc8">status</text>
+    </g>
+    <g transform="translate(740 392)">
+      <rect width="170" height="136" rx="12" fill="#161410" stroke="#9a8f7a" stroke-width="3"/>
+      <path d="M 0 46 H 170" stroke="#9a8f7a" stroke-width="2"/>
+      <text x="18" y="31" fill="#e6dcc8">customer</text>
+      <text x="18" y="73" fill="#6f6656">id</text>
+      <text x="18" y="113" fill="#e6dcc8">region</text>
+    </g>
+  </g>
+
+  <!-- The relation that it writes -->
+  <g transform="translate(1046 236)">
+    <clipPath id="card"><rect width="170" height="136" rx="12"/></clipPath>
+    <g clip-path="url(#card)">
+      <rect width="170" height="136" fill="#f0e7d5"/>
+      <rect width="8" height="136" fill="#cf4a2c"/>
+    </g>
+    <path d="M 8 46 H 170" stroke="#c9bda6" stroke-width="2"/>
+    <g class="mono" font-size="22">
+      <text x="26" y="31" fill="#161410">sales</text>
+      <text x="26" y="73" fill="#3b352b">amount</text>
+      <text x="26" y="113" fill="#3b352b">region</text>
+    </g>
+  </g>
+</svg>
+</body>
+</html>
