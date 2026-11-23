@@ -75,6 +75,8 @@ have. A reject scenario names an answer that must not be given.
   - `Defaults::read`: reads the request's defaults into the names that complete a name.
   - `Defaults::given`: the defaults that a command gives, a database without a schema taking the dialect's usual one.
   - `Defaults::used`: the defaults after a `USE`.
+  - `names_cte`: whether a table reference names a CTE, a step, rather than a relation.
+  - `listing`: names, or ends of names, as text separated by `, `.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -128,13 +130,16 @@ have. A reject scenario names an answer that must not be given.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
   - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
+  - `Write::text`: the text of a piece of a statement, its own or its tree generated under the dialect.
   - `Write::query`: the query that a piece's text holds, or its refusal.
   - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
+  - `scope_steps`: the steps of a scope's path, each its kind and index, after the path up to it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
   - `Write::clauses`: the words and the offset of each clause of a statement, its location part.
+  - `word`: the text of a token as a word of SQL, none for a quoted name or a string.
   - `Place::at`: the line and the column of an offset in a text of SQL.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
@@ -194,6 +199,7 @@ have. A reject scenario names an answer that must not be given.
   - `End::of`: the end that the engine's names of a relation and of its column resolve to.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
   - `Edge::of_analysis`: the edges and gaps of a write's projections and uses, from the engine's analysis.
+  - `Edge::ordered`: a write's edges in protocol 1's order, one per pair of ends.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.
 - accept `edge.coalesce-is-derive`: query `select coalesce(a, 0) as a from s`: the
