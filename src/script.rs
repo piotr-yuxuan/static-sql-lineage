@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::relation::{Defaults, Name, RelationName};
+use crate::relation::{Defaults, Name, RelationName, listing};
 use crate::write::{Place, Write, nesting, word};
 
 /// The first words of T-SQL's statements, before which a window may end; not `WITH`, which
@@ -101,13 +101,12 @@ impl fmt::Display for Finding {
     /// relation, its writes and their relations, or its relation and its writes.
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
-        let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
         match self {
             Finding::Refused { place, detail, .. } => write!(formatter, "refused: {place} {}", line(detail)),
             Finding::NotRead { place, detail } => write!(formatter, "not_read: {place} {}", line(detail)),
             Finding::DeclaredTwice { place, relation } => write!(formatter, "declared_twice: {place} {relation}"),
             Finding::Cycle { writes, relations } => {
-                write!(formatter, "cycle: {} ({})", writes.join(", "), names(relations).join(", "))
+                write!(formatter, "cycle: {} ({})", writes.join(", "), listing(relations))
             }
             Finding::ReplacedTwice { relation, writes } => {
                 write!(formatter, "replaced_twice: {relation} ({})", writes.join(", "))

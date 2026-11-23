@@ -7,7 +7,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::relation::RelationName;
+use crate::relation::{RelationName, listing};
 use crate::script::{Finding, Script, Scripted};
 
 /// The writes of scripts in migration order; what their reading and their order find; and
@@ -152,10 +152,8 @@ impl Graph {
         if json {
             return serde_json::to_string(self).expect("a graph serialises");
         }
-        let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let writes = (self.writes.iter()).map(|write| {
-            format!("{} {} <- {}", write.id, write.target, names(&write.reads).join(", ")).trim_end().to_string()
-        });
+        let writes = (self.writes.iter())
+            .map(|write| format!("{} {} <- {}", write.id, write.target, listing(&write.reads)).trim_end().to_string());
         let findings = self.findings.iter().map(ToString::to_string);
         let skipped = format!("skipped: {}", self.skipped);
         writes.chain(findings).chain([skipped]).collect::<Vec<_>>().join("\n")

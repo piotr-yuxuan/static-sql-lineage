@@ -13,7 +13,7 @@ use crate::dialect::Dialect;
 use crate::edge::End;
 use crate::graph::Graph;
 use crate::lineage::Lineage;
-use crate::relation::{Defaults, Name, RelationName};
+use crate::relation::{Defaults, Name, RelationName, listing};
 use crate::script::{Script, Scripted};
 
 /// A command's name, as the command line gives it.
@@ -163,13 +163,12 @@ impl Command {
             })
             .to_string();
         }
-        let names = |columns: &Vec<Name>| columns.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
         let fields = [
             format!("id: {}", write.id),
             format!("target: {}", write.target),
             format!("mode: {mode}"),
             format!("place: {}", write.place),
-            format!("columns: {}", answer.columns.as_ref().map_or_else(|| "-".to_string(), names)),
+            format!("columns: {}", answer.columns.as_ref().map_or_else(|| "-".to_string(), listing)),
         ];
         let edges = answer.edges.iter().map(|edge| format!("edge: {edge}"));
         let gaps = answer.gaps.iter().map(|gap| format!("gap: {gap}"));

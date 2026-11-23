@@ -216,3 +216,8 @@ pub fn repeated<T: Eq + Hash + Copy>(items: impl IntoIterator<Item = T>) -> Opti
     let mut seen = HashSet::new();
     items.into_iter().find(|item| !seen.insert(*item))
 }
+
+/// The text of `items`, such as names, each as it displays, separated by `, `.
+pub fn listing(items: impl IntoIterator<Item = impl fmt::Display>) -> String {
+    items.into_iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+}
