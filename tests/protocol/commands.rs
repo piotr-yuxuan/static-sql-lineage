@@ -2,7 +2,7 @@
 //! The commands `graph`, `trace`, `uses` and `outline`, run as a caller runs them on the scripts of
 //! `tests/scripts/`, as `docs/protocol.md` gives them. Expectations from plans 008 and 009,
 //! the probe's observations of the scripts of SQL Server's tools, the rulings and the Edge
-//! entry of `docs/concepts.md`.
+//! entry of `docs/concepts.md`; and the README's examples.
 
 use std::process::Output;
 
@@ -794,4 +794,24 @@ fn walks_report_dynamic_sql_not_read() {
     let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
     assert_eq!(walk["not_read"], json!([{"place": format!("{path}:2:1"), "detail": "dynamic SQL"}]));
     assert_eq!(walk["refusals"], json!([]));
+}
+
+#[test]
+fn readme_shows_what_the_binary_prints() {
+    // Each `console` block of the README whose first line runs the binary shows, on its other
+    // lines, what that command prints from the repository's root; every command is shown.
+    let readme = read("README.md");
+    let mut shown = Vec::new();
+    for block in readme.split("```console\n").skip(1) {
+        let mut block = block.split("```").next().expect("a console block ends").lines();
+        let Some(command) = block.next().and_then(|line| line.strip_prefix("$ static-sql-lineage ")) else {
+            continue;
+        };
+        let arguments: Vec<&str> = command.split_whitespace().collect();
+        assert_eq!(lines(&arguments), block.collect::<Vec<_>>(), "{command}");
+        shown.extend(arguments.first().copied());
+    }
+    for verb in ["graph", "trace", "uses", "outline"] {
+        assert!(shown.contains(&verb), "the README shows no {verb}");
+    }
 }

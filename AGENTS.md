@@ -112,6 +112,8 @@ for relations in general; query, for a write; field, link, result.
 
 ```
 LICENSE              the EUPL 1.2
+README.md            what the tool tells a user, and its examples, which a test runs
+examples/            synthetic scripts that the README reads: legacy-estate, of SQL Server
 docs/decisions.md    what the tool is for: users, rulings, promises, scope, open questions
 docs/concepts.md     the kernel, its derived terms, and scenarios with their verdicts
 docs/differences.md  where the code differs from a definition, each difference classed
@@ -126,7 +128,8 @@ tests/concepts.rs    the concept check
 tests/protocol/      the binary run as a caller runs it: --describe and the uses it
                      refuses, requests, scenarios, answers, edges, stars, catalogue (of
                      clauses), cases (Snowflake's), agreement (with dbt's lineage),
-                     statements (replace and contribute), commands (graph on scripts)
+                     statements (replace and contribute), commands (graph on scripts,
+                     and the README's examples)
 tests/scripts/       synthetic scripts as SQL Server's tools, Snowflake and DuckDB write
                      them, kept byte for byte by `.gitattributes`: CRLF, UTF-16
 tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edges, and
