@@ -5,6 +5,9 @@ columns of which tables and views it comes from, and how: copied, computed, or o
 used to choose the rows. It needs nothing but the SQL text: no database, no warehouse,
 no running pipeline.
 
+[![CI](https://github.com/piotr-yuxuan/static-sql-lineage/actions/workflows/ci.yml/badge.svg)](https://github.com/piotr-yuxuan/static-sql-lineage/actions/workflows/ci.yml)
+[![CD](https://github.com/piotr-yuxuan/static-sql-lineage/actions/workflows/cd.yml/badge.svg)](https://github.com/piotr-yuxuan/static-sql-lineage/actions/workflows/cd.yml)
+[![Latest release](https://img.shields.io/github/v/release/piotr-yuxuan/static-sql-lineage?sort=semver)](https://github.com/piotr-yuxuan/static-sql-lineage/releases/latest)
 [![Licence](https://img.shields.io/github/license/piotr-yuxuan/static-sql-lineage)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/piotr-yuxuan/static-sql-lineage)](https://github.com/piotr-yuxuan/static-sql-lineage/issues)
 [![Minimum Rust](https://img.shields.io/badge/rust-1.99%2B-informational)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/Cargo.toml)
@@ -132,8 +135,9 @@ from it. The default build reads Snowflake, T-SQL and DuckDB;
 
 ## Status and licence
 
-It is pre-release: no version is published yet. Its licence is the European Union
-Public Licence 1.2 ([`LICENSE`](LICENSE)).
+It is early: each change to `main` that passes its checks is published as a
+[release](https://github.com/piotr-yuxuan/static-sql-lineage/releases), the first being
+0.1.0. Its licence is the European Union Public Licence 1.2 ([`LICENSE`](LICENSE)).
 
 ## Further reading
 
