@@ -126,6 +126,21 @@ fn tsql_transaction_words_end_a_statement() {
 }
 
 #[test]
+fn tsql_a_statement_after_an_if_on_its_line_is_read() {
+    // polyglot stops after the `IF`'s condition, at `INSERT` or `ROLLBACK`: each a statement of
+    // its own, the conditions and the `ROLLBACK` skipped. The `INSERT` of `dbo.t` reads `dbo.d`.
+    let path = "tests/scripts/tsql/16-if-on-a-line.sql";
+    let expected = [
+        format!("{path}:2:1 dbo.a <- dbo.a"),
+        format!("{path}:4:1 dbo.c <- dbo.a"),
+        format!("{path}:5:1 dbo.d <- dbo.c"),
+        format!("{path}:1:37 dbo.t <- dbo.d"),
+        "skipped: 3".to_string(),
+    ];
+    assert_eq!(tsql(&[path]), expected);
+}
+
+#[test]
 fn tsql_a_view_is_read_whole() {
     // So is a procedure, whose `INSERT` is no write of the script.
     let path = "tests/scripts/tsql/07-routines.sql";
@@ -164,8 +179,9 @@ fn other_dynamic_sql_is_not_read() {
 
 #[test]
 fn a_refused_write_is_reported_with_its_place() {
-    // SSMS's `INSERT` without `INTO`, refused, is reported; its `SELECT`, read alone, and a
-    // refused `IF`, which is no write, are counted.
+    // SSMS's `INSERT` without `INTO`, refused, is reported; its `SELECT`, read alone, the `IF`
+    // and the `DROP VIEW` on one line, and a refused `ALTER TABLE`, which is no write, are
+    // counted.
     let path = "tests/scripts/tsql/08-refused.sql";
     let found = tsql(&[path]);
     let writes = [format!("{path}:1:1 dbo.StageA <- dbo.StageA"), format!("{path}:4:1 dbo.StageA <- dbo.StageA")];
@@ -174,7 +190,7 @@ fn a_refused_write_is_reported_with_its_place() {
     assert!(found[2].contains("Expected Into"), "{found:?}");
     // At the place in the file of `dbo`, where polyglot stops, not its place in the statement.
     assert!(found[2].ends_with(", at 2:8") && !found[2].contains("line 1"), "{found:?}");
-    assert_eq!(found[3..], ["skipped: 2"]);
+    assert_eq!(found[3..], ["skipped: 4"]);
 }
 
 #[test]
@@ -430,5 +446,5 @@ fn graph_json_lists_writes_and_findings() {
         json!({"kind": "cycle", "writes": [format!("{a}:5:1"), format!("{a}:6:1")], "relations": ["dbo.Loop1", "dbo.Loop2"]}),
         json!({"kind": "replaced_twice", "relation": "[dbo].[vA]", "writes": [format!("{c}:3:1"), format!("{d}:1:1")]}),
     ];
-    assert_eq!(graph, json!({"writes": writes, "findings": findings, "skipped": 3}));
+    assert_eq!(graph, json!({"writes": writes, "findings": findings, "skipped": 5}));
 }

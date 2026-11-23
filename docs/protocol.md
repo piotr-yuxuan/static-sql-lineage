@@ -176,7 +176,9 @@ Each file is a script, read in order:
   or `ALTER`, then `VIEW`, `PROC`, `PROCEDURE`, `FUNCTION` or `TRIGGER`, is one statement;
   any other is split at each `;` outside parentheses, then before each line that starts,
   outside parentheses, with a statement's first word; a piece whose parse fails at its
-  last token has run out of text, and grows over the next such line.
+  last token has run out of text, and grows over the next such line; one where
+  polyglot-sql stops after a complete statement at a statement's first word, even within
+  a line, as in `IF ... INSERT ...`, ends there.
 - A write is a statement that `docs/concepts.md` calls one, other than a bare query. Its
   id is its place, `<path>:<line>:<column>`: the path as given, or as found under a
   directory, then the line and the column of its first token, from 1, counted in

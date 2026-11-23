@@ -20,6 +20,10 @@ const CUTS: &str = "ALTER BACKUP BEGIN BREAK BULK CHECKPOINT CLOSE COMMIT CONTIN
     RAISERROR READTEXT RECONFIGURE RESTORE RETURN REVERT REVOKE ROLLBACK SAVE SELECT SET SETUSER THROW TRUNCATE \
     UPDATE UPDATETEXT USE WAITFOR WHILE WRITETEXT";
 
+/// polyglot-sql's message for the token after a complete statement, once its parse is done:
+/// `Parser::parse` raises it there alone.
+const BOUNDARY: &str = "Invalid expression / Unexpected token";
+
 /// What a T-SQL batch creates or alters when it is one statement: a view or a routine.
 const ROUTINES: [TokenType; 4] = [TokenType::View, TokenType::Procedure, TokenType::Function, TokenType::Trigger];
 
@@ -78,20 +82,22 @@ impl Script {
     /// at depth 0 and, in T-SQL, into batches at each line of `GO` and each SQLCMD line,
     /// a batch that creates or alters a view or a routine being one statement; the rest of
     /// T-SQL's into windows, each ending before the next cut and growing over it while its
-    /// parse fails at its last token. A file that does not decode or tokenize is not read.
+    /// parse fails at its last token, or ending where polyglot-sql stops after a complete
+    /// statement at a statement's first word. A file that does not decode or tokenize is
+    /// not read.
     pub fn read(path: &str, bytes: &[u8], dialect: Dialect, defaults: Defaults) -> Script {
         let mut script =
             Script { writes: Vec::new(), findings: Vec::new(), skipped: 0, path: path.to_string(), defaults };
-        let utf16 = |units: &[u8], unit: fn([u8; 2]) -> u16| {
-            let (pairs, rest) = units.as_chunks::<2>();
+        // UTF-16 after its byte order mark, which gives its order; else UTF-8, after its own or none.
+        let utf16 = |mark: [u8; 2], unit: fn([u8; 2]) -> u16| {
+            let (pairs, rest) = bytes.strip_prefix(&mark)?.as_chunks::<2>();
             let text = char::decode_utf16(pairs.iter().map(|pair| unit(*pair))).collect::<Result<String, _>>();
-            text.ok().filter(|_| rest.is_empty())
+            Some(text.ok().filter(|_| rest.is_empty()))
         };
-        let text = match bytes {
-            [0xFF, 0xFE, units @ ..] => utf16(units, u16::from_le_bytes),
-            [0xFE, 0xFF, units @ ..] => utf16(units, u16::from_be_bytes),
-            _ => String::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes).to_vec()).ok(),
-        };
+        let utf8 = || String::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes).to_vec()).ok();
+        let text = (utf16([0xFF, 0xFE], u16::from_le_bytes))
+            .or_else(|| utf16([0xFE, 0xFF], u16::from_be_bytes))
+            .unwrap_or_else(utf8);
         let text = text.ok_or_else(|| "not UTF-8, nor UTF-16 after a byte order mark".to_string());
         let tokenize = |text: String| {
             let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(&text);
@@ -111,6 +117,14 @@ impl Script {
             .collect();
         let first = |at: usize| at == 0 || chars[tokens[at - 1].span.end..tokens[at].span.start].contains(&'\n');
         let tsql = dialect == Dialect::Tsql;
+        // Whether `token` is one of T-SQL's first words of statements.
+        let opens = |token: &Token| {
+            let word = !matches!(
+                token.token_type,
+                TokenType::QuotedIdentifier | TokenType::String | TokenType::NationalString
+            );
+            tsql && word && CUTS.split(' ').any(|cut| token.text.eq_ignore_ascii_case(cut))
+        };
         let breaks: Vec<usize> = (0..tokens.len()).filter(|&at| first(at)).chain([tokens.len()]).collect();
         let lines: Vec<Range<usize>> = breaks.windows(2).map(|pair| pair[0]..pair[1]).collect();
         // T-SQL's separators of batches, which no statement holds: a line of `GO`, any case,
@@ -141,11 +155,7 @@ impl Script {
             let ends = batch.clone().filter_map(|at| {
                 let token = &tokens[at];
                 depth += nesting(token);
-                let word = !matches!(
-                    token.token_type,
-                    TokenType::QuotedIdentifier | TokenType::String | TokenType::NationalString
-                );
-                let cut = tsql && first(at) && word && CUTS.split(' ').any(|cut| token.text.eq_ignore_ascii_case(cut));
+                let cut = first(at) && opens(token);
                 let semicolon = token.token_type == TokenType::Semicolon;
                 (!whole && depth == 0 && (semicolon || cut)).then_some((at, semicolon))
             });
@@ -160,18 +170,35 @@ impl Script {
                 }
                 let start = tokens[from].span.start;
                 let window: String = chars[start..tokens[to - 1].span.end].iter().collect();
-                match parse_one(&window, dialect.polyglot()) {
+                let parsed = parse_one(&window, dialect.polyglot());
+                // polyglot raises its unexpected token after a complete statement: at a statement's
+                // first word, even within a line, the window ends there.
+                let stop = parsed.as_ref().err().and_then(|error| match error {
+                    polyglot_sql::Error::Parse { message, start: at, .. } if message == BOUNDARY => Some(start + at),
+                    _ => None,
+                });
+                let cut = stop.map(|stop| tokens.partition_point(|token| token.span.start < stop));
+                let cut = cut.filter(|&cut| from < cut && cut < to && opens(&tokens[cut]));
+                // polyglot's message, at the place in the file where it stops, not in the window.
+                let detail = |error| match error {
+                    polyglot_sql::Error::Parse { message, start: at, .. } => {
+                        format!("{message}, at {}", Place::at(&starts, start + at))
+                    }
+                    error => error.to_string(),
+                };
+                let place = Place::at(&starts, start);
+                match (cut, parsed) {
+                    (Some(cut), _) => {
+                        let head: String = chars[start..tokens[cut - 1].span.end].iter().collect();
+                        let parsed = parse_one(&head, dialect.polyglot()).map_err(detail);
+                        script.statement(parsed, &head, &tokens[from..cut], place, dialect);
+                        (from, next) = (cut, next - 1);
+                    }
                     // A window that fails at its last token ran out of text: it grows.
-                    Err(error) if !hard && error.start().is_some_and(|at| start + at >= tokens[to - 1].span.start) => {}
-                    parsed => {
-                        // polyglot's message, at the place in the file where it stops, not in the window.
-                        let parsed = parsed.map_err(|error| match error {
-                            polyglot_sql::Error::Parse { message, start: at, .. } => {
-                                format!("{message}, at {}", Place::at(&starts, start + at))
-                            }
-                            error => error.to_string(),
-                        });
-                        script.statement(parsed, &window, &tokens[from..to], Place::at(&starts, start), dialect);
+                    (None, Err(error))
+                        if !hard && error.start().is_some_and(|at| start + at >= tokens[to - 1].span.start) => {}
+                    (None, parsed) => {
+                        script.statement(parsed.map_err(detail), &window, &tokens[from..to], place, dialect);
                         from = to + usize::from(hard);
                     }
                 }

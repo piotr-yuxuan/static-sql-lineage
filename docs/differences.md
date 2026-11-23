@@ -93,7 +93,11 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - In a script in T-SQL, a statement that polyglot-sql refuses ends before the next line
   that starts with a statement's first word, so that its continuation, such as the
   `SELECT` of a refused `INSERT`, is read as a statement of its own, where the Write
-  entry reads one statement as one write. Class: a defect of the code.
+  entry reads one statement as one write. A statement also ends where polyglot-sql,
+  after a complete statement, stops at a statement's first word within a line, as in
+  `IF ... INSERT ...`: that cut relies on polyglot-sql 0.14.3's wording of the error,
+  "Invalid expression / Unexpected token", which the test
+  `tsql_a_statement_after_an_if_on_its_line_is_read` pins. Class: a defect of the code.
 - SQLCMD variables, such as `$(DatabaseName)` in `USE [$(DatabaseName)]`, are left
   unresolved, so that the name that holds one completes the names after it, where the
   Relation entry completes them with the database that the variable names. Class: an
