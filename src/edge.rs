@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! Edges: how a column of a relation that a write reads reaches a column of its target.
 
-use polyglot_sql::expressions::{Expression, Select};
+use polyglot_sql::expressions::{Expression, JoinKind, Select};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::{
-    ColumnReferenceFact, ColumnUseContext, LineageNode, QueryAnalysis, ReferenceConfidence, TransformKind,
+    ColumnReferenceFact, ColumnUseContext, LineageNode, QueryAnalysis, ReferenceConfidence, SetOperator, TransformKind,
 };
 use serde::Serialize;
 
@@ -32,6 +32,19 @@ impl Kind {
             TransformKind::Direct | TransformKind::Star => Some(Kind::Copy),
             TransformKind::Cast | TransformKind::Expression | TransformKind::Aggregation => Some(Kind::Derive),
             TransformKind::Constant => None,
+        }
+    }
+
+    /// The kinds of the left and right sides of a key that a join of kind `join` merges:
+    /// an inner join copies both; an outer one copies the side that it keeps, and the
+    /// other decides its rows; a full one derives from both, as `coalesce` does.
+    pub fn sides(join: JoinKind) -> Option<(Kind, Kind)> {
+        match join {
+            JoinKind::Inner | JoinKind::Natural => Some((Kind::Copy, Kind::Copy)),
+            JoinKind::Left | JoinKind::NaturalLeft => Some((Kind::Copy, Kind::Rows)),
+            JoinKind::Right | JoinKind::NaturalRight => Some((Kind::Rows, Kind::Copy)),
+            JoinKind::Full | JoinKind::NaturalFull => Some((Kind::Derive, Kind::Derive)),
+            _ => None,
         }
     }
 }
@@ -108,10 +121,13 @@ impl Edge {
         catalog: &Catalog,
     ) -> (Vec<Edge>, Vec<Gap>) {
         let mut gaps = Vec::new();
-        let mut found: Vec<(usize, &ColumnReferenceFact, Kind)> = (analysis.projections.iter().enumerate())
+        // Each reference with its place and, for a projection's, its kind: a use's is rows.
+        let mut found: Vec<(usize, &ColumnReferenceFact, Option<Kind>)> = (analysis.projections.iter().enumerate())
             .flat_map(|(place, projection)| {
                 let values = projection.upstream.iter();
-                values.filter_map(move |reference| Some((place, reference, Kind::of(reference.path_transform_kind?)?)))
+                values.filter_map(move |reference| {
+                    Some((place, reference, Some(Kind::of(reference.path_transform_kind?)?)))
+                })
             })
             .collect();
         for use_ in &analysis.column_uses {
@@ -121,15 +137,25 @@ impl Edge {
                 continue;
             };
             let used = places.into_iter().flat_map(|place| use_.references.iter().map(move |used| (place, used)));
-            found.extend(used.map(|(place, used)| (place, &used.reference, Kind::Rows)));
+            found.extend(used.map(|(place, used)| (place, &used.reference, None)));
         }
         let mut edges = Vec::new();
-        for (place, reference, kind) in found {
+        for (place, reference, value) in found {
             let child = &children[place];
-            match Edge::of_reference(reference, kind, child.clone(), relations, catalog) {
-                Ok(Some(edge)) => edges.push((place, edge)),
-                Ok(None) => {}
-                Err(detail) => gaps.push(Gap::of(GapReason::UnresolvedReference, Some(child.column.clone()), detail)),
+            let edge = match Edge::of_reference(reference, Kind::Rows, child.clone(), relations, catalog) {
+                Ok(Some(edge)) => edge,
+                Ok(None) => continue,
+                Err(detail) => {
+                    gaps.push(Gap::of(GapReason::UnresolvedReference, Some(child.column.clone()), detail));
+                    continue;
+                }
+            };
+            match value.map_or(Some(Kind::Rows), |kind| reach.kind(place, &edge.parent, kind, relations, catalog)) {
+                Some(kind) => edges.push((place, Edge { kind, ..edge })),
+                None => {
+                    let detail = "the engine's lineage does not say how its values reach it";
+                    gaps.push(Gap::of(GapReason::UnattributedUse, Some(child.column.clone()), detail));
+                }
             }
         }
         edges.sort();
@@ -141,25 +167,26 @@ impl Edge {
 /// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
 /// keeps rows by their order, whether its outermost query does, which CTEs of its
 /// outermost `WITH` that query reads, directly or through others of that `WITH`, the
-/// places of its output columns, the holders of its subqueries, and the engine's lineage
-/// of each output column, where the write needs it.
+/// places of its output columns, the holders of its subqueries, the joins that merge
+/// each output column, and the engine's lineage of each, where the write needs it.
 pub struct Reach {
     limited: bool,
     outermost: bool,
     read: Vec<usize>,
     every: Vec<usize>,
     holders: Vec<(String, Option<Holder>)>,
+    keys: Vec<Vec<(JoinKind, Option<RelationName>)>>,
     steps: Vec<Option<LineageNode>>,
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`, which has `outputs` output columns, its
-    /// subqueries held as `holders` says, and the lineage of its output columns `steps`,
-    /// or none. A CTE is matched by its name as the engine matches it, ignoring case.
+    /// The reach of the clauses of `query`, its subqueries held as `holders` says, each of
+    /// its output columns merged by the joins of `keys`, and their lineage `steps`, or none.
+    /// A CTE is matched by its name as the engine matches it, ignoring case.
     pub fn of(
         query: &Expression,
-        outputs: usize,
         holders: Vec<(String, Option<Holder>)>,
+        keys: Vec<Vec<(JoinKind, Option<RelationName>)>>,
         steps: Vec<Option<LineageNode>>,
     ) -> Reach {
         let limited = |select: &Select| {
@@ -199,7 +226,8 @@ impl Reach {
             }
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
-        Reach { limited: limited || outermost, outermost, read, every: (0..outputs).collect(), holders, steps }
+        let every = (0..keys.len()).collect();
+        Reach { limited: limited || outermost, outermost, read, every, holders, keys, steps }
     }
 
     /// The places of the output columns whose rows a use of `context` in the scope at
@@ -256,5 +284,54 @@ impl Reach {
                 None => placed.then(|| self.every.clone()),
             },
         }
+    }
+
+    /// The kind with which a projection's reference of `kind`, from `parent`, reaches the
+    /// output column at `place`, by the engine's lineage of that column where the write
+    /// needs it: rows through the filtering branch of an `INTERSECT` or an `EXCEPT`; for a
+    /// key that a join merges, the kind of the side that it comes through; none where the
+    /// lineage does not say, such as for a key merged across more than two sources, or
+    /// whose right side the lineage does not tell from its left.
+    pub fn kind(
+        &self,
+        place: usize,
+        parent: &End,
+        kind: Kind,
+        relations: &[RelationName],
+        catalog: &Catalog,
+    ) -> Option<Kind> {
+        let Some(step) = self.steps.get(place) else { return Some(kind) };
+        let step = step.as_ref()?;
+        // A merged key's right side is the step that names the join's relation or CTE.
+        let sides = match self.keys[place].as_slice() {
+            [] => None,
+            [(join, Some(right))]
+                if step.downstream.iter().filter(|first| right.reported_as(&first.source_name)).count() == 1 =>
+            {
+                Some((Kind::sides(*join)?, right))
+            }
+            _ => return None,
+        };
+        let side = |first: &LineageNode| {
+            sides.map(|((left, right), joined)| if joined.reported_as(&first.source_name) { right } else { left })
+        };
+        let leaf = |node: &LineageNode| match (&node.source_kind, &node.expression) {
+            (SourceKind::Table, Expression::Column(column)) => {
+                End::of(&node.source_name, &column.name.name, relations, catalog).ok().flatten()
+            }
+            _ => None,
+        };
+        let mut pending: Vec<_> = step.downstream.iter().map(|first| (first, side(first))).collect();
+        let mut reached = Vec::new();
+        while let Some((node, through)) = pending.pop() {
+            let filtering =
+                node.set_branch.filter(|branch| branch.ordinal == 1 && branch.operator != SetOperator::Union);
+            let through = through.max(filtering.map(|_| Kind::Rows));
+            if leaf(node).as_ref() == Some(parent) {
+                reached.push(through.unwrap_or(kind));
+            }
+            pending.extend(node.downstream.iter().map(|next| (next, through)));
+        }
+        Some(reached.into_iter().min().unwrap_or(kind))
     }
 }

@@ -130,6 +130,7 @@ have. A reject scenario names an answer that must not be given.
   - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
+  - `Write::keys`: the joins that merge each output column, a key of their `USING` or `NATURAL`.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
@@ -176,8 +177,11 @@ have. A reject scenario names an answer that must not be given.
 - home: `Edge`, `End`, `Kind`, `Reach`.
 - operations:
   - `Kind::of`: the kind of a projection's upstream reference.
+  - `Kind::sides`: the kinds of a merged key's two sides, by the kind of the join that merges it.
   - `Reach::of`: where the clauses of one write's query reach.
   - `Reach::rows`: whether a use of a column decides the rows of every output column.
+  - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
+  - `End::of`: the end that the engine's names of a relation and of its column resolve to.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
   - `Edge::of_analysis`: the edges and gaps of a write's projections and uses, from the engine's analysis.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge

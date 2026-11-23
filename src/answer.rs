@@ -137,8 +137,9 @@ impl Answer {
         let children: Vec<End> =
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
         let holders = write.holders(&query, dialect);
-        let steps = Write::steps(&query, &holders, &schema, dialect, outputs.len());
-        let reach = Reach::of(&query, outputs.len(), holders, steps);
+        let keys = write.keys(&query, &outputs, catalog, dialect, defaults);
+        let steps = Write::steps(&query, &holders, &keys, &schema, dialect);
+        let reach = Reach::of(&query, holders, keys, steps);
         let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, relations, catalog);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)
