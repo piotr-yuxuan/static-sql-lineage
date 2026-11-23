@@ -1,15 +1,75 @@
 // SPDX-License-Identifier: EUPL-1.2
-//! `--describe` and the uses the binary refuses, as `docs/protocol.md` gives them.
+//! The binary run as a caller runs it, as `docs/protocol.md` gives its uses: here
+//! `--describe` and the arguments it refuses, and the helpers of the modules.
+
+mod answers;
+mod edges;
+mod requests;
+mod scenarios;
+mod stars;
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 
+/// The command that runs the built binary.
+fn binary() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_sql-lineage"))
+}
+
 fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_sql-lineage")).args(arguments).output().expect("the binary runs")
+    binary().args(arguments).output().expect("the binary runs")
+}
+
+/// The binary's output for `input` on its standard input.
+fn answers(input: &[u8]) -> Output {
+    let mut child = (binary().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
+        .spawn()
+        .expect("the binary runs");
+    child.stdin.take().expect("a pipe to the binary").write_all(input).expect("the request is written");
+    child.wait_with_output().expect("the binary ends")
+}
+
+/// The answers to `request`, which the binary does not refuse.
+fn respond(request: &Value) -> Vec<Value> {
+    let output = answers(request.to_string().as_bytes());
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let response: Value = serde_json::from_slice(&output.stdout).expect("the response is JSON");
+    response["answers"].as_array().expect("the response has answers").clone()
+}
+
+/// A request in Snowflake of `catalog`, each relation with its columns, and of
+/// `writes`, each a target, which is also its id, and its query.
+fn request(catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
+    let catalog: Vec<Value> =
+        catalog.iter().map(|(relation, columns)| json!({"relation": relation, "columns": columns})).collect();
+    let writes: Vec<Value> =
+        writes.iter().map(|(target, sql)| json!({"id": target, "target": target, "sql": sql})).collect();
+    json!({"protocol": 1, "dialect": "snowflake", "catalog": catalog, "writes": writes})
+}
+
+/// An answer in short: each edge as `parent -> child kind`, each gap as
+/// `gap reason relation column`, `-` for none, and its refusal as `refused reason`.
+fn outline(answer: &Value) -> Vec<String> {
+    let text = |value: &Value| value.as_str().unwrap_or("-").to_string();
+    let end = |end: &Value| format!("{}.{}", text(&end["relation"]), text(&end["column"]));
+    let all = |field: &str| answer[field].as_array().cloned().unwrap_or_default();
+    let edges = all("edges")
+        .into_iter()
+        .map(|edge| format!("{} -> {} {}", end(&edge["parent"]), end(&edge["child"]), text(&edge["kind"])));
+    let gaps = (all("gaps").into_iter())
+        .map(|gap| format!("gap {} {} {}", text(&gap["reason"]), text(&gap["relation"]), text(&gap["column"])));
+    let refusal = answer["refusal"]["reason"].as_str().map(|reason| format!("refused {reason}"));
+    edges.chain(gaps).chain(refusal).collect()
+}
+
+/// The outline of the answer to `sql` against `catalog`, its target `t`.
+fn trace(catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
+    outline(&respond(&request(catalog, &[("t", sql)]))[0])
 }
 
 fn read(path: &str) -> String {
@@ -49,7 +109,7 @@ fn describe_names_the_build() {
     let description = description();
     assert_eq!(description["tool"], "sql-lineage");
     assert_eq!(description["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(description["protocols"], json!([]));
+    assert_eq!(description["protocols"], json!([1]));
     assert_eq!(description["engine"]["name"], "polyglot-sql");
     // Cargo.toml pins the engine at =0.14.3, from crates.io.
     assert_eq!(description["engine"]["version"], "0.14.3");
@@ -77,11 +137,6 @@ fn describe_follows_the_protocol_document() {
 #[test]
 fn refuses_an_argument_other_than_describe() {
     assert_refused(&run(&["--explain"]), "--explain");
-}
-
-#[test]
-fn refuses_no_argument() {
-    assert_refused(&run::<&str>(&[]), "[]");
 }
 
 #[test]

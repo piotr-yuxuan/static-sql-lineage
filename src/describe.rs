@@ -4,6 +4,7 @@
 use serde::Serialize;
 
 use crate::dialect::Dialect;
+use crate::request::Protocol;
 
 /// The engine, by its name in `Cargo.lock`.
 const ENGINE: &str = "polyglot-sql";
@@ -14,8 +15,7 @@ const ENGINE: &str = "polyglot-sql";
 pub struct Description {
     tool: &'static str,
     version: &'static str,
-    /// None until a request is read.
-    protocols: Vec<u32>,
+    protocols: Vec<Protocol>,
     engine: Engine,
     dialects: Vec<Dialect>,
 }
@@ -44,7 +44,7 @@ impl Description {
         Description {
             tool: env!("CARGO_PKG_NAME"),
             version: env!("CARGO_PKG_VERSION"),
-            protocols: Vec::new(),
+            protocols: Protocol::READ.to_vec(),
             engine: Engine {
                 name: ENGINE,
                 version: field("version").expect("the engine's entry in Cargo.lock has a version"),

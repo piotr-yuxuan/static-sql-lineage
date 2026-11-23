@@ -39,7 +39,8 @@ Reuses: <operations and types at the base that the steps call or extend>
   definition, an aspiration or an intended gap.
 - Tests take their expectations from `docs/concepts.md`, the protocol and the
   catalogue of clauses carried over from the proof of concept, never from the
-  implementation; a scenario's test carries its identifier.
+  implementation; a scenario's test carries its identifier. A scenario's test is named
+  after its identifier, `.` and `-` becoming `_`.
 - The diagrams in `docs/diagrams/` are derived from `docs/concepts.md` and
   `docs/decisions.md`, drawn with the skill `diagram-design:diagram-design`; a plan
   that changes what one shows redraws it.
@@ -109,13 +110,16 @@ for relations in general; query, for a write; field, link, result.
 ## Layout
 
 ```
-LICENSE            the EUPL 1.2
-docs/decisions.md  what the tool is for: users, rulings, promises, scope, open questions
-docs/concepts.md   the kernel, its derived terms, and scenarios with their verdicts
-docs/diagrams/     views of the two documents above: the kernel, the use cases
-docs/protocol.md   how a caller runs the binary, and what it answers
-docs/work/         plans and their notes, not tracked
-src/               one module per home of `docs/concepts.md`
-tests/concepts.rs  the concept check
-tests/describe.rs  --describe, and the uses the binary refuses
+LICENSE              the EUPL 1.2
+docs/decisions.md    what the tool is for: users, rulings, promises, scope, open questions
+docs/concepts.md     the kernel, its derived terms, and scenarios with their verdicts
+docs/differences.md  where the code differs from a definition, each difference classed
+docs/diagrams/       views of the two documents above: the kernel, the use cases
+docs/protocol.md     how a caller runs the binary, and what it answers
+docs/work/           plans and their notes, not tracked
+src/                 one module per home of `docs/concepts.md`: relation, write, edge,
+                     answer, catalog, request, dialect, describe
+tests/concepts.rs    the concept check
+tests/protocol/      the binary run as a caller runs it: --describe and the uses it
+                     refuses, requests, scenarios, answers, edges, stars
 ```

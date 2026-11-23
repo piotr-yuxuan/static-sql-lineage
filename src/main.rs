@@ -2,22 +2,46 @@
 //! `sql-lineage`: the column lineage of SQL that writes relations.  How to run it is in
 //! `docs/protocol.md`.
 
+mod answer;
+mod catalog;
 mod describe;
 mod dialect;
+mod edge;
+mod relation;
+mod request;
+mod write;
 
 use std::ffi::OsString;
 use std::process::ExitCode;
 
 use describe::Description;
+use request::Request;
+
+/// The longest request read, in bytes: a project of 6,000 models is a few tens of
+/// megabytes.
+const LIMIT: u64 = 512 << 20;
 
 fn main() -> ExitCode {
     // An argument need not be Unicode; it is refused like any other.
     let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
-    if matches!(arguments.as_slice(), [only] if only == "--describe") {
-        let description = Description::of_build(include_str!("../Cargo.lock"));
-        println!("{}", serde_json::to_string(&description).expect("a description serialises"));
-        return ExitCode::SUCCESS;
+    let output = match arguments.as_slice() {
+        [] => Request::read(std::io::stdin().lock(), LIMIT)
+            .and_then(Request::respond)
+            .map(|response| serde_json::to_string(&response).expect("a response serialises")),
+        [only] if only == "--describe" => {
+            Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
+                .expect("a description serialises"))
+        }
+        _ => Err(format!("given {arguments:?}; the uses are --describe, or a request on standard input")),
+    };
+    match output {
+        Ok(output) => {
+            println!("{output}");
+            ExitCode::SUCCESS
+        }
+        Err(reason) => {
+            eprintln!("sql-lineage: {reason}");
+            ExitCode::from(2)
+        }
     }
-    eprintln!("sql-lineage: given {arguments:?}; the only use is --describe");
-    ExitCode::from(2)
 }
