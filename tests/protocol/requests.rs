@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, request};
+use super::{answers, assert_refused, read, request};
 
 /// A valid request: the catalog `s` of the column `a`, and the write `t`.
 fn valid() -> Value {
@@ -162,4 +162,15 @@ fn refuses_two_writes_with_one_id() {
 #[test]
 fn refuses_two_writes_with_one_target() {
     refused(&request(&[("s", &["a"])], &[("t", "select a from s"), ("T", "select a from s")]), "target T");
+}
+
+#[test]
+fn protocol_document_example_holds() {
+    let document = read("docs/protocol.md");
+    let example = |section: &str| {
+        let text = document.split(section).nth(1).and_then(|rest| rest.split("```json").nth(1)?.split("```").next());
+        serde_json::from_str::<Value>(text.expect("an example")).expect("the example is JSON")
+    };
+    let output = answers(example("## The request").to_string().as_bytes());
+    assert_eq!(serde_json::from_slice::<Value>(&output.stdout).ok(), Some(example("## The response")));
 }

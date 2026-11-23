@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::edge::{Edge, End, Kind};
+use crate::edge::{Edge, End, Kind, Reach};
 use crate::relation::Name;
 use crate::write::{Outputs, Write};
 
@@ -46,6 +46,7 @@ impl Gap {
 pub enum GapReason {
     AmbiguousRelation,
     AnalysisFailed,
+    UnattributedUse,
     UnknownRelation,
     UnresolvedReference,
     Wildcard,
@@ -132,6 +133,15 @@ impl Answer {
                 return answer.ended(gaps);
             }
         };
+        let reach = Reach::of(&query);
+        let unplaced = analysis.column_uses.iter().filter(|use_| reach.rows(use_).is_none());
+        gaps.extend(unplaced.map(|use_| {
+            let detail = format!("{:?} at {}: {}", use_.context, use_.scope_path, use_.expression_sql);
+            Gap::of(GapReason::UnattributedUse, detail)
+        }));
+        let rows: Vec<_> = (analysis.column_uses.iter().filter(|use_| reach.rows(use_) == Some(true)))
+            .flat_map(|use_| use_.references.iter().map(|used| (&used.reference, Kind::Rows)))
+            .collect();
         let found =
             (analysis.projections.iter().zip(&outputs)).enumerate().flat_map(|(place, (projection, output))| {
                 let child = End { relation: write.target.clone(), column: output.to_string() };
@@ -139,7 +149,7 @@ impl Answer {
                     .upstream
                     .iter()
                     .filter_map(|reference| Some((reference, Kind::of(reference.path_transform_kind?)?)));
-                values.map(move |(reference, kind)| {
+                values.chain(rows.iter().copied()).map(move |(reference, kind)| {
                     (place, output, Edge::of_reference(reference, kind, child.clone(), relations, catalog))
                 })
             });

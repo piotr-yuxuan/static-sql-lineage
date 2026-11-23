@@ -50,8 +50,89 @@ fn a_path_into_a_semi_structured_value_derives() {
 }
 
 #[test]
+fn a_where_decides_rows() {
+    assert_eq!(trace(&[("s", &["a", "b"])], "select a from s where b > 0"), ["s.a -> t.a copy", "s.b -> t.a rows"]);
+}
+
+#[test]
+fn a_join_condition_decides_rows() {
+    let found = trace(&[("s", &["k", "a"]), ("u", &["k", "c"])], "select s.a, u.c from s join u on s.k = u.k");
+    let expected = [
+        "s.a -> t.a copy",
+        "s.k -> t.a rows",
+        "u.k -> t.a rows",
+        "s.k -> t.c rows",
+        "u.c -> t.c copy",
+        "u.k -> t.c rows",
+    ];
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn group_by_decides_rows_of_the_other_columns() {
+    let found = trace(&[("s", &["k", "a"])], "select k, sum(a) as total from s group by k");
+    assert_eq!(found, ["s.k -> t.k copy", "s.a -> t.total derive", "s.k -> t.total rows"]);
+}
+
+#[test]
+fn having_decides_rows() {
+    let found = trace(&[("s", &["k", "a"])], "select k from s group by k having sum(a) > 0");
+    assert_eq!(found, ["s.a -> t.k rows", "s.k -> t.k copy"]);
+}
+
+#[test]
+fn qualify_decides_rows() {
+    let found =
+        trace(&[("s", &["a", "b", "c"])], "select a from s qualify row_number() over (partition by b order by c) = 1");
+    assert_eq!(found, ["s.a -> t.a copy", "s.b -> t.a rows", "s.c -> t.a rows"]);
+}
+
+#[test]
+fn order_by_under_a_limit_decides_rows() {
+    for limit in ["limit 1", "limit 1 offset 2", "fetch first 1 rows only"] {
+        let found = trace(&[("s", &["a", "b"])], &format!("select a from s order by b {limit}"));
+        assert_eq!(found, ["s.a -> t.a copy", "s.b -> t.a rows"], "{limit}");
+    }
+}
+
+#[test]
+fn a_lateral_table_functions_input_decides_rows() {
+    let found =
+        trace(&[("s", &["k", "items"])], "select s.k, f.value as v from s, lateral flatten(input => s.items) f");
+    assert_eq!(found, ["s.items -> t.k rows", "s.k -> t.k copy", "s.items -> t.v derive"]);
+}
+
+#[test]
+fn copy_outranks_rows() {
+    assert_eq!(trace(&[("s", &["a"])], "select a from s where a > 0"), ["s.a -> t.a copy"]);
+}
+
+#[test]
+fn derive_outranks_rows() {
+    assert_eq!(trace(&[("s", &["a"])], "select a + 1 as x from s where a > 0"), ["s.a -> t.x derive"]);
+}
+
+#[test]
 fn a_literal_or_count_has_no_parent() {
     assert!(trace(&[("s", &["a"])], "select 1 as one, count(*) as n, current_date as d from s").is_empty());
+}
+
+#[test]
+fn a_clause_in_a_cte_reaches_every_column() {
+    let sql = "with c as (select a from s where b > 0), d as (select a from c) select a from d";
+    assert_eq!(trace(&[("s", &["a", "b"])], sql), ["s.a -> t.a copy", "s.b -> t.a rows"]);
+}
+
+#[test]
+fn a_clause_in_an_unread_cte_is_a_gap() {
+    let sql = "with c as (select a from s), d as (select a from s where b > 0), e as (select a from d) select a from c";
+    assert_eq!(trace(&[("s", &["a", "b"])], sql), ["s.a -> t.a copy", "gap unattributed_use - -"]);
+}
+
+#[test]
+fn a_use_in_a_subquery_is_a_gap() {
+    let sql = "select a from s where exists (select 1 from u where u.k = s.a)";
+    assert_eq!(trace(&[("s", &["a"]), ("u", &["k"])], sql), ["s.a -> t.a copy", "gap unattributed_use - -"]);
 }
 
 #[test]

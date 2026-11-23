@@ -171,9 +171,11 @@ have. A reject scenario names an answer that must not be given.
   `DISTINCT`, nor from a literal, `count(*)` or `current_date`, which have no parent
   column.
 - avoid: link, flow, dependency, mapping.
-- home: `Edge`, `End`, `Kind`.
+- home: `Edge`, `End`, `Kind`, `Reach`.
 - operations:
   - `Kind::of`: the kind of a projection's upstream reference.
+  - `Reach::of`: where the clauses of one write's query reach.
+  - `Reach::rows`: whether a use of a column decides the rows of every output column.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.

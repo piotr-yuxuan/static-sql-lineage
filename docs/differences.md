@@ -8,6 +8,10 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   catalog's bare `OrderId`, which SQL Server's default collation, insensitive to case,
   accepts. The Relation entry asks for the dialect's own rules. Class: a defect of the
   code.
+- A clause inside a subquery, such as the `WHERE` of an `EXISTS` or an `IN` subquery,
+  gives an `unattributed_use` gap, where the Edge entry says that `IN` and `EXISTS`
+  decide rows: polyglot-sql does not say which projection or clause holds a subquery.
+  Plan 005 places it from the tree. Class: an aspiration.
 - A `*` leaves a write's output columns unknown, a `wildcard` gap, where the Edge entry
   says that a column selected through `*` is a `copy`. Class: an aspiration.
 - The filtering branch of `INTERSECT` and `EXCEPT` gives a `copy` to each output

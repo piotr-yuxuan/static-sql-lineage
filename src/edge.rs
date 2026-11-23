@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! Edges: how a column of a relation that a write reads reaches a column of its target.
 
+use polyglot_sql::expressions::{Expression, Select};
 use polyglot_sql::scope::SourceKind;
-use polyglot_sql::{ColumnReferenceFact, ReferenceConfidence, TransformKind};
+use polyglot_sql::traversal::ExpressionWalk;
+use polyglot_sql::{ColumnReferenceFact, ColumnUseContext, ColumnUseFact, ReferenceConfidence, TransformKind};
 use serde::Serialize;
 
 use crate::catalog::Catalog;
@@ -15,6 +17,7 @@ use crate::relation::RelationName;
 pub enum Kind {
     Copy,
     Derive,
+    Rows,
 }
 
 impl Kind {
@@ -74,6 +77,92 @@ impl Edge {
                 Ok(Some(Edge { parent, child, kind }))
             }
             _ => Err(unresolved()),
+        }
+    }
+}
+
+/// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
+/// keeps rows by their order, whether its outermost query does, and which CTEs of its
+/// outermost `WITH` that query reads, directly or through others of that `WITH`.
+pub struct Reach {
+    limited: bool,
+    outermost: bool,
+    read: Vec<usize>,
+}
+
+impl Reach {
+    /// The reach of the clauses of `query`. A CTE is matched by its name as the engine
+    /// matches it, ignoring case.
+    pub fn of(query: &Expression) -> Reach {
+        let limited = |select: &Select| {
+            select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
+        };
+        let (with, outermost) = match query {
+            Expression::Select(select) => (select.with.as_ref(), limited(select)),
+            Expression::Union(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
+            Expression::Intersect(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
+            Expression::Except(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
+            _ => (None, false),
+        };
+        let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
+        let named = |tree: &Expression| -> Vec<String> {
+            let one_part = |node: &Expression| match node {
+                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => {
+                    Some(table.name.name.to_ascii_lowercase())
+                }
+                _ => None,
+            };
+            tree.dfs().filter_map(one_part).collect()
+        };
+        // What the outermost query reads outside its CTEs' bodies, then what each CTE
+        // that it reads reads.
+        let mut pending = named(query);
+        for name in ctes.iter().flat_map(|cte| named(&cte.this)) {
+            if let Some(at) = pending.iter().position(|other| *other == name) {
+                pending.swap_remove(at);
+            }
+        }
+        let mut read = Vec::new();
+        while let Some(name) = pending.pop() {
+            let cte = ctes.iter().position(|cte| cte.alias.name.eq_ignore_ascii_case(&name));
+            if let Some(at) = cte.filter(|at| !read.contains(at)) {
+                read.push(at);
+                pending.extend(named(&ctes[at].this));
+            }
+        }
+        let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
+        Reach { limited: limited || outermost, outermost, read }
+    }
+
+    /// Whether `use_` decides the rows of every output column; none when where it
+    /// reaches cannot be placed. A clause reaches every output column from the outermost
+    /// query, its derived tables and its branches, and from a CTE of its outermost
+    /// `WITH` that it reads; not from a subquery, a table function or another CTE.
+    pub fn rows(&self, use_: &ColumnUseFact) -> Option<bool> {
+        let path = use_.scope_path.strip_prefix("root").and_then(|path| {
+            match path.strip_prefix(".ctes[").and_then(|rest| rest.split_once(']')) {
+                Some((at, rest)) => at.parse().ok().filter(|at| self.read.contains(at)).map(|_| rest),
+                None => Some(path),
+            }
+        });
+        let placed = path.is_some_and(|path| {
+            path.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
+        });
+        match use_.context {
+            ColumnUseContext::Join
+            | ColumnUseContext::Filter
+            | ColumnUseContext::Group
+            | ColumnUseContext::Having
+            | ColumnUseContext::Qualify
+            | ColumnUseContext::SetOperationFilter
+            | ColumnUseContext::TableFunctionInput => placed.then_some(true),
+            // The engine counts these in the upstream of the projection that holds them.
+            ColumnUseContext::WindowPartition
+            | ColumnUseContext::WindowOrder
+            | ColumnUseContext::WindowFrame
+            | ColumnUseContext::AggregateOrder => Some(false),
+            ColumnUseContext::Order if !self.limited => Some(false),
+            ColumnUseContext::Order => (self.outermost && use_.scope_path == "root").then_some(true),
         }
     }
 }
