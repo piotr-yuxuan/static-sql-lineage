@@ -118,3 +118,8 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - A column that `ALTER TABLE ... ADD` adds to a declared relation is not added to its
   columns, where the Catalog entry knows the columns that the scripts give a relation: the
   statement is skipped. Class: an aspiration.
+- In T-SQL, a statement that holds a national string with a quote in it, such as
+  `N'it''s'`, is refused `unparsed` once it is generated into a piece, through protocol 1
+  as through the commands, where the Write entry reads it: polyglot-sql generates the
+  string as `N'it's'`, which does not parse again. A bare query, which is not generated, is
+  read. Class: a defect of the code.
