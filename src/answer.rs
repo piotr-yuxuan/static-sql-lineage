@@ -144,8 +144,7 @@ impl Answer {
             }
             None => mapped.cloned().collect(),
         };
-        let ends: Vec<End> =
-            columns.iter().map(|column| End { relation: target.clone(), column: column.clone() }).collect();
+        let ends = End::of_columns(target, &columns);
         let placed = edges.into_iter().map(|edge| (ends.iter().position(|end| *end == edge.child), edge));
         let edges = Edge::ordered(placed.collect());
         (Answer { columns: known.map(|_| columns), edges, ..answer }.ended(gaps), false)
@@ -242,8 +241,7 @@ impl Answer {
         if query.dfs().any(starred) {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
-        let children: Vec<End> =
-            outputs.iter().map(|output| End { relation: target.clone(), column: output.clone() }).collect();
+        let children = End::of_columns(target, &outputs);
         let holders = Write::holders(sql, &query, dialect);
         let keys = Write::keys(sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&text, &query, &holders, keys.as_deref(), &order, &schema, dialect);

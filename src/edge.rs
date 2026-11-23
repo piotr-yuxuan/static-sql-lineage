@@ -89,6 +89,11 @@ impl End {
             _ => Err(unresolved()),
         }
     }
+
+    /// The ends of `columns`, columns of `relation`, in their order.
+    pub fn of_columns(relation: &RelationName, columns: &[Name]) -> Vec<End> {
+        columns.iter().map(|column| End { relation: relation.clone(), column: column.clone() }).collect()
+    }
 }
 
 /// `(parent relation, column) -> (child relation, column)`, with its kind.

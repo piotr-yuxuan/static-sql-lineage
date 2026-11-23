@@ -197,6 +197,7 @@ have. A reject scenario names an answer that must not be given.
   - `Reach::rows`: the output columns whose rows a use of a column decides.
   - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
   - `End::of`: the end that the engine's names of a relation and of its column resolve to.
+  - `End::of_columns`: the ends of a relation's columns, as a write's target gives them.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
   - `Edge::of_analysis`: the edges and gaps of a write's projections and uses, from the engine's analysis.
   - `Edge::ordered`: a write's edges in protocol 1's order, one per pair of ends.
