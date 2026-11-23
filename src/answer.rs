@@ -160,9 +160,9 @@ impl Answer {
         let children: Vec<End> =
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
         let holders = write.holders(&query, dialect);
-        let keys = write.keys(&query, &outputs, catalog, dialect, defaults);
-        let steps = Write::steps(&query, &holders, &keys, &order, &schema, dialect);
-        let reach = Reach::of(&query, holders, keys, steps);
+        let keys = write.keys(&query, catalog, dialect, defaults);
+        let steps = Write::steps(&query, &holders, keys.as_deref(), &order, &schema, dialect);
+        let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
         let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)

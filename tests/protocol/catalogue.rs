@@ -224,6 +224,28 @@ fn a_natural_left_key_copies_the_left() {
 }
 
 #[test]
+fn a_key_merged_in_a_cte_follows_its_join() {
+    let queries = [
+        "with o as (select k, a from s), c as (select k, x from u), \
+         f as (select * from o left join c using (k)) select * from f",
+        "select * from (select * from s left join u using (k)) d",
+    ];
+    let expected = [
+        "s.k -> t.k copy",
+        "u.k -> t.k rows",
+        "s.a -> t.a copy",
+        "s.k -> t.a rows",
+        "u.k -> t.a rows",
+        "s.k -> t.x rows",
+        "u.k -> t.x rows",
+        "u.x -> t.x copy",
+    ];
+    for sql in queries {
+        assert_eq!(trace(&[("s", &["k", "a"]), ("u", &["k", "x"])], sql), expected, "{sql}");
+    }
+}
+
+#[test]
 fn a_key_merged_across_three_sources_is_a_gap() {
     let sql = "select k from s join u using (k) join v using (k)";
     let found = trace(&[("s", &["k"]), ("u", &["k"]), ("v", &["k"])], sql);

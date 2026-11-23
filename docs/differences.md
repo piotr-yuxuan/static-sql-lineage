@@ -41,10 +41,11 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   the engine's lineage does not tell apart, such as a relation joined to itself, gives
   an `unattributed_use` gap for its output column, where the Edge entry gives each key
   the kind of its join's side. Class: an aspiration.
-- A key that `USING` or `NATURAL` merges in a CTE, a derived table or a branch, rather
-  than in the outermost `SELECT`, is a `derive` from both keys, as polyglot-sql reports
-  a `COALESCE`, where the Edge entry gives each key the kind of its join's side. Class:
-  a defect of the code.
+- A key that `USING` or `NATURAL` merges in a branch of a set operation or in a
+  subquery, or among sources whose columns are unknown, leaves the values of every
+  output column of the write to an `unattributed_use` gap, where the Edge entry gives
+  each key the kind of its join's side: the engine's lineage does not tell its sides
+  there. Class: an aspiration.
 - A subquery in a field of a `SELECT` other than its select list and the clauses that
   decide rows or order them, such as `LIMIT`, `TOP`, `DISTINCT ON` or a join's pivots,
   gives an `unattributed_use` gap for the uses in it. Class: an aspiration.

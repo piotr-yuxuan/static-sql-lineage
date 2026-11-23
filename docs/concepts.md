@@ -123,14 +123,14 @@ have. A reject scenario names an answer that must not be given.
   Whether `DELETE ... WHERE` is a write is open (`decisions.md`, Q4).
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`, `Holder`.
+- home: `Write`, `Outputs`, `Holder`, `Key`.
 - operations:
   - `Write::query`: the write's query, or its refusal.
   - `Write::relations`: the relations that the write's query reads.
   - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
-  - `Write::keys`: the joins that merge each output column, a key of their `USING` or `NATURAL`.
+  - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the

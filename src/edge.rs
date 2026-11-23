@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::answer::{Gap, GapReason};
 use crate::catalog::Catalog;
 use crate::relation::RelationName;
-use crate::write::Holder;
+use crate::write::{Holder, Key};
 
 /// How a parent column reaches a child column, in the order in which one is kept when
 /// several apply.
@@ -169,26 +169,29 @@ impl Edge {
 /// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
 /// keeps rows by their order, whether its outermost query does, which CTEs of its
 /// outermost `WITH` that query reads, directly or through others of that `WITH`, the
-/// places of its output columns, the holders of its subqueries, the joins that merge
-/// each output column, and the engine's lineage of each, where the write needs it.
+/// places of its output columns, the holders of its subqueries, the keys that its joins
+/// merge, if their sides are told, and the engine's lineage of each output column, where
+/// the write needs it.
 pub struct Reach {
     limited: bool,
     outermost: bool,
     read: Vec<usize>,
     every: Vec<usize>,
     holders: Vec<(String, Option<Holder>)>,
-    keys: Vec<Vec<(JoinKind, Option<RelationName>)>>,
+    keys: Option<Vec<Key>>,
     steps: Vec<Option<LineageNode>>,
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`, its subqueries held as `holders` says, each of
-    /// its output columns merged by the joins of `keys`, and their lineage `steps`, or none.
-    /// A CTE is matched by its name as the engine matches it, ignoring case.
+    /// The reach of the clauses of `query`, which has `outputs` output columns, its
+    /// subqueries held as `holders` says, the keys that its joins merge `keys`, and the
+    /// lineage of its output columns `steps`, or none. A CTE is matched by its name as the
+    /// engine matches it, ignoring case.
     pub fn of(
         query: &Expression,
+        outputs: usize,
         holders: Vec<(String, Option<Holder>)>,
-        keys: Vec<Vec<(JoinKind, Option<RelationName>)>>,
+        keys: Option<Vec<Key>>,
         steps: Vec<Option<LineageNode>>,
     ) -> Reach {
         let limited = |select: &Select| {
@@ -228,7 +231,7 @@ impl Reach {
             }
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
-        let every = (0..keys.len()).collect();
+        let every = (0..outputs).collect();
         Reach { limited: limited || outermost, outermost, read, every, holders, keys, steps }
     }
 
@@ -291,9 +294,10 @@ impl Reach {
     /// The kind with which a projection's reference of `kind`, from `parent`, reaches the
     /// output column at `place`, by the engine's lineage of that column where the write
     /// needs it: rows through the filtering branch of an `INTERSECT` or an `EXCEPT`; for a
-    /// key that a join merges, the kind of the side that it comes through; none where the
-    /// lineage does not say, such as for a key merged across more than two sources, or
-    /// whose right side the lineage does not tell from its left.
+    /// key that a join merges, the kind of the side that it comes through, in the
+    /// outermost `SELECT` or the CTE or derived table whose step the lineage names; none
+    /// where the lineage does not say, such as for a key merged across more than two
+    /// sources, or whose right side the lineage does not tell from its left.
     pub fn kind(
         &self,
         place: usize,
@@ -302,37 +306,49 @@ impl Reach {
         relations: &[RelationName],
         catalog: &Catalog,
     ) -> Option<Kind> {
+        let keys = self.keys.as_ref()?;
         let Some(step) = self.steps.get(place) else { return Some(kind) };
         let step = step.as_ref()?;
-        // A merged key's right side is the step that names the join's relation or CTE.
-        let sides = match self.keys[place].as_slice() {
-            [] => None,
-            [(join, Some(right))]
-                if step.downstream.iter().filter(|first| right.reported_as(&first.source_name)).count() == 1 =>
-            {
-                Some((Kind::sides(*join)?, right))
-            }
-            _ => return None,
-        };
-        let side = |first: &LineageNode| {
-            sides.map(|((left, right), joined)| if joined.reported_as(&first.source_name) { right } else { left })
-        };
         let leaf = |node: &LineageNode| match (&node.source_kind, &node.expression) {
             (SourceKind::Table, Expression::Column(column)) => {
                 End::of(&node.source_name, &column.name.name, relations, catalog).ok().flatten()
             }
             _ => None,
         };
-        let mut pending: Vec<_> = step.downstream.iter().map(|first| (first, side(first))).collect();
+        // The keys merged into the column of `node`: the outermost `SELECT`'s, at the
+        // lineage's root, or those of the CTE or derived table that its step names.
+        let merged = |node: &LineageNode, root: bool| -> Vec<&Key> {
+            let step = matches!(node.source_kind, SourceKind::Cte | SourceKind::DerivedTable);
+            let owns = |key: &&Key| match &key.owner {
+                None => root,
+                Some(owner) => step && owner.reported_as(&node.source_name),
+            };
+            keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect()
+        };
+        let mut pending = vec![(step, None, true)];
         let mut reached = Vec::new();
-        while let Some((node, through)) = pending.pop() {
+        while let Some((node, through, root)) = pending.pop() {
             let filtering =
                 node.set_branch.filter(|branch| branch.ordinal == 1 && branch.operator != SetOperator::Union);
             let through = through.max(filtering.map(|_| Kind::Rows));
             if leaf(node).as_ref() == Some(parent) {
                 reached.push(through.unwrap_or(kind));
             }
-            pending.extend(node.downstream.iter().map(|next| (next, through)));
+            // A merged key's right side is the step that names the join's relation or CTE.
+            let names = |right: &RelationName, next: &LineageNode| right.reported_as(&next.source_name);
+            let sides = match merged(node, root).as_slice() {
+                [] => None,
+                [Key { join, right: Some(right), .. }]
+                    if node.downstream.iter().filter(|next| names(right, next)).count() == 1 =>
+                {
+                    Some((Kind::sides(*join)?, right))
+                }
+                _ => return None,
+            };
+            pending.extend(node.downstream.iter().map(|next| {
+                let side = sides.map(|((left, right), joined)| if names(joined, next) { right } else { left });
+                (next, through.max(side), false)
+            }));
         }
         Some(reached.into_iter().min().unwrap_or(kind))
     }

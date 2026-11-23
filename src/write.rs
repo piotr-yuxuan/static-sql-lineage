@@ -45,6 +45,16 @@ pub enum Holder {
     Column(Name, Name),
 }
 
+/// A key that a join merges in a `SELECT` of a write's query: the CTE or derived table
+/// whose select it is, none for the outermost; the column that its list names for it; the
+/// kind of the join; and the relation or CTE that the join joins, when it joins one.
+pub struct Key {
+    pub owner: Option<Name>,
+    pub column: Name,
+    pub join: JoinKind,
+    pub right: Option<RelationName>,
+}
+
 impl Write {
     /// The write's query, the outermost one when it is parenthesised, as the engine
     /// reads it; refused when it is not one statement, or not a query.
@@ -193,66 +203,76 @@ impl Write {
         found
     }
 
-    /// For each of the output columns that `outputs` names, the joins of the outermost
-    /// `SELECT` of `query` that merge it, each by its kind and the relation or CTE that it
-    /// joins: a key that its `USING` names, or that its `NATURAL` finds on both its sides,
-    /// selected bare, aliased or not, or through a `*`.
-    pub fn keys(
-        &self,
-        query: &Expression,
-        outputs: &[Name],
-        catalog: &Catalog,
-        dialect: Dialect,
-        defaults: &[Name],
-    ) -> Vec<Vec<(JoinKind, Option<RelationName>)>> {
+    /// The keys that the joins of `query` merge in its outermost `SELECT`, a CTE's or a
+    /// derived table's, selected bare, aliased or not, or through a `*`; none when a join
+    /// merges a key in a branch of a set operation or in a subquery, or among sources whose
+    /// columns are unknown, where the sides of its keys are not told.
+    pub fn keys(&self, query: &Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Option<Vec<Key>> {
         let sql: Vec<char> = self.sql.chars().collect();
-        let Expression::Select(select) = query else { return vec![Vec::new(); outputs.len()] };
-        let ctes: Vec<&Cte> = select.with.iter().flat_map(|with| &with.ctes).collect();
-        let Ok(columns) = joined(select, &ctes, &sql, catalog, dialect, defaults) else {
-            return vec![Vec::new(); outputs.len()];
-        };
-        let starred =
-            select_list(select).any(|expression| matches!(expression, Expression::Star(star) if star.table.is_none()));
+        let root = build_scope(query);
+        let ctes: Vec<&Cte> = (root.cte_scopes.iter())
+            .filter_map(|cte| match &cte.expression {
+                Expression::Cte(cte) => Some(&**cte),
+                _ => None,
+            })
+            .collect();
         let bare = |expression: &Expression| match expression {
             Expression::Column(column) if column.table.is_none() => Name::of(&column.name, &sql, dialect),
             _ => None,
         };
-        let joins = |join: &Join| match &join.this {
+        let right = |join: &Join| match &join.this {
             Expression::Table(table) => RelationName::of(table, &sql, dialect, defaults),
             _ => None,
         };
-        (outputs.iter())
-            .map(|output| {
-                let named =
-                    select_list(select).find(|expression| name(expression, &sql, dialect).as_ref() == Some(output));
-                let key = match named {
-                    Some(Expression::Alias(alias)) => bare(&alias.this),
-                    Some(column) => bare(column),
-                    None => starred.then(|| output.clone()),
-                };
-                let merged = columns.iter().find(|(column, _)| key.as_ref() == Some(column));
-                let merged = merged.into_iter().flat_map(|(_, joins)| joins.iter().map(|&at| &select.joins[at]));
-                merged.map(|join| (join.kind, joins(join))).collect()
-            })
-            .collect()
+        let mut keys = Vec::new();
+        for (path, scope, owner) in scopes(&root, &sql, dialect) {
+            let query = match &scope.expression {
+                Expression::Cte(cte) => &cte.this,
+                query => query,
+            };
+            let Expression::Select(select) = query else { continue };
+            if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
+                continue;
+            }
+            let placed = !["subqueries[", "udtfs[", "branches["].iter().any(|kind| path.contains(kind));
+            let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok().filter(|_| placed)?;
+            // Each column of the list with the column of the sources that it selects.
+            let listed = select_list(select).flat_map(|expression| match expression {
+                Expression::Star(star) if star.table.is_none() => {
+                    columns.iter().map(|(column, _)| (column.clone(), column.clone())).collect()
+                }
+                Expression::Alias(alias) => {
+                    name(expression, &sql, dialect).zip(bare(&alias.this)).into_iter().collect()
+                }
+                column => name(column, &sql, dialect).zip(bare(column)).into_iter().collect::<Vec<_>>(),
+            });
+            for (named, selected) in listed {
+                let merged = columns.iter().filter(|(column, _)| *column == selected).flat_map(|(_, joins)| joins);
+                keys.extend(merged.map(|&at| {
+                    let (join, right) = (select.joins[at].kind, right(&select.joins[at]));
+                    Key { owner: owner.clone(), column: named.clone(), join, right }
+                }));
+            }
+        }
+        Some(keys)
     }
 
     /// The engine's lineage of each output column of `query`, the engine's projection
     /// that `order` gives for it, against `schema`, none where the engine gives none; for a
-    /// write that holds an `INTERSECT` or an `EXCEPT`, a key that `keys` says a join
-    /// merges, or a subquery in a CTE's or a derived table's select list, as `holders`
-    /// says, and for no other.
+    /// write that holds an `INTERSECT` or an `EXCEPT`, a key that a join merges, as `keys`
+    /// says, or a subquery in a CTE's or a derived table's select list, as `holders` says,
+    /// and for no other.
     pub fn steps(
         query: &Expression,
         holders: &[(String, Option<Holder>)],
-        keys: &[Vec<(JoinKind, Option<RelationName>)>],
+        keys: Option<&[Key]>,
         order: &[usize],
         schema: &ValidationSchema,
         dialect: Dialect,
     ) -> Vec<Option<LineageNode>> {
         let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
         let held = holders.iter().any(|(_, holder)| matches!(holder, Some(Holder::Column(..))));
-        if !(filtering || held || keys.iter().any(|joins| !joins.is_empty())) {
+        if !(filtering || held || keys.is_some_and(|keys| !keys.is_empty())) {
             return Vec::new();
         }
         let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
@@ -322,12 +342,8 @@ fn joined<'a>(
     }
     for (at, join) in select.joins.iter().enumerate() {
         let right = columns_of(&join.this)?;
-        let natural = matches!(
-            join.kind,
-            JoinKind::Natural | JoinKind::NaturalLeft | JoinKind::NaturalRight | JoinKind::NaturalFull
-        );
         let using: Vec<Name> = join.using.iter().filter_map(|key| Name::of(key, sql, dialect)).collect();
-        let merges = |column: &Name| using.contains(column) || natural && right.contains(column);
+        let merges = |column: &Name| using.contains(column) || natural(join) && right.contains(column);
         for (column, joins) in &mut columns {
             if merges(column) {
                 joins.push(at);
@@ -446,6 +462,11 @@ fn listed<'a>(
         names.extend(columns);
     }
     Ok(names)
+}
+
+/// Whether `join` is `NATURAL`, which merges the columns that both its sides have.
+fn natural(join: &Join) -> bool {
+    matches!(join.kind, JoinKind::Natural | JoinKind::NaturalLeft | JoinKind::NaturalRight | JoinKind::NaturalFull)
 }
 
 /// The expressions of the select list of `select`, each out of the `Annotated` that the
