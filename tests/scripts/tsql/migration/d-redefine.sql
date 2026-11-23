@@ -1,0 +1,2 @@
+CREATE OR ALTER VIEW dbo.vA AS SELECT Id FROM dbo.Stage2
+GO

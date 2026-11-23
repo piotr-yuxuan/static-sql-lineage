@@ -5,6 +5,8 @@
 
 use std::process::Output;
 
+use serde_json::{Value, json};
+
 use super::{assert_refused, binary, run};
 
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
@@ -208,4 +210,194 @@ fn a_directory_is_read_in_path_order() {
         "skipped: 0",
     ];
     assert_eq!(tsql(&["tests/scripts/tsql/order"]), expected);
+}
+
+/// The ids of the writes that `graph` prints for `paths` in `dialect`, with `options`.
+fn ordered(dialect: &str, options: &[&str], paths: &[&str]) -> Vec<String> {
+    let lines = printed(&[&["--dialect", dialect], options, paths].concat());
+    ids(&lines).into_iter().map(str::to_string).collect()
+}
+
+/// Where `id` comes among `ids`.
+fn place(ids: &[String], id: &str) -> usize {
+    ids.iter().position(|other| other == id).unwrap_or_else(|| panic!("{id} not among {ids:?}"))
+}
+
+#[test]
+fn a_database_option_without_a_schema_takes_the_usual_one() {
+    // `vTop` reads the database's view `vBase`, named without a schema: it comes after it only
+    // when the usual schema completes that name, `dbo`, `PUBLIC` or `main`.
+    let scripts = [
+        ("tsql", "tests/scripts/tsql/10-defaults.sql", "Sales", 3),
+        ("snowflake", "tests/scripts/snowflake/03-defaults.sql", "SALES", 2),
+        ("duckdb", "tests/scripts/duckdb/02-defaults.sql", "sales", 2),
+    ];
+    for (dialect, path, database, line) in scripts {
+        let (top, base) = (format!("{path}:1:1"), format!("{path}:{line}:1"));
+        assert_eq!(ordered(dialect, &["--database", database], &[path]), [base.clone(), top.clone()], "{dialect}");
+        assert_eq!(ordered(dialect, &[], &[path]), [top, base], "{dialect}");
+    }
+}
+
+#[test]
+fn use_changes_the_defaults() {
+    // After `USE [Sales]`, `dbo.vBase` is the view that `vTop` reads, written before it.
+    let path = "tests/scripts/tsql/09-use.sql";
+    let found = ordered("tsql", &[], &[path]);
+    assert!(place(&found, &format!("{path}:9:1")) < place(&found, &format!("{path}:3:1")), "{found:?}");
+}
+
+#[test]
+fn use_without_a_schema_takes_the_usual_one() {
+    // After `USE [Sales]`, `vPlain` is `Sales.dbo.vPlain`, which `vBare` reads.
+    let path = "tests/scripts/tsql/09-use.sql";
+    let found = ordered("tsql", &[], &[path]);
+    assert!(place(&found, &format!("{path}:11:1")) < place(&found, &format!("{path}:5:1")), "{found:?}");
+}
+
+#[test]
+fn snowflake_use_of_a_qualified_schema() {
+    // `USE SCHEMA SALES.MART` sets both defaults; `USE SCHEMA STAGE` keeps the database.
+    let path = "tests/scripts/snowflake/02-use.sql";
+    let expected = [
+        format!("{path}:3:1 SALES.MART.V_BASE <- SALES.RAW.ORDERS"),
+        format!("{path}:2:1 V_TOP <- V_BASE"),
+        format!("{path}:6:1 V_SRC <- SALES.RAW.ORDERS"),
+        format!("{path}:5:1 V_LOW <- SALES.STAGE.V_SRC"),
+        "skipped: 0".to_string(),
+    ];
+    assert_eq!(printed(&["--dialect", "snowflake", path]), expected);
+}
+
+/// The path of the migration script `name`.
+fn migration(name: &str) -> String {
+    format!("tests/scripts/tsql/migration/{name}.sql")
+}
+
+#[test]
+fn graph_orders_writes_after_what_they_read() {
+    // Given in the order b, a, c, d: the writes of `dbo.Fact`, the cycle, the two writes of
+    // `vA`, then `vB`, which reads `vA`, then `vC`, which reads `dbo.Fact` and `vB`.
+    let [a, b, c, d] = ["a-load", "b-views", "c-base", "d-redefine"].map(migration);
+    let expected = [
+        format!("{a}:1:1 dbo.Fact <- dbo.Stage"),
+        format!("{a}:2:1 dbo.Fact <- dbo.Stage2"),
+        format!("{a}:3:1 dbo.Fact <- dbo.Fact"),
+        format!("{a}:5:1 dbo.Loop1 <- dbo.Loop2"),
+        format!("{a}:6:1 dbo.Loop2 <- dbo.Loop1"),
+        format!("{c}:3:1 [dbo].[vA] <- dbo.Stage"),
+        format!("{d}:1:1 dbo.vA <- dbo.Stage2"),
+        format!("{b}:1:1 dbo.vB <- dbo.vA"),
+        format!("{b}:3:1 [dbo].[vC] <- dbo.Fact, dbo.vB"),
+        format!("cycle: {a}:5:1, {a}:6:1 (dbo.Loop1, dbo.Loop2)"),
+        format!("replaced_twice: [dbo].[vA] ({c}:3:1, {d}:1:1)"),
+        "skipped: 1".to_string(),
+    ];
+    assert_eq!(tsql(&[&b, &a, &c, &d]), expected);
+}
+
+#[test]
+fn graph_orders_a_contribute_write_to_an_undeclared_target() {
+    // No catalog knows `dbo.Fact`: the `DELETE` still reads `vGone` in its condition.
+    let path = migration("g-undeclared");
+    let expected = [
+        format!("{path}:3:1 dbo.vGone <- dbo.Stage"),
+        format!("{path}:1:1 dbo.Fact <- dbo.Fact, dbo.vGone"),
+        "skipped: 0".to_string(),
+    ];
+    assert_eq!(tsql(&[&path]), expected);
+}
+
+#[test]
+fn graph_keeps_reading_order_where_free() {
+    // `vY` and `vZ` are free first: `vY`, the earlier, comes first, then `vZ`, then `vX`.
+    let path = migration("e-free");
+    let expected = [
+        format!("{path}:3:1 dbo.vY <- dbo.Orders"),
+        format!("{path}:5:1 dbo.vZ <- dbo.Orders"),
+        format!("{path}:1:1 dbo.vX <- dbo.vZ"),
+        "skipped: 0".to_string(),
+    ];
+    assert_eq!(tsql(&[&path]), expected);
+}
+
+#[test]
+fn graph_reports_a_cycle() {
+    // Two inserts that read each other's target, in reading order, at the earlier's turn.
+    let path = migration("a-load");
+    let found = tsql(&[&path]);
+    let ids = [1, 2, 3, 5, 6].map(|line| format!("{path}:{line}:1"));
+    assert_eq!(self::ids(&found), ids);
+    assert_eq!(found[5..], [format!("cycle: {path}:5:1, {path}:6:1 (dbo.Loop1, dbo.Loop2)"), "skipped: 0".to_string()]);
+}
+
+#[test]
+fn graph_puts_a_write_of_its_own_target_after_earlier_ones() {
+    // The `UPDATE` reads its own target and waits only on the `SELECT ... INTO` before it;
+    // the `INSERT` waits on both; the view that reads `dbo.Fact`, on all three.
+    let path = migration("f-own");
+    let expected = [
+        format!("{path}:3:1 dbo.Fact <- dbo.Stage"),
+        format!("{path}:4:1 dbo.Fact <- dbo.Fact"),
+        format!("{path}:5:1 dbo.Fact <- dbo.Stage2"),
+        format!("{path}:1:1 dbo.vFact <- dbo.Fact"),
+        "skipped: 0".to_string(),
+    ];
+    assert_eq!(tsql(&[&path]), expected);
+}
+
+#[test]
+fn graph_reports_a_target_replaced_twice() {
+    // `vA` is created, then created or altered: reported, and `vB` comes after both.
+    let [b, c, d] = ["b-views", "c-base", "d-redefine"].map(migration);
+    let expected = [
+        format!("{c}:3:1 [dbo].[vA] <- dbo.Stage"),
+        format!("{d}:1:1 dbo.vA <- dbo.Stage2"),
+        format!("{b}:1:1 dbo.vB <- dbo.vA"),
+        format!("{b}:3:1 [dbo].[vC] <- dbo.Fact, dbo.vB"),
+        format!("replaced_twice: [dbo].[vA] ({c}:3:1, {d}:1:1)"),
+        "skipped: 1".to_string(),
+    ];
+    assert_eq!(tsql(&[&b, &c, &d]), expected);
+}
+
+#[test]
+fn graph_counts_skipped_statements() {
+    // SSMS's table script: two `SET`s, `CREATE TABLE`, `ALTER TABLE` and an extended
+    // property's `EXEC`; its `USE` sets the defaults. Counted across files.
+    let (tables, views) = ("tests/scripts/tsql/01-tables.sql", "tests/scripts/tsql/02-views.sql");
+    assert_eq!(tsql(&[tables]), ["skipped: 5"]);
+    let both = [format!("{views}:12:1 [dbo].[vCustomer] <- [dbo].[Customer]"), "skipped: 9".to_string()];
+    assert_eq!(tsql(&[tables, views]), both);
+}
+
+#[test]
+fn graph_json_lists_writes_and_findings() {
+    let [a, c, d] = ["a-load", "c-base", "d-redefine"].map(migration);
+    let (refused, cp1252) = ("tests/scripts/tsql/08-refused.sql", "tests/scripts/tsql/14-cp1252.sql");
+    let output = graph(&["--dialect", "tsql", "--json", &a, &c, &d, refused, cp1252]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let mut graph: Value = serde_json::from_slice(&output.stdout).expect("the output is JSON");
+    // polyglot's message, text for a person.
+    let message = graph["findings"][0]["detail"].take();
+    assert!(message.as_str().is_some_and(|message| message.contains("Expected Into")), "{message}");
+    let write = |id: String, target: &str, read: &str| json!({"id": id, "target": target, "reads": [read]});
+    let writes = [
+        write(format!("{a}:1:1"), "dbo.Fact", "dbo.Stage"),
+        write(format!("{a}:2:1"), "dbo.Fact", "dbo.Stage2"),
+        write(format!("{a}:3:1"), "dbo.Fact", "dbo.Fact"),
+        write(format!("{a}:5:1"), "dbo.Loop1", "dbo.Loop2"),
+        write(format!("{a}:6:1"), "dbo.Loop2", "dbo.Loop1"),
+        write(format!("{c}:3:1"), "[dbo].[vA]", "dbo.Stage"),
+        write(format!("{d}:1:1"), "dbo.vA", "dbo.Stage2"),
+        write(format!("{refused}:1:1"), "dbo.StageA", "dbo.StageA"),
+        write(format!("{refused}:4:1"), "dbo.StageA", "dbo.StageA"),
+    ];
+    let findings = [
+        json!({"kind": "refused", "place": format!("{refused}:2:1"), "detail": null}),
+        json!({"kind": "not_read", "place": cp1252, "detail": "not UTF-8, nor UTF-16 after a byte order mark"}),
+        json!({"kind": "cycle", "writes": [format!("{a}:5:1"), format!("{a}:6:1")], "relations": ["dbo.Loop1", "dbo.Loop2"]}),
+        json!({"kind": "replaced_twice", "relation": "[dbo].[vA]", "writes": [format!("{c}:3:1"), format!("{d}:1:1")]}),
+    ];
+    assert_eq!(graph, json!({"writes": writes, "findings": findings, "skipped": 3}));
 }

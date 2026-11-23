@@ -7,6 +7,7 @@ use std::ops::Range;
 
 use polyglot_sql::expressions::{ExecuteStatement, Expression, Literal};
 use polyglot_sql::{Token, TokenType, generate, parse_one};
+use serde::Serialize;
 
 use crate::dialect::Dialect;
 use crate::relation::{Defaults, Name, RelationName};
@@ -61,19 +62,27 @@ const WRITES: [(TokenType, &[TokenType], &[TokenType]); 9] = [
 ];
 
 /// A write found in a script: its id, the place of its first token in its file; its
-/// target, as its statement names it; and the relations that its pieces read, as they
-/// name them, without repeats.
+/// target, as its statement names it; whether it replaces its target; and the relations
+/// that its pieces read, as they name them, without repeats.
+#[derive(Serialize)]
 pub struct Scripted {
     pub id: String,
     pub target: RelationName,
+    #[serde(skip)]
+    pub replaces: bool,
     pub reads: Vec<RelationName>,
 }
 
-/// What a reader finds in a script besides its writes, with its place: a statement
-/// refused, with polyglot's message, or text not read.
+/// What the reading of scripts finds besides their writes: a statement refused, with
+/// polyglot's message, or text not read, each with its place; once the writes are ordered,
+/// a cycle of writes, with the relations that they write, or a relation replaced twice.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Finding {
     Refused { place: String, detail: String },
     NotRead { place: String, detail: String },
+    Cycle { writes: Vec<String>, relations: Vec<RelationName> },
+    ReplacedTwice { relation: RelationName, writes: Vec<String> },
 }
 
 /// A file read as a script: its writes, in reading order, its findings, and the number of
@@ -243,7 +252,7 @@ impl Script {
             });
             let mut seen = HashSet::new();
             let reads = reads.filter(|relation| seen.insert(relation.clone())).collect();
-            self.writes.push(Scripted { id, target, reads });
+            self.writes.push(Scripted { id, target, replaces: read.replaces, reads });
             return;
         }
         // Dynamic SQL: `EXEC` of a string or a variable, or of `sp_executesql`, bare or under

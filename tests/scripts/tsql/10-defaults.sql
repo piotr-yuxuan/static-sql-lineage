@@ -1,0 +1,4 @@
+CREATE VIEW dbo.vTop AS SELECT Id FROM Sales.dbo.vBase
+GO
+CREATE VIEW vBase AS SELECT Id FROM dbo.Orders
+GO

@@ -8,6 +8,7 @@ mod command;
 mod describe;
 mod dialect;
 mod edge;
+mod graph;
 mod relation;
 mod request;
 mod script;

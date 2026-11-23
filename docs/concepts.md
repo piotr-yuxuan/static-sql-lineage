@@ -304,10 +304,10 @@ have. A reject scenario names an answer that must not be given.
 |---|---|---|
 | base relation | a relation that no write of the request has as its target; its columns come from the catalog. Avoid: source | |
 | lineage | the edges of all the answers to one request; where several writes give one pair of columns, the first of `copy`, `derive`, `rows` (`decisions.md`, R12) | |
-| graph | the relations and the writes between them: a write links its target to each relation its query reads | |
+| graph | the relations and the writes between them: a write links its target to each relation its query reads | `Graph`, `Search` |
 | trace | a column's edges upstream, followed through earlier writes to base relations | |
 | uses | a column's edges downstream | |
-| migration order | an order of the writes in which each comes after the writes of the relations it reads; a cycle is reported | |
+| migration order | an order of the writes in which each comes after every write of each relation that it reads, other than its own target, and after the writes of its own target that precede it in reading order; among the strongly connected components of these dependencies whose dependencies are all ordered, the one with the earliest write in reading order comes next, its writes in reading order; a component of more than one write is a cycle, reported with its writes and the relations that they write, and a relation with more than one replace write is reported with those writes | |
 | outline | a short text form of one write's answer, with its locations | |
 
 ## Context
