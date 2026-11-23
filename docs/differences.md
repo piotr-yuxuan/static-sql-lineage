@@ -65,8 +65,9 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   write as `duplicate_column`, as a Snowflake view refuses duplicate names. Class: an
   intended gap.
 - T-SQL's `INSERT t (...) SELECT ...`, without `INTO`, as SQL Server's scripts write it,
-  and `DELETE FROM t FROM t JOIN ...` are refused `unparsed`, where the Write entry reads
-  them as writes: polyglot-sql parses neither. Class: a defect of the code.
+  and `DELETE FROM t FROM t JOIN ...` are refused `unparsed`, and reported as refused
+  writes by `graph`, where the Write entry reads them as writes: polyglot-sql parses
+  neither. Class: a defect of the code.
 - Snowflake's `INSERT ALL`, which writes several targets, and DuckDB's
   `INSERT ... BY NAME`, which maps its columns by name, are refused `not_a_query`, where
   the Write entry reads `INSERT ... SELECT` as a write. Class: an aspiration.
@@ -82,3 +83,18 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   matches CTE names ignoring ASCII case, so a write that reads `"c"` while the catalog
   declares it may take the CTE's columns as its parents, with no gap. Class: a defect of
   the code.
+- Dynamic SQL other than SSMS's existence check, such as `EXEC` of a string or of a
+  variable, or `sp_executesql` of a variable, is reported by `graph` as not read, where
+  the Write entry reads each statement that writes a relation. Class: an aspiration.
+- A user's default schema other than the dialect's usual one is known from `--schema`
+  alone: `--database` without `--schema`, and a `USE` of a database, take `dbo`,
+  `PUBLIC` or `main`, where the Relation entry completes a name with the defaults that
+  the SQL is read under. Class: an intended gap.
+- In a script in T-SQL, a statement that polyglot-sql refuses ends before the next line
+  that starts with a statement's first word, so that its continuation, such as the
+  `SELECT` of a refused `INSERT`, is read as a statement of its own, where the Write
+  entry reads one statement as one write. Class: a defect of the code.
+- SQLCMD variables, such as `$(DatabaseName)` in `USE [$(DatabaseName)]`, are left
+  unresolved, so that the name that holds one completes the names after it, where the
+  Relation entry completes them with the database that the variable names. Class: an
+  intended gap.
