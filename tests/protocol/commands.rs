@@ -773,3 +773,20 @@ fn commands_give_json_on_request() {
     let expected = json!({"id": view(5), "target": "dbo.vOther", "mode": "replace", "place": "5:1", "clauses": clauses, "answer": answer});
     assert_eq!(outline, expected);
 }
+
+#[test]
+fn uses_reports_the_scripts_refused_writes() {
+    // `dbo.Bad` reads `dbo.O` but does not parse, and takes the views after it with it: no edge
+    // is known, and the walk, either way, lists the refused write, which may read the column.
+    let path = "tests/scripts/tsql/23-refused-reader.sql";
+    for name in ["uses", "trace"] {
+        let found = walked(name, "dbo.O.Id", &[path]);
+        assert!(matches!(found.as_slice(), [line] if line.starts_with(&format!("refused: {path}:2:1 "))), "{found:?}");
+    }
+    let found = lines(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
+    let walk: Value = serde_json::from_str(&found.join("\n")).expect("the output is JSON");
+    let refused = &walk["refusals"][0];
+    assert_eq!((&walk["edges"], &refused["place"]), (&json!([]), &json!(format!("{path}:2:1"))));
+    assert!(refused["detail"].is_string() && refused.get("write").is_none(), "{walk}");
+    assert_eq!(walk["refusals"].as_array().map(Vec::len), Some(1));
+}

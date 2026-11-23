@@ -280,8 +280,11 @@ children, breadth first: each column once, each edge once, at the depth of its f
 reaching, from 1. A write is met at a column of its target, for `trace`, or of a relation
 that it reads, for `uses`; it gives its refusal, and its gaps on the whole write or on a
 column of its target that the walk follows, so that a write that is refused, or whose
-upstream is unknown, is not taken for a relation that no write fills. A cycle is a set of
-columns that the walk follows, each of which reaches the others, or one that reaches itself.
+upstream is unknown, is not taken for a relation that no write fills. A walk also lists
+every refused write of the scripts, a statement whose first words make it a write and that
+does not parse, with its place and polyglot-sql's message: any of them may read or write the
+column, and the tool cannot tell which. A cycle is a set of columns that the walk follows,
+each of which reaches the others, or one that reaches itself.
 
 Refused, with status 2, nothing on standard output and one line on standard error, as
 `graph` is, and for an argument that is not `<relation>.<column>`, or a column that no
@@ -290,19 +293,22 @@ and nothing met, gives an empty line.
 
 The text, by default: one line per edge, in the walk's order, indented by two spaces for
 each depth after the first, `<parent> -> <child> <kind> <id>, ...`, each end as
-`<relation>.<column>`, with the ids of its writes; then one line per gap, per refusal and
-per cycle met, after its kind and a colon:
+`<relation>.<column>`, with the ids of its writes; then one line per gap and per refusal of
+the writes met, one per refused write of the scripts, `refused: <place> <detail>`, its
+detail on one line, and one per cycle, after its kind and a colon:
 
 ```
 [dbo].[Fact].[Amount] -> dbo.vBase.Total copy views.sql:3:1
   dbo.Stage.Amount -> dbo.Fact.[Amount] copy load.sql:1:1, load.sql:2:1
 gap: views.sql:5:1 unknown_relation dbo.Missing -
 refused: load.sql:4:1 invalid
+refused: views.sql:9:1 Unexpected token: Create, at 10:1
 cycle: dbo.Loop1.Id, dbo.Loop2.Id
 ```
 
 With `--json`, the same as one object, each end a `relation` and a `column`, spelled as an
-edge of protocol 1 spells them:
+edge of protocol 1 spells them; a refused write of the scripts is in `refusals` with its
+`place` and its `detail`, and no `write`:
 
 ```json
 {
@@ -311,7 +317,8 @@ edge of protocol 1 spells them:
              "child": {"relation": "dbo.vBase", "column": "Total"},
              "kind": "copy", "writes": ["views.sql:3:1"], "depth": 1}],
   "gaps": [{"write": "views.sql:5:1", "reason": "unknown_relation", "relation": "dbo.Missing", "column": null}],
-  "refusals": [{"write": "load.sql:4:1", "reason": "invalid"}],
+  "refusals": [{"write": "load.sql:4:1", "reason": "invalid"},
+               {"place": "views.sql:9:1", "detail": "Unexpected token: Create, at 10:1"}],
   "cycles": [[{"relation": "dbo.Loop1", "column": "Id"}, {"relation": "dbo.Loop2", "column": "Id"}]]
 }
 ```

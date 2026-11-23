@@ -29,11 +29,11 @@ const BOUNDARY: &str = "Invalid expression / Unexpected token";
 /// What a T-SQL batch creates or alters when it is one statement: a view or a routine.
 const ROUTINES: [TokenType; 4] = [TokenType::View, TokenType::Procedure, TokenType::Function, TokenType::Trigger];
 
-/// The first word of a statement that makes it a write or a declaration, with the words that
-/// it needs at depth 0, before its first `AS` and anywhere.
+/// The first word of a statement that makes it a write, with the words that it needs at
+/// depth 0, before its first `AS` and anywhere.
 const WRITES: [(TokenType, &[TokenType], &[TokenType]); 9] = [
     (TokenType::Create, &[TokenType::View], &[]),
-    (TokenType::Create, &[TokenType::Table], &[]),
+    (TokenType::Create, &[TokenType::Table], &[TokenType::As]),
     (TokenType::Alter, &[TokenType::View], &[]),
     (TokenType::Insert, &[], &[]),
     (TokenType::Update, &[], &[]),
@@ -65,18 +65,35 @@ pub struct Scripted {
     pub clauses: Vec<(String, Place)>,
 }
 
-/// What the reading of scripts finds besides their writes: a statement refused, with
-/// polyglot's message or the catalog's rule that it breaks, text not read, or a relation
-/// declared again, each with its place; once the writes are ordered, a cycle of writes,
-/// with the relations that they write, or a relation replaced twice.
+/// What the reading of scripts finds besides their writes: a statement refused, a write or a
+/// declaration, with polyglot's message or the catalog's rule that it breaks, text not read,
+/// or a relation declared again, each with its place; once the writes are ordered, a cycle of
+/// writes, with the relations that they write, or a relation replaced twice.
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Finding {
-    Refused { place: String, detail: String },
-    NotRead { place: String, detail: String },
-    DeclaredTwice { place: String, relation: RelationName },
-    Cycle { writes: Vec<String>, relations: Vec<RelationName> },
-    ReplacedTwice { relation: RelationName, writes: Vec<String> },
+    Refused {
+        place: String,
+        detail: String,
+        #[serde(skip)]
+        write: bool,
+    },
+    NotRead {
+        place: String,
+        detail: String,
+    },
+    DeclaredTwice {
+        place: String,
+        relation: RelationName,
+    },
+    Cycle {
+        writes: Vec<String>,
+        relations: Vec<RelationName>,
+    },
+    ReplacedTwice {
+        relation: RelationName,
+        writes: Vec<String>,
+    },
 }
 
 impl fmt::Display for Finding {
@@ -86,7 +103,7 @@ impl fmt::Display for Finding {
         let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
         let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
         match self {
-            Finding::Refused { place, detail } => write!(formatter, "refused: {place} {}", line(detail)),
+            Finding::Refused { place, detail, .. } => write!(formatter, "refused: {place} {}", line(detail)),
             Finding::NotRead { place, detail } => write!(formatter, "not_read: {place} {}", line(detail)),
             Finding::DeclaredTwice { place, relation } => write!(formatter, "declared_twice: {place} {relation}"),
             Finding::Cycle { writes, relations } => {
@@ -248,7 +265,7 @@ impl Script {
     /// Reads `parsed`, the parse of `text`, a statement of the script whose tokens are
     /// `tokens` and whose offsets are at the places that `at` gives, as [`Script::parsed`]
     /// reads its tree. One that does not parse is refused, reported when its first words make
-    /// it a write or a declaration.
+    /// it a write, or a declaration, a `CREATE TABLE` with no `AS`.
     fn statement(
         &mut self,
         parsed: Result<Expression, String>,
@@ -273,8 +290,10 @@ impl Script {
             let needs = |needed: &[TokenType], among: &[TokenType]| needed.iter().all(|word| among.contains(word));
             words.first() == Some(first) && needs(before, &head) && needs(anywhere, &words)
         };
-        if WRITES.iter().any(write) {
-            self.findings.push(Finding::Refused { place: format!("{}:{place}", self.path), detail: error });
+        let written = WRITES.iter().any(write);
+        if written || write(&(TokenType::Create, &[TokenType::Table], &[])) {
+            let place = format!("{}:{place}", self.path);
+            self.findings.push(Finding::Refused { place, detail: error, write: written });
         } else {
             self.skipped += 1;
         }
@@ -380,7 +399,7 @@ impl Script {
                     Ok(again) => {
                         self.findings.extend(again.map(|relation| Finding::DeclaredTwice { place: id, relation }))
                     }
-                    Err(detail) => self.findings.push(Finding::Refused { place: id, detail }),
+                    Err(detail) => self.findings.push(Finding::Refused { place: id, detail, write: false }),
                 }
             }
             _ => self.skipped += 1,

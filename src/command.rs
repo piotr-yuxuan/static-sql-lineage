@@ -130,7 +130,7 @@ impl Command {
             Verb::Outline => {
                 let at = graph.writes.iter().position(|write| write.id == argument);
                 let at = at.ok_or_else(|| format!("no script has the write {argument}"))?;
-                let lineage = Lineage::of(&graph.writes, catalog, self.dialect);
+                let lineage = Lineage::of(&graph, catalog, self.dialect);
                 Ok(self.outline(&graph.writes[at], &lineage.answers[at]))
             }
             Verb::Trace | Verb::Uses => {
@@ -143,7 +143,7 @@ impl Command {
                 let defaults = self.defaults.read(self.dialect)?;
                 let relation = RelationName::read(&relation.iter().collect::<String>(), self.dialect, &defaults)?;
                 let from = End { relation, column: Name::read(&column.iter().collect::<String>(), self.dialect)? };
-                let lineage = Lineage::of(&graph.writes, catalog, self.dialect);
+                let lineage = Lineage::of(&graph, catalog, self.dialect);
                 let walk = lineage.walk(&from, self.verb == Verb::Trace);
                 Ok(walk.ok_or_else(|| format!("no script knows the column {from}"))?.printed(self.json))
             }
