@@ -85,6 +85,13 @@ fn column_defined_folded() {
 }
 
 #[test]
+fn column_defined_through_star() {
+    let first = "with c as (select a as \"Total\" from s) select * from c";
+    let answers = respond(&request(&[("s", &["a"])], &[("u", first), ("v", "select \"Total\" as x from u")]));
+    assert_eq!(outline(&answers[1]), ["u.\"Total\" -> v.x copy"]);
+}
+
+#[test]
 fn write_unnamed_output() {
     assert_eq!(trace(&[("s", &["a"])], "select a + 1 from s"), ["refused unnamed_column"]);
 }

@@ -97,7 +97,7 @@ impl Answer {
         if !errors.is_empty() {
             return answer.refused(Refusal { reason: RefusalReason::Invalid, detail: errors.join("; ") });
         }
-        let outputs = match write.outputs(&query, dialect) {
+        let outputs = match write.outputs(&query, catalog, dialect, defaults) {
             Ok(Outputs::Named(outputs)) => outputs,
             Ok(Outputs::Unknown(relation)) => {
                 gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, "the columns of a * are unknown") });

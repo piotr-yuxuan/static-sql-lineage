@@ -2,12 +2,13 @@
 //! A write as the request gives it: its query, the relations it reads, and the names of
 //! its output columns.
 
-use polyglot_sql::expressions::Expression;
+use polyglot_sql::expressions::{Cte, Expression, Select};
 use polyglot_sql::parse_one;
 use polyglot_sql::scope::{SourceKind, build_scope};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
+use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName, repeated};
 
@@ -62,31 +63,20 @@ impl Write {
         relations
     }
 
-    /// The names of `query`'s output columns, from its outermost select list, or the
-    /// left branch's for a set operation: an alias names its column, so does a column;
-    /// refused when one is unnamed, or two are named alike.
-    pub fn outputs(&self, query: &Expression, dialect: Dialect) -> Result<Outputs, Refusal> {
-        let (sql, mut query): (Vec<char>, _) = (self.sql.chars().collect(), query);
-        let select = loop {
-            query = match query {
-                Expression::Union(set) => &set.left,
-                Expression::Intersect(set) => &set.left,
-                Expression::Except(set) => &set.left,
-                Expression::Subquery(subquery) => &subquery.this,
-                Expression::Select(select) => break select,
-                _ => return Ok(Outputs::Unknown(None)),
-            }
+    /// The names of `query`'s output columns, as [`named`] gives them; refused when one
+    /// is unnamed, or two are named alike.
+    pub fn outputs(
+        &self,
+        query: &Expression,
+        catalog: &Catalog,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Result<Outputs, Refusal> {
+        let sql: Vec<char> = self.sql.chars().collect();
+        let names = match named(query, &[], &sql, catalog, dialect, defaults) {
+            Ok(names) => names,
+            Err(relation) => return Ok(Outputs::Unknown(relation)),
         };
-        if select.expressions.iter().any(|expression| matches!(expression, Expression::Star(_))) {
-            return Ok(Outputs::Unknown(None));
-        }
-        let names: Vec<Option<Name>> = (select.expressions.iter())
-            .map(|expression| match expression {
-                Expression::Alias(alias) => Name::of(&alias.alias, &sql, dialect),
-                Expression::Column(column) => Name::of(&column.name, &sql, dialect),
-                _ => None,
-            })
-            .collect();
         if let Some(place) = names.iter().position(Option::is_none) {
             let detail = format!("output column {} has no name", place + 1);
             return Err(Refusal { reason: RefusalReason::UnnamedColumn, detail });
@@ -98,4 +88,103 @@ impl Write {
         }
         Ok(Outputs::Named(names))
     }
+}
+
+/// The names of the columns that `query` gives, `None` for one that it leaves unnamed;
+/// or, when a `*` leaves them unknown, the relation that it reads, if any. A query gives
+/// those of its outermost select list, or its left branch's, as [`listed`] names them; a
+/// CTE among `ctes`, those in scope, gives its query's, and a relation of the catalog its
+/// columns, as the catalog spells them.
+fn named<'a>(
+    query: &'a Expression,
+    ctes: &[&'a Cte],
+    sql: &[char],
+    catalog: &Catalog,
+    dialect: Dialect,
+    defaults: &[Name],
+) -> Result<Vec<Option<Name>>, Option<String>> {
+    let (mut query, mut ctes) = (query, ctes.to_vec());
+    loop {
+        let (with, inner) = match query {
+            Expression::Select(select) => {
+                ctes.extend(select.with.iter().flat_map(|with| &with.ctes));
+                return listed(select, &ctes, sql, catalog, dialect, defaults);
+            }
+            Expression::Union(set) => (&set.with, &set.left),
+            Expression::Intersect(set) => (&set.with, &set.left),
+            Expression::Except(set) => (&set.with, &set.left),
+            Expression::Subquery(subquery) => (&None, &subquery.this),
+            Expression::Table(table) => {
+                let cte = ctes
+                    .iter()
+                    .rposition(|cte| table.schema.is_none() && cte.alias.name.eq_ignore_ascii_case(&table.name.name));
+                let Some(at) = cte else {
+                    let relation = RelationName::of(table, sql, dialect, defaults).ok_or(None)?;
+                    let (_, columns) = catalog.get(&relation).ok_or_else(|| Some(relation.to_string()))?;
+                    return Ok(columns.iter().cloned().map(Some).collect());
+                };
+                let cte: &Cte = ctes[at];
+                ctes.truncate(at);
+                (&None, &cte.this)
+            }
+            _ => return Err(None),
+        };
+        ctes.extend(with.iter().flat_map(|with| &with.ctes));
+        query = inner;
+    }
+}
+
+/// The names of the columns of `select`'s list: an alias names its column, so does a
+/// column, and a `*` gives those of the one source that its qualifier names, or of the
+/// only source of `select`, as [`named`] gives them, less those that it excludes, as it
+/// renames them. Unknown when a `*` reads several sources, or reaches an unnamed column.
+fn listed<'a>(
+    select: &'a Select,
+    ctes: &[&'a Cte],
+    sql: &[char],
+    catalog: &Catalog,
+    dialect: Dialect,
+    defaults: &[Name],
+) -> Result<Vec<Option<Name>>, Option<String>> {
+    let sources: Vec<&Expression> = (select.from.iter().flat_map(|from| &from.expressions))
+        .chain(select.joins.iter().map(|join| &join.this))
+        .collect();
+    let mut names = Vec::new();
+    for expression in &select.expressions {
+        let Expression::Star(star) = expression else {
+            names.push(match expression {
+                Expression::Alias(alias) => Name::of(&alias.alias, sql, dialect),
+                Expression::Column(column) => Name::of(&column.name, sql, dialect),
+                _ => None,
+            });
+            continue;
+        };
+        let called = |source: &&Expression| match (&star.table, source) {
+            (None, _) => sources.len() == 1,
+            (Some(qualifier), Expression::Table(table)) => {
+                table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
+            }
+            (Some(qualifier), Expression::Subquery(subquery)) => {
+                subquery.alias.as_ref().is_some_and(|alias| alias.name.eq_ignore_ascii_case(&qualifier.name))
+            }
+            _ => false,
+        };
+        let source = sources.iter().copied().find(called).ok_or(None)?;
+        let mut columns = named(source, ctes, sql, catalog, dialect, defaults)?;
+        if columns.iter().any(Option::is_none) {
+            return Err(None);
+        }
+        let excluded: Vec<Option<Name>> =
+            star.except.iter().flatten().map(|identifier| Name::of(identifier, sql, dialect)).collect();
+        columns.retain(|column| !excluded.contains(column));
+        for (old, new) in star.rename.iter().flatten() {
+            let old = Name::of(old, sql, dialect);
+            columns
+                .iter_mut()
+                .filter(|column| **column == old)
+                .for_each(|column| *column = Name::of(new, sql, dialect));
+        }
+        names.extend(columns);
+    }
+    Ok(names)
 }
