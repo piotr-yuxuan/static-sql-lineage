@@ -281,6 +281,29 @@ fn a_transformed_key_through_a_cte_derives() {
 }
 
 #[test]
+fn a_key_transformed_where_it_is_merged_keeps_its_sides() {
+    let joins = [
+        ("inner", ["s.k -> t.j derive", "u.k -> t.j derive"]),
+        ("left", ["s.k -> t.j derive", "u.k -> t.j rows"]),
+        ("right", ["s.k -> t.j rows", "u.k -> t.j derive"]),
+        ("full", ["s.k -> t.j derive", "u.k -> t.j derive"]),
+    ];
+    for (join, expected) in joins {
+        for computed in ["upper(k) j", "cast(k as varchar) as j"] {
+            let outermost = format!("select {computed} from s {join} join u using (k)");
+            let cte = format!("with f as ({outermost}) select j from f");
+            for sql in [outermost, cte] {
+                assert_eq!(trace(&[("s", &["k", "a"]), ("u", &["k", "c"])], &sql), expected, "{sql}");
+            }
+        }
+    }
+    // The key's sides alone: a column of the right side that the expression reads derives.
+    let sql = "select concat(k, c) as j from s left join u using (k)";
+    let expected = ["s.k -> t.j derive", "u.c -> t.j derive", "u.k -> t.j rows"];
+    assert_eq!(trace(&[("s", &["k", "a"]), ("u", &["k", "c"])], sql), expected);
+}
+
+#[test]
 fn a_key_merged_in_a_branch_is_a_gap_for_its_column_alone() {
     let sql = "select k, a from s join u using (k) union all select k, c from u";
     let expected = [

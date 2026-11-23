@@ -335,6 +335,11 @@ impl Reach {
         // or those of the CTE or derived table that its step names; none for no key, and
         // none at all where the lineage does not tell the sides, nor which step is the
         // merge of a key in a branch or a subquery, which any step of its name may be.
+        // The column that a step stands for: a leaf's, or that of a CTE or derived table.
+        let stands = |next: &LineageNode| match &next.expression {
+            Expression::Column(column) => column.name.name.clone(),
+            _ => next.name.clone(),
+        };
         let sides = |node: &LineageNode, root: bool| {
             let step = matches!(node.source_kind, SourceKind::Cte | SourceKind::DerivedTable);
             let owns = |key: &&Key| match &key.owner {
@@ -343,13 +348,14 @@ impl Reach {
                 Some(owner) => step && owner.reported_as(&node.source_name),
             };
             let merged: Vec<&Key> = keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect();
-            let names = |right: &RelationName| {
-                node.downstream.iter().filter(|next| right.reported_as(&next.source_name)).count()
+            let names = |key: &Key, right: &RelationName| {
+                let sides = node.downstream.iter().filter(|next| key.read.reported_as(&stands(next)));
+                sides.filter(|next| right.reported_as(&next.source_name)).count()
             };
             match merged.as_slice() {
                 [] => Some(None),
-                [Key { placed: true, join, right: Some(right), .. }] if names(right) == 1 => {
-                    Some(Some((Kind::sides(*join)?, right)))
+                [key @ Key { placed: true, right: Some(right), .. }] if names(key, right) == 1 => {
+                    Some(Some((Kind::sides(key.join)?, right, *key)))
                 }
                 _ => None,
             }
@@ -363,16 +369,20 @@ impl Reach {
                 node.set_branch.filter(|branch| branch.ordinal == 1 && branch.operator != SetOperator::Union);
             let through = through.max(filtering.map(|_| Kind::Rows));
             let sides = sides(node, root)?;
-            // A merge's own expression is its `COALESCE`, which its sides' kinds replace.
-            let own = sides.map_or(own.max(expressed(node)), |_| own);
+            // A merge's own expression holds its `COALESCE`, which its sides' kinds replace;
+            // an expression around the key derives.
+            let own = sides
+                .map_or(own.max(expressed(node)), |(_, _, key)| if key.computed { own.max(Kind::Derive) } else { own });
             if leaf(node).as_ref() == Some(parent) {
                 let reference = if crossed { own } else { kind };
                 reached.push(through.map_or(reference, |through| through.max(reference)));
             }
+            // A merge's sides are the steps that stand for its key.
             pending.extend(node.downstream.iter().map(|next| {
                 let side = sides
-                    .map(|((left, right), joined)| if joined.reported_as(&next.source_name) { right } else { left });
-                (next, through.max(side), own, crossed || sides.is_some(), false)
+                    .filter(|(_, _, key)| key.read.reported_as(&stands(next)))
+                    .map(|((left, right), joined, _)| if joined.reported_as(&next.source_name) { right } else { left });
+                (next, through.max(side), own, crossed || side.is_some(), false)
             }));
         }
         Some(reached.into_iter().min().unwrap_or(kind))

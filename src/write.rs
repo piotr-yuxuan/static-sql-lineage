@@ -48,12 +48,15 @@ pub enum Holder {
 /// A key that a join merges in a `SELECT` of a write's query: the CTE or derived table
 /// whose select it is, none for the outermost; whether the engine's lineage names that
 /// select's step, which it does not for a branch of a set operation or a subquery; the
-/// column that its list names for it; the kind of the join; and the relation or CTE that
+/// column that its list names, the key that the column reads, and whether an expression
+/// around the key computes the column; the kind of the join; and the relation or CTE that
 /// the join joins, when it joins one.
 pub struct Key {
     pub owner: Option<Name>,
     pub placed: bool,
     pub column: Name,
+    pub read: Name,
+    pub computed: bool,
     pub join: JoinKind,
     pub right: Option<RelationName>,
 }
@@ -211,8 +214,9 @@ impl Write {
     }
 
     /// The keys that the joins of `query` merge in each of its `SELECT`s, selected bare,
-    /// aliased or not, or through a `*`; none when a join merges a key among sources whose
-    /// columns are unknown, where its keys are not told.
+    /// aliased or not, through a `*`, or read bare by an expression of its select list;
+    /// none when a join merges a key among sources whose columns are unknown, where its
+    /// keys are not told.
     pub fn keys(&self, query: &Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Option<Vec<Key>> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
@@ -238,21 +242,37 @@ impl Write {
             }
             let placed = !["subqueries[", "udtfs[", "branches["].iter().any(|kind| path.contains(kind));
             let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
-            // Each column of the list with the column of the sources that it selects.
+            // Each column of the list with each column of the sources that it reads bare, and
+            // whether an expression around it computes the column.
             let listed = select_list(select).flat_map(|expression| match expression {
                 Expression::Star(star) if star.table.is_none() => {
-                    columns.iter().map(|(column, _)| (column.clone(), column.clone())).collect()
+                    columns.iter().map(|(column, _)| (column.clone(), column.clone(), false)).collect()
                 }
                 Expression::Alias(alias) => {
-                    name(expression, &sql, dialect).zip(bare(&alias.this)).into_iter().collect()
+                    let named = name(expression, &sql, dialect);
+                    let computed = bare(&alias.this).is_none();
+                    let read = walk_in_scope(&alias.this, false).filter_map(bare);
+                    read.filter_map(|read| Some((named.clone()?, read, computed))).collect()
                 }
-                column => name(column, &sql, dialect).zip(bare(column)).into_iter().collect::<Vec<_>>(),
+                column => name(column, &sql, dialect)
+                    .zip(bare(column))
+                    .map(|(named, read)| (named, read, false))
+                    .into_iter()
+                    .collect::<Vec<_>>(),
             });
-            for (named, selected) in listed {
-                let merged = columns.iter().filter(|(column, _)| *column == selected).flat_map(|(_, joins)| joins);
+            for (named, read, computed) in listed {
+                let merged = columns.iter().filter(|(column, _)| *column == read).flat_map(|(_, joins)| joins);
                 keys.extend(merged.map(|&at| {
                     let (join, right) = (select.joins[at].kind, right(&select.joins[at]));
-                    Key { owner: owner.clone(), placed, column: named.clone(), join, right }
+                    Key {
+                        owner: owner.clone(),
+                        placed,
+                        column: named.clone(),
+                        read: read.clone(),
+                        computed,
+                        join,
+                        right,
+                    }
                 }));
             }
         }
