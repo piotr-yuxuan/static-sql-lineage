@@ -8,9 +8,9 @@ CARGO_JOBS ?= 4
 TEST_THREADS ?= 4
 BASE ?= main
 
-.PHONY: check fmt clippy licence test kernel-unchanged
+.PHONY: check fmt clippy licence workflows test kernel-unchanged
 
-check: fmt clippy licence test
+check: fmt clippy licence workflows test
 
 fmt:
 	@cargo fmt --check
@@ -22,7 +22,7 @@ clippy:
 # Rust, after `# ` elsewhere. Either list empty, as outside a git repository,
 # is a failure, not a pass.
 licence:
-	@status=0; rust=$$(git ls-files '*.rs') && build=$$(git ls-files '*.toml' Makefile flake.nix) \
+	@status=0; rust=$$(git ls-files '*.rs') && build=$$(git ls-files '*.toml' '*.yml' Makefile flake.nix) \
 		&& [ -n "$$rust" ] && [ -n "$$build" ] || { echo "licence: no file to check"; exit 1; }; \
 	for file in $$rust; do \
 		[ "$$(head -n 1 "$$file")" = "// SPDX-License-Identifier: EUPL-1.2" ] || { echo "$$file: no SPDX line"; status=1; }; \
@@ -31,6 +31,9 @@ licence:
 		[ "$$(head -n 1 "$$file")" = "# SPDX-License-Identifier: EUPL-1.2" ] || { echo "$$file: no SPDX line"; status=1; }; \
 	done; \
 	exit $$status
+
+workflows:
+	@actionlint
 
 test:
 	@cargo test --locked -j $(CARGO_JOBS) -- --test-threads=$(TEST_THREADS)

@@ -134,4 +134,5 @@ tests/scripts/       synthetic scripts as SQL Server's tools, Snowflake and Duck
                      them, kept byte for byte by `.gitattributes`: CRLF, UTF-16
 tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edges, and
                      the explanations of each difference
+.github/workflows/   CI, `make check` on every push
 ```

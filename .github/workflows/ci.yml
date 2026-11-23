@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Every check, on every branch.  It holds no rule: the checks are in the Makefile, and
+# docs/release-pipeline.md describes this file.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Only a branch's tip must pass.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # A branch of the repository is checked at its push, a pull request only when it comes
+  # from a fork, so that no branch is checked twice.
+  check:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-${{ github.job }}-${{ runner.os }}-
+      - run: nix develop -c make check

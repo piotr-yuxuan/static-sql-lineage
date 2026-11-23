@@ -11,7 +11,11 @@
       # No C compiler wrapper: it splits a project path that holds a space.
       # Linking uses the cc on PATH.
       shell = pkgs: pkgs.mkShellNoCC {
-        packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.git pkgs.gnumake ];
+        packages = [
+          pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.git pkgs.gnumake
+          # For the workflows.
+          pkgs.actionlint
+        ];
       };
     in
     {
