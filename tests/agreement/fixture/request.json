@@ -1,0 +1,61 @@
+{
+  "protocol": 1,
+  "dialect": "duckdb",
+  "catalog": [
+    {
+      "relation": "\"shop\".\"main\".\"raw_customers\"",
+      "columns": [
+        "id",
+        "first_name",
+        "last_name"
+      ]
+    },
+    {
+      "relation": "\"shop\".\"main\".\"raw_orders\"",
+      "columns": [
+        "id",
+        "customer_id",
+        "order_date",
+        "status",
+        "amount_cents"
+      ]
+    }
+  ],
+  "writes": [
+    {
+      "id": "model.shop.stg_customers",
+      "target": "\"shop\".\"main\".\"stg_customers\"",
+      "sql": "-- The customers, from the source rather than the seed's ref('raw_customers').\nselect\n    id as customer_id,\n    first_name,\n    last_name\nfrom \"shop\".\"main\".\"raw_customers\""
+    },
+    {
+      "id": "model.shop.stg_orders",
+      "target": "\"shop\".\"main\".\"stg_orders\"",
+      "sql": "with source as (\n    select * from \"shop\".\"main\".\"raw_orders\"\n),\n\nrenamed as (\n    select\n        id as order_id,\n        customer_id,\n        order_date,\n        status,\n        (amount_cents / 100)::numeric(16, 2) as amount\n    from source\n)\n\nselect * from renamed"
+    },
+    {
+      "id": "model.shop.stg_page_views",
+      "target": "\"shop\".\"main\".\"stg_page_views\"",
+      "sql": "select * from \"shop\".\"events\".\"page_views\""
+    },
+    {
+      "id": "model.shop.orders",
+      "target": "\"shop\".\"main\".\"orders\"",
+      "sql": "\nwith orders as (\n    select * from \"shop\".\"main\".\"stg_orders\"\n),\n\ncustomers as (\n    select * from \"shop\".\"main\".\"stg_customers\"\n),\n\nfinal as (\n    select\n        orders.order_id,\n        customers.first_name,\n        orders.amount,\n        (orders.amount > 0) as is_paid\n    from orders\n    left join customers using (customer_id)\n)\n\nselect * from final"
+    },
+    {
+      "id": "snapshot.shop.orders_snapshot",
+      "target": "\"shop\".\"main\".\"orders_snapshot\"",
+      "sql": "\n\nselect * from \"shop\".\"main\".\"stg_orders\"\n"
+    },
+    {
+      "id": "model.shop.customers",
+      "target": "\"shop\".\"main\".\"customers\"",
+      "sql": "with customer_orders as (\n    select customer_id, count(*) as order_count\n    from \"shop\".\"main\".\"orders\"\n    group by customer_id\n)\n\nselect stg.*, customer_orders.order_count\nfrom \"shop\".\"main\".\"stg_customers\" as stg\nleft join customer_orders using (customer_id)"
+    },
+    {
+      "id": "model.shop.order_summary",
+      "target": "\"shop\".\"main\".\"order_summary\"",
+      "sql": "-- Its upstream is a variable: only dbt knows it.\nselect count(*) as orders from \"shop\".\"main\".\"orders\""
+    }
+  ]
+}

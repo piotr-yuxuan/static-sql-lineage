@@ -1,0 +1,186 @@
+{
+  "protocol": 1,
+  "dialect": "duckdb",
+  "catalog": [
+    {
+      "relation": "\"shop\".\"main\".\"raw_customers\"",
+      "columns": [
+        "id",
+        "first_name",
+        "last_name"
+      ]
+    },
+    {
+      "relation": "\"shop\".\"main\".\"raw_orders\"",
+      "columns": [
+        "id",
+        "customer_id",
+        "order_date",
+        "status",
+        "amount_cents"
+      ]
+    }
+  ],
+  "writes": [
+    {
+      "id": "model.shop.stg_customers",
+      "target": "\"shop\".\"main\".\"stg_customers\"",
+      "sql": "-- The customers, from the source rather than the seed's ref('raw_customers').\nselect\n    id as customer_id,\n    first_name,\n    last_name\nfrom \"shop\".\"main\".\"raw_customers\""
+    },
+    {
+      "id": "model.shop.stg_orders",
+      "target": "\"shop\".\"main\".\"stg_orders\"",
+      "sql": "with source as (\n    select * from \"shop\".\"main\".\"raw_orders\"\n),\n\nrenamed as (\n    select\n        id as order_id,\n        customer_id,\n        order_date,\n        status,\n        (amount_cents / 100)::numeric(16, 2) as amount\n    from source\n)\n\nselect * from renamed"
+    },
+    {
+      "id": "model.shop.stg_page_views",
+      "target": "\"shop\".\"main\".\"stg_page_views\"",
+      "sql": "select * from \"shop\".\"events\".\"page_views\""
+    },
+    {
+      "id": "model.shop.orders",
+      "target": "\"shop\".\"main\".\"orders\"",
+      "sql": "\nwith orders as (\n    select * from \"shop\".\"main\".\"stg_orders\"\n),\n\ncustomers as (\n    select * from \"shop\".\"main\".\"stg_customers\"\n),\n\nfinal as (\n    select\n        orders.order_id,\n        customers.first_name,\n        orders.amount,\n        (orders.amount > 0) as is_paid\n    from orders\n    left join customers using (customer_id)\n)\n\nselect * from final"
+    },
+    {
+      "id": "model.shop.p_case",
+      "target": "\"shop\".\"main\".\"p_case\"",
+      "sql": "select order_id, case when status = 'placed' then amount else 0 end as placed_amount,\n  coalesce(status, 'unknown') as status\nfrom \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_cast",
+      "target": "\"shop\".\"main\".\"p_cast\"",
+      "sql": "select order_id, cast(order_id as varchar) as order_id_text, amount::double as amount_d from \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_count",
+      "target": "\"shop\".\"main\".\"p_count\"",
+      "sql": "select count(*) as n, count(distinct customer_id) as customers from \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_distinct",
+      "target": "\"shop\".\"main\".\"p_distinct\"",
+      "sql": "select distinct status from \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_exclude",
+      "target": "\"shop\".\"main\".\"p_exclude\"",
+      "sql": "select * exclude (status, amount) from \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_group",
+      "target": "\"shop\".\"main\".\"p_group\"",
+      "sql": "select customer_id, count(*) as n, max(order_date) as last_order\nfrom \"shop\".\"main\".\"stg_orders\"\nwhere status <> 'returned'\ngroup by customer_id\nhaving sum(amount) > 0"
+    },
+    {
+      "id": "model.shop.p_group_all",
+      "target": "\"shop\".\"main\".\"p_group_all\"",
+      "sql": "select customer_id, status, sum(amount) as total, count(*) as n from \"shop\".\"main\".\"stg_orders\" group by all"
+    },
+    {
+      "id": "model.shop.p_in",
+      "target": "\"shop\".\"main\".\"p_in\"",
+      "sql": "select first_name from \"shop\".\"main\".\"stg_customers\"\nwhere customer_id in (select customer_id from \"shop\".\"main\".\"stg_orders\" where status = 'placed')"
+    },
+    {
+      "id": "model.shop.p_limit",
+      "target": "\"shop\".\"main\".\"p_limit\"",
+      "sql": "select order_id from \"shop\".\"main\".\"stg_orders\" order by amount desc limit 3"
+    },
+    {
+      "id": "model.shop.p_listagg",
+      "target": "\"shop\".\"main\".\"p_listagg\"",
+      "sql": "select customer_id, string_agg(status, ',' order by order_date) as statuses from \"shop\".\"main\".\"stg_orders\" group by customer_id"
+    },
+    {
+      "id": "model.shop.p_literal",
+      "target": "\"shop\".\"main\".\"p_literal\"",
+      "sql": "select 1 as one, current_date as today from \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_mixed",
+      "target": "\"shop\".\"main\".\"p_mixed\"",
+      "sql": "select coalesce(amount, 0) + 1 as amount_plus, greatest(order_id, customer_id) as g, nullif(status, '') as s,\n  min(amount) over (partition by customer_id) as min_amount\nfrom \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "model.shop.p_order",
+      "target": "\"shop\".\"main\".\"p_order\"",
+      "sql": "select order_id from \"shop\".\"main\".\"stg_orders\" order by amount desc"
+    },
+    {
+      "id": "model.shop.p_qualify",
+      "target": "\"shop\".\"main\".\"p_qualify\"",
+      "sql": "select order_id, customer_id from \"shop\".\"main\".\"stg_orders\"\nqualify row_number() over (partition by customer_id order by order_date desc) = 1"
+    },
+    {
+      "id": "model.shop.p_self",
+      "target": "\"shop\".\"main\".\"p_self\"",
+      "sql": "select status from \"shop\".\"main\".\"stg_orders\" where status = 'placed'"
+    },
+    {
+      "id": "model.shop.p_star_join",
+      "target": "\"shop\".\"main\".\"p_star_join\"",
+      "sql": "select o.*, c.first_name from \"shop\".\"main\".\"stg_orders\" o join \"shop\".\"main\".\"stg_customers\" c on o.customer_id = c.customer_id"
+    },
+    {
+      "id": "model.shop.p_subquery",
+      "target": "\"shop\".\"main\".\"p_subquery\"",
+      "sql": "select c.customer_id,\n  (select max(o.amount) from \"shop\".\"main\".\"stg_orders\" o where o.customer_id = c.customer_id and o.status = 'placed') as max_placed\nfrom \"shop\".\"main\".\"stg_customers\" c"
+    },
+    {
+      "id": "model.shop.p_union",
+      "target": "\"shop\".\"main\".\"p_union\"",
+      "sql": "select order_id as id, 'order' as kind from \"shop\".\"main\".\"stg_orders\"\nunion all\nselect customer_id as id, 'customer' as kind from \"shop\".\"main\".\"stg_customers\""
+    },
+    {
+      "id": "model.shop.p_using_full",
+      "target": "\"shop\".\"main\".\"p_using_full\"",
+      "sql": "select * from \"shop\".\"main\".\"stg_orders\" o full join \"shop\".\"main\".\"stg_customers\" c using (customer_id)"
+    },
+    {
+      "id": "model.shop.p_using_inner",
+      "target": "\"shop\".\"main\".\"p_using_inner\"",
+      "sql": "select o.*, c.first_name from \"shop\".\"main\".\"stg_orders\" o join \"shop\".\"main\".\"stg_customers\" c using (customer_id)"
+    },
+    {
+      "id": "model.shop.p_using_key",
+      "target": "\"shop\".\"main\".\"p_using_key\"",
+      "sql": "select customer_id, o.status from \"shop\".\"main\".\"stg_orders\" o left join \"shop\".\"main\".\"stg_customers\" c using (customer_id)"
+    },
+    {
+      "id": "model.shop.p_using_left",
+      "target": "\"shop\".\"main\".\"p_using_left\"",
+      "sql": "select o.* from \"shop\".\"main\".\"stg_orders\" o left join \"shop\".\"main\".\"stg_customers\" c using (customer_id)"
+    },
+    {
+      "id": "model.shop.p_using_star",
+      "target": "\"shop\".\"main\".\"p_using_star\"",
+      "sql": "select * from \"shop\".\"main\".\"stg_orders\" o left join \"shop\".\"main\".\"stg_customers\" c using (customer_id)"
+    },
+    {
+      "id": "model.shop.p_using_star_inner",
+      "target": "\"shop\".\"main\".\"p_using_star_inner\"",
+      "sql": "select * from \"shop\".\"main\".\"stg_orders\" o join \"shop\".\"main\".\"stg_customers\" c using (customer_id)"
+    },
+    {
+      "id": "model.shop.p_window",
+      "target": "\"shop\".\"main\".\"p_window\"",
+      "sql": "select order_id, row_number() over (partition by customer_id order by order_date) as rn,\n  sum(amount) over (partition by customer_id) as customer_total\nfrom \"shop\".\"main\".\"stg_orders\""
+    },
+    {
+      "id": "snapshot.shop.orders_snapshot",
+      "target": "\"shop\".\"main\".\"orders_snapshot\"",
+      "sql": "\n\nselect * from \"shop\".\"main\".\"stg_orders\"\n"
+    },
+    {
+      "id": "model.shop.customers",
+      "target": "\"shop\".\"main\".\"customers\"",
+      "sql": "with customer_orders as (\n    select customer_id, count(*) as order_count\n    from \"shop\".\"main\".\"orders\"\n    group by customer_id\n)\n\nselect stg.*, customer_orders.order_count\nfrom \"shop\".\"main\".\"stg_customers\" as stg\nleft join customer_orders using (customer_id)"
+    },
+    {
+      "id": "model.shop.order_summary",
+      "target": "\"shop\".\"main\".\"order_summary\"",
+      "sql": "-- Its upstream is a variable: only dbt knows it.\nselect count(*) as orders from \"shop\".\"main\".\"orders\""
+    }
+  ]
+}
