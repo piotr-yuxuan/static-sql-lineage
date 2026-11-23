@@ -122,9 +122,10 @@ have. A reject scenario names an answer that must not be given.
   no relation: `INSERT ... VALUES`, `TRUNCATE`, or `CREATE TABLE` with a column list.
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`.
+- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`, `Columns`, `Reading`.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
+  - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
   - `Write::query`: the query that a piece's text holds, or its refusal.
   - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
