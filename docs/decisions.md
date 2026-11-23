@@ -59,6 +59,25 @@ Ruled on 2026-11-22, later.
   partly qualified name of its catalog and writes is completed with them, under the
   dialect's rules, before any comparison.
 
+Ruled on 2026-11-23.
+
+- R12. Several writes to one relation (Q3): the relation's lineage is the union of its
+  writes' edges, and where two writes give one pair of columns different kinds, the first
+  of `copy`, `derive`, `rows` is kept; a contribute write that is refused leaves its
+  target as it was.
+- R13. `DELETE` and `MERGE`'s matching condition (Q4): `DELETE ... WHERE` or `USING`,
+  and `MERGE`'s `ON`, give `rows` edges to every column of the target from other
+  relations' columns, and none from the target's own; `DELETE` is a contribute write.
+  Stored procedures are set aside.
+
+Taken with plan 006 under the owner's standing word, for the owner to see: a statement
+whose own target is not its write's is refused (D1); a condition of a `MERGE`'s `WHEN`
+clause decides the rows of the columns that its action writes, and of no other (D4); a
+value that a column takes from its own row, as in `SET a = a + 1`, is an edge (D5); a
+contribute write to a target that the catalog does not know gives an `unknown_relation`
+gap for it, and the edges of the columns that its statement names (D6); the catalog
+after a write follows its statement's kind (D7).
+
 ## Widening, in order
 
 Each step reuses what the steps before it built, so that the cheapest concepts come
@@ -97,7 +116,8 @@ concept's yet.
   or a relation's name that is not a bare name.
 - Writes come in dependency order, and each changes the catalog as `concepts.md`
   says: a replace write's output columns become its target's for the writes after it;
-  a refused write, or a `*` that leaves its output unknown, makes its target unknown.
+  a refused replace write, or a `*` that leaves its output unknown, makes its target
+  unknown; a contribute write, refused or not, leaves its target as it was.
 - Names are SQL text, settled by the dialect on both sides of the protocol. An edge
   spells a relation and its columns as the catalog or the write that made it known
   does.
@@ -120,10 +140,7 @@ foreseen to ask.
 
 | # | Question | Closed by | Before step |
 |---|---|---|---|
-| Q1 | How polyglot-sql reads writes other than a query that defines its target: `CREATE VIEW`, `CREATE MATERIALIZED VIEW`, `INSERT ... SELECT`, `MERGE`, `UPDATE ... FROM`, `CREATE TABLE ... AS`, `SELECT ... INTO`, in each of the three dialects | a probe on synthetic SQL | 3 |
 | Q2 | How it reads T-SQL routines and functions: `BEGIN ... END`, `#t` and `@t`, `IF ... ELSE`, dynamic SQL run by `EXEC`, inline and multi-statement table functions, `CROSS APPLY`, a scalar function whose body reads a table | a probe | 5 |
-| Q3 | A relation's lineage when several writes reach it: the union of their edges, which kind when two writes give one pair of columns different kinds, and what a refused contribute write does to its target | the owner, on scenarios | 3 |
-| Q4 | Whether `DELETE ... WHERE`, and `MERGE`'s matching condition, give `rows` edges to every column of the target | the owner | 3 |
 | Q6 | Whether every branch of a routine counts, so that lineage says what may happen; whether answers about a routine show its temporary relations or pass through them | the owner | 5 |
 | Q8 | Whether the repository will be public | the owner | the first release |
 | Q9 | Whether a `CREATE TABLE` with a column list feeds the catalog, for the porting use, which reads files rather than a request | the owner | 4 |
@@ -141,3 +158,9 @@ by two probes, untracked in this repository's `docs/work/probes/`:
 whether each output name was quoted, at its place in the outermost select list, and
 through a `*` in what the `*` reads; a replace write with an unnamed output column is
 refused, as Snowflake refuses it, and so is one with two columns named alike.
+
+Q1, how polyglot-sql reads writes other than a query, was closed by the probe
+`2026-11-23-plan-006-statements/`, untracked in `docs/work/probes/`, with `ALTER VIEW`
+and `SELECT ... INTO` over a set operation from `2026-11-23-plan-007-files/`: what each
+statement parses into in each dialect, how its target and its query are read, and the
+synthetic `SELECT`s of `UPDATE`, `DELETE` and `MERGE`, checked on Snowflake.

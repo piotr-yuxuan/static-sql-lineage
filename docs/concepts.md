@@ -102,17 +102,17 @@ have. A reject scenario names an answer that must not be given.
 
 - tier: kernel
 - means: one statement that puts rows into one relation, its *target*, from a query
-  over relations: `CREATE VIEW`, `CREATE TABLE ... AS SELECT`,
-  `CREATE MATERIALIZED VIEW`, `SELECT ... INTO`, `INSERT ... SELECT`, `MERGE`,
-  `UPDATE ... FROM`, or a bare query given with the target it builds, as dbt-lsp-plus
-  gives a compiled model.
+  over relations, or changes or removes them: `CREATE VIEW` and `ALTER VIEW ... AS`,
+  `CREATE TABLE ... AS SELECT`, `CREATE MATERIALIZED VIEW`, a dynamic table,
+  `SELECT ... INTO`, `INSERT ... SELECT`, `UPDATE`, `DELETE`, `MERGE`, or a bare query
+  given with the target it builds, as dbt-lsp-plus gives a compiled model.
 - part, mode: a *replace* write makes its target exactly the query's rows, and the
   query's output columns become the target's columns. Each output column of a replace
   write is named by its query, and no two alike under the dialect, or the write is
   refused. A *contribute* write adds rows to a target that may have other writes, or
   changes values in it, and leaves its columns as they are; its output columns are
   mapped onto the target's by an `INSERT` column list, by position, by `SET`, or by
-  `MERGE`'s clauses.
+  `MERGE`'s clauses. A `DELETE` is a contribute write that removes rows.
 - part, identity: the id that the caller gives it, unique in the request, which its
   answer echoes. How a write read from a file is named is for the plan for the
   commands.
@@ -120,7 +120,6 @@ have. A reject scenario names an answer that must not be given.
   column in the SQL text that holds them.
 - not: the relation, which may have several writes or none. Not a statement that reads
   no relation: `INSERT ... VALUES`, `TRUNCATE`, or `CREATE TABLE` with a column list.
-  Whether `DELETE ... WHERE` is a write is open (`decisions.md`, Q4).
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
 - home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`.
@@ -136,8 +135,7 @@ have. A reject scenario names an answer that must not be given.
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
   first answer is the edge `s.x -> t.a`, `copy`; the second is the edges
-  `t.a -> u.a` and `t.b -> u.b`, both `copy`; no gap in either. Its test waits on the
-  probe of `INSERT` (`decisions.md`, Q1).
+  `t.a -> u.a` and `t.b -> u.b`, both `copy`; no gap in either.
 - reject `write.contribute-as-replace`: a gap or a refusal for `b` in the second
   answer, as if the insert had made `a` the only column of `t`.
 - accept `write.unnamed-output`: query `select a + 1 from s`: a refusal; no edge.
@@ -156,9 +154,11 @@ have. A reject scenario names an answer that must not be given.
 - tier: kernel
 - means: `(parent relation, parent column) -> (child relation, child column)`, with a
   kind. The child is a write's target and one of its columns; the parent is a relation
-  that the write's query reads, and one of its columns. A write gives at most one edge
-  per pair of columns; when several kinds apply, the first of `copy`, `derive`, `rows`
-  is kept.
+  that the write reads, and one of its columns. A write gives at most one edge per pair
+  of columns; when several kinds apply, the first of `copy`, `derive`, `rows` is kept. A
+  contribute write's clauses reach the columns that it writes, but `DELETE`'s condition
+  and `MERGE`'s `ON` reach every column of the target; a condition on the target's own
+  row in `UPDATE`, `DELETE` or `MERGE` gives no edge (`decisions.md`, R13).
 - part, kind, with examples:
   - `copy`: on every row, the child's value is the parent's, unchanged, perhaps
     renamed: a column selected or aliased, through `*`, CTEs and subqueries, in each
@@ -184,7 +184,7 @@ have. A reject scenario names an answer that must not be given.
   - `Kind::of`: the kind of a projection's upstream reference.
   - `Kind::sides`: the kinds of a merged key's two sides, by the kind of the join that merges it.
   - `Reach::of`: where the clauses of one write's query reach.
-  - `Reach::rows`: whether a use of a column decides the rows of every output column.
+  - `Reach::rows`: the output columns whose rows a use of a column decides.
   - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
   - `End::of`: the end that the engine's names of a relation and of its column resolve to.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
@@ -213,10 +213,12 @@ have. A reject scenario names an answer that must not be given.
   clause whose reach the analysis cannot place (`unattributed_use`); an analysis that
   failed (`analysis_failed`).
 - part, columns: the write's output columns, when all are known, so that "no
-  upstream" is said of named columns.
-- part, refusal: the write is not one query that the tool reads, has an output column
-  that its query does not name, or two named alike, or is not valid against the
-  catalog, such as a column that does not exist. Nothing of it is traced.
+  upstream" is said of named columns; for a contribute write, the target's columns that
+  the write reaches.
+- part, refusal: the write is not one query or statement that the tool reads, is a
+  statement whose target is not the write's, has an output column that its query does
+  not name, or two named alike, or is not valid against the catalog, such as a column
+  that does not exist. Nothing of it is traced.
 - not: a claim that a column has no upstream, unless the answer has no gap and no
   refusal. Unknown is not none.
 - avoid: result, report, output; response, which carries all the answers to one
@@ -241,10 +243,10 @@ have. A reject scenario names an answer that must not be given.
 - means: what is known of relations' names and columns. There is one per request, and
   each write reads it as it stands just before that write. It starts as the request
   gives it, and the writes are read in the request's order. After each:
-  a replace write sets its target's columns to its output columns; a refused write, or
-  one whose `*` leaves its output columns unknown, makes its target unknown; a
-  contribute write leaves its target's columns as they are. What a refused contribute
-  write does to its target is open (`decisions.md`, Q3).
+  a replace write sets its target's columns to its output columns; a refused replace
+  write, one that does not parse, or one whose `*` leaves its output columns unknown,
+  makes its target unknown; a contribute write, refused or not, leaves its target as it
+  was (`decisions.md`, R12), and so does a statement that is not a write.
 - not: the warehouse: the tool never connects to one and never fetches a shape. Not the
   columns that a query happens to read, which say nothing of the columns a relation
   has.
@@ -287,7 +289,7 @@ have. A reject scenario names an answer that must not be given.
 | Term | Defined as | Home |
 |---|---|---|
 | base relation | a relation that no write of the request has as its target; its columns come from the catalog. Avoid: source | |
-| lineage | the edges of all the answers to one request | |
+| lineage | the edges of all the answers to one request; where several writes give one pair of columns, the first of `copy`, `derive`, `rows` (`decisions.md`, R12) | |
 | graph | the relations and the writes between them: a write links its target to each relation its query reads | |
 | trace | a column's edges upstream, followed through earlier writes to base relations | |
 | uses | a column's edges downstream | |

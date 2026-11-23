@@ -58,3 +58,16 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   middle relation's column from the `*`, where sql-lineage names it and refuses the
   write as `duplicate_column`, as a Snowflake view refuses duplicate names. Class: an
   intended gap.
+- T-SQL's `INSERT t (...) SELECT ...`, without `INTO`, as SQL Server's scripts write it,
+  and `DELETE FROM t FROM t JOIN ...` are refused `unparsed`, where the Write entry reads
+  them as writes: polyglot-sql parses neither. Class: a defect of the code.
+- Snowflake's `INSERT ALL`, which writes several targets, and DuckDB's
+  `INSERT ... BY NAME`, which maps its columns by name, are refused `not_a_query`, where
+  the Write entry reads `INSERT ... SELECT` as a write. Class: an aspiration.
+- Statements that Snowflake refuses and polyglot-sql reads, such as `WITH ... INSERT`,
+  `WHEN NOT MATCHED BY SOURCE` in a `MERGE`, or `SELECT ... INTO`, are traced as the
+  statements of the dialects that accept them: validating SQL is out of scope. Class: an
+  intended gap.
+- A subquery in `VALUES`, as in `insert into t values (1, (select max(x) from s))`, reads
+  a relation, which the Write entry's *not*, "a statement that reads no relation",
+  overlooks; it is refused `not_a_query`. Class: a defect of the definition.
