@@ -64,8 +64,15 @@ have. A reject scenario names an answer that must not be given.
   rules.
 - avoid: object, dataset, node, model, source; view, for relations in general; field
   and attribute, for a column.
-- home: none yet.
-- operations: none yet.
+- home: `Name`, `RelationName`, `Defaults`.
+- operations:
+  - `Name::read`: reads one identifier, alone, as SQL text under the dialect.
+  - `Name::of`: the name of an identifier parsed from a write's SQL, as it spells it.
+  - `Name::reported_as`: whether the engine's text for a name is this one's.
+  - `RelationName::read`: reads a bare name of one to three parts, completed by the defaults.
+  - `RelationName::of`: the name of a table reference parsed from a write's SQL.
+  - `RelationName::reported_as`: whether the engine's text for a relation is this one's.
+  - `Defaults::read`: reads the request's defaults into the names that complete a name.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -116,8 +123,11 @@ have. A reject scenario names an answer that must not be given.
   Whether `DELETE ... WHERE` is a write is open (`decisions.md`, Q4).
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: none yet.
-- operations: none yet.
+- home: `Write`, `Outputs`.
+- operations:
+  - `Write::query`: the write's query, or its refusal.
+  - `Write::relations`: the relations that the write's query reads.
+  - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
@@ -161,8 +171,10 @@ have. A reject scenario names an answer that must not be given.
   `DISTINCT`, nor from a literal, `count(*)` or `current_date`, which have no parent
   column.
 - avoid: link, flow, dependency, mapping.
-- home: none yet.
-- operations: none yet.
+- home: `Edge`, `End`, `Kind`.
+- operations:
+  - `Kind::of`: the kind of a projection's upstream reference.
+  - `Edge::of_reference`: the edge from what a reference of the engine reads.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.
 - accept `edge.coalesce-is-derive`: query `select coalesce(a, 0) as a from s`: the
@@ -195,8 +207,9 @@ have. A reject scenario names an answer that must not be given.
   refusal. Unknown is not none.
 - avoid: result, report, output; response, which carries all the answers to one
   request.
-- home: none yet.
-- operations: none yet.
+- home: `Answer`, `Gap`, `GapReason`, `Refusal`, `RefusalReason`.
+- operations:
+  - `Answer::of`: the answer to one write against the catalog.
 - accept `answer.unknown-star`: query `select * from r`, with no catalog: an
   `unknown_relation` gap for `r` and a `wildcard` gap; no edge.
 - reject `answer.silent-none`: for that query, no edge and no gap.
@@ -221,8 +234,12 @@ have. A reject scenario names an answer that must not be given.
   columns that a query happens to read, which say nothing of the columns a relation
   has.
 - avoid: schema, which is also a part of a name; metadata, information schema, sources.
-- home: none yet.
-- operations: none yet.
+- home: `Catalog`, `Declared`.
+- operations:
+  - `Catalog::declared`: the catalog that the request declares.
+  - `Catalog::get`: a relation as the catalog knows it, with its columns.
+  - `Catalog::schema`: what the engine is told of the known relations that a write reads.
+  - `Catalog::record`: what a write makes of its target.
 - accept `catalog.unknown-relation`: query `select a from r`, with no catalog: an
   `unknown_relation` gap for `r`; no edge.
 - reject `catalog.columns-guessed`: for that query, the edge `r.a -> t.a`, as if the
@@ -239,6 +256,8 @@ have. A reject scenario names an answer that must not be given.
 - home: `Dialect`.
 - operations:
   - `Dialect::built`: the dialects that the build includes.
+  - `Dialect::named`: a dialect of the build by its name.
+  - `Dialect::polyglot`: the dialect as polyglot-sql names it.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
@@ -260,9 +279,9 @@ have. A reject scenario names an answer that must not be given.
 | Term | Defined as | Home |
 |---|---|---|
 | view, materialised view, dynamic table, table made by `CREATE TABLE ... AS` | a relation with one replace write; the kind of object is a label from its statement | |
-| request | one JSON document on standard input: a protocol number, the dialect, a default database and schema, the catalog, and the writes in dependency order | |
-| response | one answer per write of the request, on standard output | |
-| protocol | the number of the request's and response's format; either side refuses another | |
+| request | one JSON document on standard input: a protocol number, the dialect, a default database and schema, the catalog, and the writes in dependency order | `Request` |
+| response | one answer per write of the request, on standard output | `Response` |
+| protocol | the number of the request's and response's format; either side refuses another | `Protocol` |
 | describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
 
 ## Kept apart
