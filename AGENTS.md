@@ -122,7 +122,8 @@ src/                 one module per home of `docs/concepts.md`: relation, write,
 tests/concepts.rs    the concept check
 tests/protocol/      the binary run as a caller runs it: --describe and the uses it
                      refuses, requests, scenarios, answers, edges, stars, catalogue (of
-                     clauses), cases (Snowflake's), agreement (with dbt's lineage)
+                     clauses), cases (Snowflake's), agreement (with dbt's lineage),
+                     statements (replace and contribute)
 tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edges, and
                      the explanations of each difference
 ```

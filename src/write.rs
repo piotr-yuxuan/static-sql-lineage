@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: EUPL-1.2
-//! A write as the request gives it: its query, the relations it reads, and the names of
-//! its output columns.
+//! A write as the request gives it: the pieces that its statement is read into, and the
+//! query of each, the relations it reads, and the names of its output columns.
 
 use std::collections::HashSet;
 
-use polyglot_sql::expressions::{Cte, Expression, Join, JoinKind, Literal, Select};
+use polyglot_sql::expressions::{
+    AlterViewAction, Cte, Expression, From, Identifier, Join, JoinKind, Literal, Merge, Null, Select, TableRef,
+    ViewColumn, Where, With,
+};
 use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
-use polyglot_sql::traversal::ExpressionWalk;
+use polyglot_sql::traversal::{ExpressionWalk, get_merge_target};
 use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
-use polyglot_sql::{ColumnUseContext, LineageNode, lineage_at_with_schema, parse_one};
+use polyglot_sql::{ColumnUseContext, LineageNode, TokenType, generate, lineage_at_with_schema, parse_one};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
@@ -16,7 +19,7 @@ use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName, repeated};
 
-/// The request's form of a write: its id, its target and the SQL of its query.
+/// The request's form of a write: its id, its target and its SQL, a query or a statement.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Write {
@@ -61,11 +64,157 @@ pub struct Key {
     pub right: Option<RelationName>,
 }
 
+/// One `SELECT` that a write is read into, as text; the target's columns onto which its
+/// output columns map by position, or none where its query names them; and whether it
+/// reads the target's own row, whose conditions then give no edge.
+pub struct Piece {
+    pub text: String,
+    pub columns: Option<Vec<Name>>,
+    pub own: bool,
+}
+
 impl Write {
-    /// The write's query, the outermost one when it is parenthesised, as the engine
-    /// reads it; refused when it is not one statement, or not a query.
-    pub fn query(&self, dialect: Dialect) -> Result<Expression, Refusal> {
-        let parsed = parse_one(&self.sql, dialect.polyglot())
+    /// The pieces that the write's statement is read into, its target as the statement
+    /// names it, and whether it replaces its target. A query is one piece, its own text,
+    /// and writes `target`, or the table of its `INTO`; a view, or a table made by
+    /// `CREATE TABLE ... AS`, is its query, onto its column list, if any. An `INSERT` is
+    /// its query; an `UPDATE`, the `SELECT` of its values over its sources, its target among
+    /// them; a `DELETE`, of a `NULL` for every column of the target; a `MERGE`, one for its
+    /// `ON` as a `DELETE`, then one for each `WHEN` clause. A contribute statement's pieces map onto the target's columns, as `catalog`
+    /// knows them, or, the target unknown, onto those that the statement names; a piece
+    /// that would need the target's columns is left out. Refused when the statement does not parse, is not a
+    /// write that the tool reads, names another target than `target`, which completes it as
+    /// it completes the request's names, or a column that the target lacks.
+    pub fn pieces(
+        &self,
+        target: &RelationName,
+        catalog: &Catalog,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Result<(RelationName, bool, Vec<Piece>), Refusal> {
+        let refused = |reason, detail: String| Refusal { reason, detail };
+        let statement = (parse_one(&self.sql, dialect.polyglot()))
+            .map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
+        let sql: Vec<char> = self.sql.chars().collect();
+        let known = catalog.get(target).map(|(_, columns)| columns);
+        // The values of a piece that decides the rows of every column of the target.
+        let nulls = vec![Expression::Null(Null); known.map_or(0, <[Name]>::len)];
+        let not_a_write = || refused(RefusalReason::NotAQuery, "not a write that the tool reads".to_string());
+        // The statement's target, none for a query's; whether it replaces it; whether its
+        // pieces read its own row; each piece, its tree or none for the statement's own
+        // text, with its columns.
+        let (table, replaces, own, specs) = match &statement {
+            Expression::CreateView(view) => {
+                let columns = view_columns(&view.columns, &view.name, &self.sql, dialect);
+                (Some(&view.name), true, false, vec![(Some(view.query.clone()), columns)])
+            }
+            Expression::AlterView(view) => {
+                let query = (view.actions.iter())
+                    .find_map(|action| match action {
+                        AlterViewAction::AsSelect(query) => Some(query),
+                        _ => None,
+                    })
+                    .ok_or_else(not_a_write)?;
+                let columns = view_columns(&view.columns, &view.name, &self.sql, dialect);
+                (Some(&view.name), true, false, vec![(Some((**query).clone()), columns)])
+            }
+            Expression::CreateTable(create) => {
+                let query = with(create.as_select.clone().ok_or_else(not_a_write)?, create.with_cte.clone());
+                let columns = create.columns.iter().map(|column| Name::of(&column.name, &sql, dialect));
+                let columns = columns.collect::<Option<Vec<Name>>>().filter(|columns| !columns.is_empty());
+                (Some(&create.name), true, false, vec![(Some(query), Ok(columns))])
+            }
+            Expression::Insert(insert) => {
+                let query = insert.query.clone().filter(|_| !insert.by_name).ok_or_else(not_a_write)?;
+                let columns = columns(&insert.columns, known, &sql, dialect);
+                (Some(&insert.table), false, false, vec![(Some(with(query, insert.with.clone())), columns)])
+            }
+            Expression::Update(update) => {
+                // T-SQL's `UPDATE a ... FROM t AS a` names as its target the source that `a`
+                // names; any other target is added to the sources.
+                let known_as = |table: &TableRef| Name::of(table.alias.as_ref().unwrap_or(&table.name), &sql, dialect);
+                let froms = update.from_clause.iter().flat_map(|from| &from.expressions);
+                let named = froms.clone().find_map(|source| match source {
+                    Expression::Table(table) if known_as(table) == known_as(&update.table) => Some(&**table),
+                    _ => None,
+                });
+                let added = named.is_none().then(|| Expression::Table(Box::new(update.table.clone())));
+                // polyglot gives every target as an expression, in `assignments`, once any is
+                // qualified.
+                let assignments =
+                    update.assignments.iter().map(|pair| Some((assigned(&pair.left)?, pair.right.clone())));
+                let pairs = update.set.iter().map(|(column, value)| Some((column, value.clone()))).chain(assignments);
+                let pairs = pairs.collect::<Option<Vec<_>>>().ok_or_else(not_a_write)?;
+                let (set, values): (Vec<&Identifier>, Vec<Expression>) = pairs.into_iter().unzip();
+                let condition = update.where_clause.as_ref().map(|filter| filter.this.clone());
+                let sources = added.into_iter().chain(froms.cloned()).collect();
+                let piece = synthetic(values, sources, update.from_joins.clone(), condition, update.with.clone());
+                let columns = columns(set, known, &sql, dialect);
+                (Some(named.unwrap_or(&update.table)), false, true, vec![(Some(piece), columns)])
+            }
+            Expression::Delete(delete) => {
+                let alias = delete.alias.clone().or_else(|| delete.table.alias.clone());
+                let sources =
+                    std::iter::once(TableRef { alias, ..delete.table.clone() }).chain(delete.using.iter().cloned());
+                let sources = sources.map(|source| Expression::Table(Box::new(source))).collect();
+                let condition = delete.where_clause.as_ref().map(|filter| filter.this.clone());
+                let piece = synthetic(nulls, sources, delete.joins.clone(), condition, delete.with.clone());
+                (Some(&delete.table), false, true, vec![(Some(piece), Ok(known.map(<[Name]>::to_vec)))])
+            }
+            Expression::Merge(merge) => {
+                let Some(Expression::Table(table)) = get_merge_target(&statement) else { return Err(not_a_write()) };
+                let with = merge.with_.as_deref().and_then(|with| match with {
+                    Expression::With(with) => Some((**with).clone()),
+                    _ => None,
+                });
+                let sources = vec![(*merge.this).clone(), (*merge.using).clone()];
+                let whens = whens(merge, &sources, with.as_ref(), &nulls).ok_or_else(not_a_write)?.into_iter();
+                let whens = whens.map(|(piece, named)| (Some(piece), columns(&named, known, &sql, dialect)));
+                let on = synthetic(nulls, sources, Vec::new(), merge.on.as_deref().cloned(), with);
+                let specs = std::iter::once((Some(on), Ok(known.map(<[Name]>::to_vec)))).chain(whens);
+                (Some(&**table), false, true, specs.collect())
+            }
+            // `SELECT ... INTO` names its target in the `SELECT`, or in the left branch of a
+            // set operation, and is traced as the query that it is.
+            query @ (Expression::Select(_)
+            | Expression::Union(_)
+            | Expression::Intersect(_)
+            | Expression::Except(_)
+            | Expression::Subquery(_)) => {
+                let into = query.dfs().find_map(|node| match node {
+                    Expression::Select(select) => select.into.as_ref(),
+                    _ => None,
+                });
+                let into = into.map(|into| match &into.this {
+                    Expression::Table(table) => Ok(&**table),
+                    _ => Err(not_a_write()),
+                });
+                (into.transpose()?, true, false, vec![(None, Ok(None))])
+            }
+            _ => return Err(not_a_write()),
+        };
+        let found = match table {
+            None => target.clone(),
+            Some(table) => (RelationName::of(table, &sql, dialect, defaults).filter(|found| found == target))
+                .ok_or_else(|| refused(RefusalReason::OtherTarget, format!("the statement does not write {target}")))?,
+        };
+        let mut pieces = Vec::new();
+        for (tree, columns) in specs {
+            let columns = columns?;
+            if !replaces && columns.is_none() {
+                continue;
+            }
+            let text = tree.map_or_else(|| Ok(self.sql.clone()), |tree| generate(&tree, dialect.polyglot()));
+            let text = text.map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
+            pieces.push(Piece { text, columns, own });
+        }
+        Ok((found, replaces, pieces))
+    }
+
+    /// The query that `sql` holds, the outermost one when it is parenthesised, as the
+    /// engine reads it; refused when it is not one statement, or not a query.
+    pub fn query(sql: &str, dialect: Dialect) -> Result<Expression, Refusal> {
+        let parsed = parse_one(sql, dialect.polyglot())
             .map_err(|error| Refusal { reason: RefusalReason::Unparsed, detail: error.to_string() })?;
         match parsed {
             Expression::Subquery(subquery) if subquery.alias.is_none() => Ok(subquery.this),
@@ -77,11 +226,12 @@ impl Write {
         }
     }
 
-    /// The relations that `query` reads: its table references that name no CTE in scope,
-    /// as the engine scopes them, and those that Snowflake's `IDENTIFIER` names by its one
-    /// string literal in a `FROM` or a join, ordered by their spelling.
-    pub fn relations(&self, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
-        let sql: Vec<char> = self.sql.chars().collect();
+    /// The relations that `query`, parsed from `sql`, reads: its table references that
+    /// name no CTE in scope, as the engine scopes them, and those that Snowflake's
+    /// `IDENTIFIER` names by its one string literal in a `FROM` or a join, ordered by their
+    /// spelling.
+    pub fn relations(sql: &str, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
+        let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let scoped = scopes(&root, &sql, dialect).into_iter().flat_map(|(_, scope, _)| scope.sources.values());
         let mut relations: Vec<RelationName> = (scoped.filter_map(|source| match (&source.kind, &source.expression) {
@@ -112,19 +262,29 @@ impl Write {
         relations
     }
 
-    /// The names of `query`'s output columns, as [`named`] gives them; refused when one
-    /// is unnamed, or two are named alike.
+    /// The names of the output columns of `query`, parsed from `sql`, as [`named`] gives
+    /// them, or `columns` onto which they map by position; refused when they are not as
+    /// many as `columns`, or when one is unnamed, or two are named alike.
     pub fn outputs(
-        &self,
+        sql: &str,
         query: &Expression,
+        columns: Option<&[Name]>,
         catalog: &Catalog,
         dialect: Dialect,
         defaults: &[Name],
     ) -> Result<Outputs, Refusal> {
-        let sql: Vec<char> = self.sql.chars().collect();
+        let sql: Vec<char> = sql.chars().collect();
         let names = match named(query, &[], &sql, catalog, dialect, defaults) {
             Ok(names) => names,
             Err(relation) => return Ok(Outputs::Unknown(relation)),
+        };
+        let names = match columns {
+            Some(columns) if columns.len() == names.len() => columns.iter().cloned().map(Some).collect(),
+            Some(columns) => {
+                let detail = format!("{} output columns for {} columns", names.len(), columns.len());
+                return Err(Refusal { reason: RefusalReason::Invalid, detail });
+            }
+            None => names,
         };
         if let Some(place) = names.iter().position(Option::is_none) {
             let detail = format!("output column {} has no name", place + 1);
@@ -138,15 +298,16 @@ impl Write {
         Ok(Outputs::Named(names))
     }
 
-    /// Each subquery of `query` that no subquery holds, by the scope path that the engine
-    /// gives it, with its holder; none for one that the engine numbers otherwise, or that
-    /// follows a `*` in its select list, where its place would count the `*` as one. The
-    /// engine numbers the subqueries of a `SELECT` by its `collect_subqueries`: the fields
-    /// that hold them, in the order of its struct, each walked by `walk_in_scope`, finding a
-    /// `Subquery` with no alias, the query of `EXISTS` and of `IN`, and that of `ANY` and
-    /// `ALL` twice, as a quantifier's and as a `Subquery`.
-    pub fn holders(&self, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
-        let sql: Vec<char> = self.sql.chars().collect();
+    /// Each subquery of `query`, parsed from `sql`, that no subquery holds, by the scope
+    /// path that the engine gives it, with its holder; none for one that the engine numbers
+    /// otherwise, or that follows a `*` in its select list, where its place would count the
+    /// `*` as one. The engine numbers the subqueries of a `SELECT` by its
+    /// `collect_subqueries`: the fields that hold them, in the order of its struct, each
+    /// walked by `walk_in_scope`, finding a `Subquery` with no alias, the query of `EXISTS`
+    /// and of `IN`, and that of `ANY` and `ALL` twice, as a quantifier's and as a
+    /// `Subquery`.
+    pub fn holders(sql: &str, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
+        let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let all = scopes(&root, &sql, dialect);
         // A branch that filters an `INTERSECT` or an `EXCEPT`, or a branch of one, decides
@@ -213,12 +374,18 @@ impl Write {
         found
     }
 
-    /// The keys that the joins of `query` merge in each of its `SELECT`s, selected bare,
-    /// aliased or not, through a `*`, or read bare by an expression of its select list;
-    /// none when a join merges a key among sources whose columns are unknown, where its
-    /// keys are not told.
-    pub fn keys(&self, query: &Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Option<Vec<Key>> {
-        let sql: Vec<char> = self.sql.chars().collect();
+    /// The keys that the joins of `query`, parsed from `sql`, merge in each of its
+    /// `SELECT`s, selected bare, aliased or not, through a `*`, or read bare by an
+    /// expression of its select list; none when a join merges a key among sources whose
+    /// columns are unknown, where its keys are not told.
+    pub fn keys(
+        sql: &str,
+        query: &Expression,
+        catalog: &Catalog,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Option<Vec<Key>> {
+        let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let ctes: Vec<&Cte> = (root.cte_scopes.iter())
             .filter_map(|cte| match &cte.expression {
@@ -522,4 +689,151 @@ fn name(expression: &Expression, sql: &[char], dialect: Dialect) -> Option<Name>
         Expression::Column(column) => Name::of(&column.name, sql, dialect),
         _ => None,
     }
+}
+
+/// The target's columns that `identifiers`, parsed from `sql`, name, as `known`, the
+/// target's columns, spells them, or as `sql` does when the target is unknown; or, for no
+/// identifier, every column of the target, unknown with it. Refused when one does not
+/// read as a name, is named twice, or the target lacks one.
+fn columns<'a>(
+    identifiers: impl IntoIterator<Item = &'a Identifier>,
+    known: Option<&[Name]>,
+    sql: &[char],
+    dialect: Dialect,
+) -> Result<Option<Vec<Name>>, Refusal> {
+    let refused = |detail: String| Refusal { reason: RefusalReason::Invalid, detail };
+    let named = identifiers.into_iter().map(|identifier| Name::of(identifier, sql, dialect));
+    let unread = || refused("a column of its list does not read as a name".to_string());
+    let named = named.collect::<Option<Vec<Name>>>().ok_or_else(unread)?;
+    if let Some(name) = repeated(&named) {
+        return Err(refused(format!("the statement names {name} twice")));
+    }
+    if named.is_empty() {
+        return Ok(known.map(<[Name]>::to_vec));
+    }
+    let Some(known) = known else { return Ok(Some(named)) };
+    let found = named.iter().map(|name| {
+        let column = known.iter().find(|column| *column == name).cloned();
+        column.ok_or_else(|| refused(format!("the target has no column {name}")))
+    });
+    found.collect::<Result<_, _>>().map(Some)
+}
+
+/// The names of `columns`, the column list of the view `view`, read from the tokens of
+/// `sql` that follow its name, since the parser keeps neither their spans nor their
+/// quotes: the token that opens each item of the list; none for no list.
+fn view_columns(
+    columns: &[ViewColumn],
+    view: &TableRef,
+    sql: &str,
+    dialect: Dialect,
+) -> Result<Option<Vec<Name>>, Refusal> {
+    let refused = |detail: String| Refusal { reason: RefusalReason::Invalid, detail };
+    if columns.is_empty() {
+        return Ok(None);
+    }
+    let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(sql);
+    let tokens = tokens.map_err(|error| refused(error.to_string()))?;
+    let chars: Vec<char> = sql.chars().collect();
+    let after = view.name.span.map_or(0, |span| span.end);
+    let (mut depth, mut opens, mut names) = (0, false, Vec::new());
+    for token in tokens.iter().filter(|token| token.span.start >= after) {
+        match token.token_type {
+            TokenType::LParen => depth += 1,
+            TokenType::RParen if depth == 1 => break,
+            TokenType::RParen => depth -= 1,
+            _ if opens => {
+                let quoted = token.token_type == TokenType::QuotedIdentifier;
+                let span = Some(token.span);
+                let identifier = Identifier { name: token.text.clone(), quoted, trailing_comments: Vec::new(), span };
+                names.push(Name::of(&identifier, &chars, dialect).ok_or_else(|| refused(token.text.clone()))?);
+            }
+            _ => {}
+        }
+        opens = depth == 1 && matches!(token.token_type, TokenType::LParen | TokenType::Comma);
+    }
+    Ok(Some(names))
+}
+
+/// The `SELECT` of each `WHEN` clause of `merge`, its values over `sources`, under `with`,
+/// where its condition holds, with the columns that its `UPDATE SET` or its `INSERT` names;
+/// none for an `INSERT` without a list, whose values follow the target's columns, or for a
+/// `DELETE`, whose values are `nulls`, one for each column of the target. None when a
+/// clause names a target that is not a column.
+fn whens(
+    merge: &Merge,
+    sources: &[Expression],
+    with: Option<&With>,
+    nulls: &[Expression],
+) -> Option<Vec<(Expression, Vec<Identifier>)>> {
+    let clauses = merge.whens.iter().flat_map(|whens| match whens.as_ref() {
+        Expression::Whens(whens) => whens.expressions.as_slice(),
+        _ => &[],
+    });
+    let mut pieces = Vec::new();
+    for clause in clauses {
+        let Expression::When(when) = clause else { continue };
+        // polyglot gives an action as a tuple of its keyword and its lists, a `DELETE` as its
+        // keyword alone.
+        let (values, named): (Vec<Expression>, Vec<Identifier>) = match when.then.as_ref() {
+            Expression::Tuple(action) => match action.expressions.as_slice() {
+                [Expression::Var(keyword), Expression::Tuple(set)] if keyword.this.eq_ignore_ascii_case("update") => {
+                    let pairs = set.expressions.iter().map(|pair| match pair {
+                        Expression::Eq(pair) => Some((pair.right.clone(), assigned(&pair.left)?.clone())),
+                        _ => None,
+                    });
+                    pairs.collect::<Option<Vec<_>>>()?.into_iter().unzip()
+                }
+                [_, Expression::Tuple(named), Expression::Tuple(values)] => {
+                    let named = named.expressions.iter().map(|item| assigned(item).cloned());
+                    (values.expressions.clone(), named.collect::<Option<_>>()?)
+                }
+                [_, Expression::Tuple(values)] => (values.expressions.clone(), Vec::new()),
+                _ => continue,
+            },
+            _ => (nulls.to_vec(), Vec::new()),
+        };
+        let piece = synthetic(values, sources.to_vec(), Vec::new(), when.condition.as_deref().cloned(), with.cloned());
+        pieces.push((piece, named));
+    }
+    Some(pieces)
+}
+
+/// The column that `expression`, the target of an assignment or an item of a column list,
+/// names, by its last part; none for any other expression, such as a tuple.
+fn assigned(expression: &Expression) -> Option<&Identifier> {
+    match expression {
+        Expression::Identifier(identifier) => Some(identifier),
+        Expression::Column(column) => Some(&column.name),
+        _ => None,
+    }
+}
+
+/// The synthetic `SELECT` of a piece of an `UPDATE`, a `DELETE` or a `MERGE`: `values`
+/// over `sources` and `joins`, where `condition` holds, under the statement's `with`.
+fn synthetic(
+    values: Vec<Expression>,
+    sources: Vec<Expression>,
+    joins: Vec<Join>,
+    condition: Option<Expression>,
+    with: Option<With>,
+) -> Expression {
+    let mut select = Select::new();
+    (select.expressions, select.joins, select.with) = (values, joins, with);
+    select.from = Some(From { expressions: sources });
+    select.where_clause = condition.map(|this| Where { this });
+    Expression::Select(Box::new(select))
+}
+
+/// `query` under `with`, the `WITH` that its statement writes before it, unless it has
+/// its own.
+fn with(mut query: Expression, with: Option<With>) -> Expression {
+    match &mut query {
+        Expression::Select(select) => select.with = select.with.take().or(with),
+        Expression::Union(set) => set.with = set.with.take().or(with),
+        Expression::Intersect(set) => set.with = set.with.take().or(with),
+        Expression::Except(set) => set.with = set.with.take().or(with),
+        _ => {}
+    }
+    query
 }

@@ -10,6 +10,7 @@ mod edges;
 mod requests;
 mod scenarios;
 mod stars;
+mod statements;
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;

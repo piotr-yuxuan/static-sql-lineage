@@ -113,7 +113,8 @@ impl Edge {
     /// the gaps, from the engine's `analysis` of its query, whose projections `order`
     /// gives for each: each projection's upstream references by their kind, as `reach`
     /// says they reach, and each use's references as `rows` to the output columns that
-    /// `reach` places it at; one edge per pair of columns, of the first kind.
+    /// `reach` places it at; one edge per pair of columns, of the first kind. No `rows`
+    /// edge comes from `own`, a target whose own row the query reads (Q4).
     pub fn of_analysis(
         analysis: &QueryAnalysis,
         order: &[usize],
@@ -121,6 +122,7 @@ impl Edge {
         children: &[End],
         relations: &[RelationName],
         catalog: &Catalog,
+        own: Option<&RelationName>,
     ) -> (Vec<Edge>, Vec<Gap>) {
         let mut gaps = Vec::new();
         // Each reference with its place and, for a projection's, its kind: a use's is rows.
@@ -152,7 +154,9 @@ impl Edge {
                     continue;
                 }
             };
+            let source = reference.source_name.as_deref().unwrap_or_default();
             match value.map_or(Some(Kind::Rows), |kind| reach.kind(place, &edge.parent, kind, relations, catalog)) {
+                Some(Kind::Rows) if own.is_some_and(|own| own.reported_as(source)) => {}
                 Some(kind) => edges.push((place, Edge { kind, ..edge })),
                 None => {
                     let detail = "the engine's lineage does not say how its values reach it";

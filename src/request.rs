@@ -74,13 +74,10 @@ impl Request {
         if let Some(id) = repeated(self.writes.iter().map(|write| &write.id)) {
             return Err(format!("two writes have the id {id:?}"));
         }
-        if let Some(target) = repeated(&targets) {
-            return Err(format!("two writes have the target {target}"));
-        }
         let answers = (self.writes.iter().zip(targets))
             .map(|(write, target)| {
-                let answer = Answer::of(write, &catalog, dialect, &defaults);
-                catalog.record(target, answer.columns.clone());
+                let (answer, replaces) = Answer::of(write, &target, &catalog, dialect, &defaults);
+                catalog.record(target, replaces, answer.columns.clone());
                 answer
             })
             .collect();

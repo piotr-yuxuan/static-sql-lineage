@@ -65,8 +65,12 @@ impl Catalog {
         serde_json::from_value(json!({"tables": tables, "strict": true})).expect("a schema of names and columns")
     }
 
-    /// Records what a write makes of its target: its output columns, or unknown.
-    pub fn record(&mut self, target: RelationName, columns: Option<Vec<Name>>) {
+    /// Records what a write makes of its target: one that `replaces` it, its output
+    /// columns, or unknown; any other, nothing.
+    pub fn record(&mut self, target: RelationName, replaces: bool, columns: Option<Vec<Name>>) {
+        if !replaces {
+            return;
+        }
         self.relations.remove(&target);
         if let Some(columns) = columns {
             self.relations.insert(target, columns);

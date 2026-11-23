@@ -91,6 +91,39 @@ fn column_defined_through_star() {
     assert_eq!(outline(&answers[1]), ["u.\"Total\" -> v.x copy"]);
 }
 
+/// The two answers of `write.contribute-keeps-columns`.
+fn contributed() -> Vec<Vec<String>> {
+    let writes = [("t", "insert into t (a) select x from s"), ("u", "create view u as select a, b from t")];
+    respond(&request(&[("t", &["a", "b"]), ("s", &["x"])], &writes)).iter().map(outline).collect()
+}
+
+#[test]
+fn write_contribute_keeps_columns() {
+    assert_eq!(contributed(), [vec!["s.x -> t.a copy"], vec!["t.a -> u.a copy", "t.b -> u.b copy"]]);
+}
+
+#[test]
+fn write_contribute_as_replace() {
+    let found = contributed();
+    assert!(!found[1].iter().any(|line| line.starts_with("gap") || line.starts_with("refused")), "{found:?}");
+}
+
+/// The answer to `sql` against the catalog of `write.delete-decides-rows`.
+fn deleted(sql: &str) -> Vec<String> {
+    trace(&[("t", &["a", "b"]), ("s", &["k"])], sql)
+}
+
+#[test]
+fn write_delete_decides_rows() {
+    assert_eq!(deleted("delete from t where a in (select k from s)"), ["s.k -> t.a rows", "s.k -> t.b rows"]);
+}
+
+#[test]
+fn write_delete_own_condition() {
+    let found = deleted("delete from t where b < 0");
+    assert!(!found.iter().any(|line| line.contains(" -> ")), "{found:?}");
+}
+
 #[test]
 fn write_unnamed_output() {
     assert_eq!(trace(&[("s", &["a"])], "select a + 1 from s"), ["refused unnamed_column"]);
@@ -155,6 +188,25 @@ fn answer_refusal_spreads() {
 fn answer_stale_shape() {
     let found = spread();
     assert!(!found[1].contains(&"t.a -> u.a copy".to_string()), "{found:?}");
+}
+
+/// The second answer of `catalog.refused-contribute-keeps-target`.
+fn kept() -> Vec<String> {
+    let writes = [("t", "insert into t (nope) select x from s"), ("u", "create view u as select a from t")];
+    let answers = respond(&request(&[("t", &["a"]), ("s", &["x"])], &writes));
+    assert_eq!(outline(&answers[0]), ["refused invalid"]);
+    outline(&answers[1])
+}
+
+#[test]
+fn catalog_refused_contribute_keeps_target() {
+    assert_eq!(kept(), ["t.a -> u.a copy"]);
+}
+
+#[test]
+fn catalog_refused_contribute_as_unknown() {
+    let found = kept();
+    assert!(!found.contains(&"gap unknown_relation t -".to_string()), "{found:?}");
 }
 
 #[test]
