@@ -172,6 +172,13 @@ pub struct Defaults {
 }
 
 impl Defaults {
+    /// The defaults that a command gives, `database` and `schema`, spelled as SQL text: a
+    /// database without a schema takes the dialect's usual schema.
+    pub fn given(database: Option<String>, schema: Option<String>, dialect: Dialect) -> Defaults {
+        let schema = schema.or_else(|| database.as_ref().map(|_| dialect.default_schema().to_string()));
+        Defaults { database, schema }
+    }
+
     /// The names that complete a name of one part, outermost first.
     pub fn read(&self, dialect: Dialect) -> Result<Vec<Name>, String> {
         if self.database.is_some() && self.schema.is_none() {

@@ -73,6 +73,7 @@ have. A reject scenario names an answer that must not be given.
   - `RelationName::of`: the name of a table reference parsed from a write's SQL.
   - `RelationName::reported_as`: whether the engine's text for a relation is this one's.
   - `Defaults::read`: reads the request's defaults into the names that complete a name.
+  - `Defaults::given`: the defaults that a command gives, a database without a schema taking the dialect's usual one.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -285,6 +286,7 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::polyglot`: the dialect as polyglot-sql names it.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
   - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
+  - `Dialect::default_schema`: the schema of a database given without one.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
@@ -315,6 +317,7 @@ have. A reject scenario names an answer that must not be given.
 | response | one answer per write of the request, on standard output | `Response` |
 | protocol | the number of the request's and response's format; either side refuses another | `Protocol` |
 | describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
+| command | `graph`, `trace`, `uses` or `outline`, as the command line names it, with its dialect, its defaults and its paths | `Command` |
 
 ## Kept apart
 

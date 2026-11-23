@@ -44,6 +44,16 @@ impl Dialect {
         }
     }
 
+    /// The schema of a database given without one: SQL Server's `dbo`, Snowflake's
+    /// `PUBLIC`, DuckDB's `main`.
+    pub fn default_schema(self) -> &'static str {
+        match self {
+            Dialect::Tsql => "dbo",
+            Dialect::Snowflake => "PUBLIC",
+            Dialect::Duckdb => "main",
+        }
+    }
+
     /// The rule by which a name is normalised: polyglot-sql's for the dialect, but for
     /// T-SQL, whose names ignore case whether delimited or not, as SQL Server's default
     /// collation compares them.

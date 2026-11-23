@@ -6,6 +6,7 @@ mod agreement;
 mod answers;
 mod cases;
 mod catalogue;
+mod commands;
 mod edges;
 mod requests;
 mod scenarios;
