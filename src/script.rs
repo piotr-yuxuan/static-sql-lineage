@@ -164,8 +164,7 @@ impl Script {
             // T-SQL's first words; neither in a batch that is one statement.
             let ends = batch.clone().filter_map(|at| {
                 let token = &tokens[at];
-                depth +=
-                    i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen);
+                depth += nesting(token);
                 let word = !matches!(
                     token.token_type,
                     TokenType::QuotedIdentifier | TokenType::String | TokenType::NationalString
@@ -218,8 +217,7 @@ impl Script {
             Err(error) => {
                 let mut depth = 0;
                 let words = tokens.iter().filter(|token| {
-                    depth += i32::from(token.token_type == TokenType::LParen)
-                        - i32::from(token.token_type == TokenType::RParen);
+                    depth += nesting(token);
                     depth == 0
                 });
                 let words: Vec<TokenType> = words.map(|token| token.token_type).collect();
@@ -292,4 +290,9 @@ impl Script {
             _ => self.skipped += 1,
         }
     }
+}
+
+/// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
+fn nesting(token: &Token) -> i32 {
+    i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
 }
