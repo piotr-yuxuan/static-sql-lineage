@@ -1,4 +1,4 @@
-# parent relation	parent column	child relation	child column	dbt	sql-lineage	verdict	reason
+# parent relation	parent column	child relation	child column	dbt	static-sql-lineage	verdict	reason
 # dbt calls a copy the value that one function or branch selects unchanged; the definition derives it.
 "shop"."main"."stg_orders"	amount	"shop"."main"."p_case"	placed_amount	copy	derive	meaning	a CASE result is amount on some rows and 0 on others: definition.md derives it, dbt calls the branch a copy
 "shop"."main"."stg_orders"	status	"shop"."main"."p_case"	status	copy	derive	meaning	coalesce(status, 'unknown') computes a value, as edge.coalesce-is-derive says; dbt calls the selected argument a copy

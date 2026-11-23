@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: EUPL-1.2
 {
-  description = "Development shell of sql-lineage";
+  description = "Development shell of static-sql-lineage";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/31ecbaca1bdefa45dffc409f0250bd8039ea0010";

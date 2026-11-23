@@ -1,9 +1,10 @@
 # Working in this repository
 
-This repository holds `sql-lineage`, a command-line tool in Rust on polyglot-sql. For
-each SQL write, it answers which columns of which relations reach which columns of the
-write's target, and how. It knows SQL and nothing of dbt. `docs/decisions.md` says
-what it is for and what it leaves out; `docs/concepts.md` defines its terms.
+This repository holds `static-sql-lineage`, a command-line tool in Rust on
+polyglot-sql. For each SQL write, it answers which columns of which relations reach
+which columns of the write's target, and how. It knows SQL and nothing of dbt.
+`docs/decisions.md` says what it is for and what it leaves out; `docs/concepts.md`
+defines its terms.
 
 ## Workflow
 

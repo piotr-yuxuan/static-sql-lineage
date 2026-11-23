@@ -1,15 +1,16 @@
 # Decisions
 
-What `sql-lineage` is for, what it promises and what it leaves out, as ruled by the
-owner. A ruling changes only through a plan that the owner approves. An open question
-names the probe or the ruling that closes it, and the plan that must wait for it.
+What `static-sql-lineage` is for, what it promises and what it leaves out, as ruled
+by the owner. A ruling changes only through a plan that the owner approves. An open
+question names the probe or the ruling that closes it, and the plan that must wait
+for it.
 
 ## What it is
 
-`sql-lineage` reads SQL that writes relations and answers, for each write, which
-columns of which relations reach which columns of its target, and how. It knows SQL and
-nothing of dbt, and it never connects to a database (see "Promises"). Its terms are
-those of `concepts.md`.
+`static-sql-lineage` reads SQL that writes relations and answers, for each write,
+which columns of which relations reach which columns of its target, and how. It knows
+SQL and nothing of dbt, and it never connects to a database (see "Promises"). Its terms
+are those of `concepts.md`.
 
 ## Use cases
 
@@ -54,7 +55,10 @@ Ruled on 2026-11-22, later.
 
 - R9. Licence: EUPL-1.2, the text in `LICENSE`, and an SPDX line in each source and
   build file, which `make check` keeps.
-- R10. Name: `sql-lineage`, kept when the tool widens to the other use cases.
+- R10. Name, ruled on 2026-11-23: `static-sql-lineage`, formerly `sql-lineage`,
+  for the repository, the package, the binary and the `tool` of `--describe`, and kept
+  as the tool widens to the other use cases. The prefix says what sets it apart from
+  other lineage tools: it reads SQL text and never connects to a database.
 - R11. Names of relations: a request may give a default database and schema, and every
   partly qualified name of its catalog and writes is completed with them, under the
   dialect's rules, before any comparison.

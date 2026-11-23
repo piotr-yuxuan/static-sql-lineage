@@ -1,20 +1,20 @@
 # Protocol
 
-How a caller runs `sql-lineage`, and what it answers. Protocol 1 gives each write as a
-query and its target, as dbt-lsp-plus gives a compiled model, or as a statement and its
-target, and answers each write with its output columns, edges, gaps or refusal, in the
-terms of `docs/concepts.md`.
+How a caller runs `static-sql-lineage`, and what it answers. Protocol 1 gives each
+write as a query and its target, as dbt-lsp-plus gives a compiled model, or as a
+statement and its target, and answers each write with its output columns, edges, gaps
+or refusal, in the terms of `docs/concepts.md`.
 
 ## Uses
 
 | Use | Status | Standard output | Standard error |
 |---|---|---|---|
-| `sql-lineage`, a request on standard input | 0 | the response, as JSON | nothing |
+| `static-sql-lineage`, a request on standard input | 0 | the response, as JSON | nothing |
 | the same, a request refused as a whole | 2 | nothing | one line, naming the reason |
-| `sql-lineage --describe` | 0 | the description, as JSON | nothing |
-| `sql-lineage graph`, its options and paths | 0 | the graph of the scripts' writes, as text or JSON | nothing |
-| `sql-lineage trace` or `sql-lineage uses`, its options, a column and paths | 0 | the column's edges upstream or downstream, as text or JSON | nothing |
-| `sql-lineage outline`, its options, a write's id and paths | 0 | the write in brief, as text or JSON | nothing |
+| `static-sql-lineage --describe` | 0 | the description, as JSON | nothing |
+| `static-sql-lineage graph`, its options and paths | 0 | the graph of the scripts' writes, as text or JSON | nothing |
+| `static-sql-lineage trace` or `static-sql-lineage uses`, its options, a column and paths | 0 | the column's edges upstream or downstream, as text or JSON | nothing |
+| `static-sql-lineage outline`, its options, a write's id and paths | 0 | the write in brief, as text or JSON | nothing |
 | any of these, refused | 2 | nothing | one line, naming the reason |
 | any other argument | 2 | nothing | one line, naming what was given |
 
@@ -153,7 +153,7 @@ The writes of files of SQL, as SQL Server's tools, Snowflake and DuckDB write th
 the order to migrate them in. Which relations a write reads needs no catalog.
 
 ```
-sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] [--json] <path>...
+static-sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] [--json] <path>...
 ```
 
 - `--dialect`: required; one of this build's, as `--describe` spells them.
@@ -259,8 +259,8 @@ A column's edges, followed upstream through the writes that fill its relation to
 that no write fills, or downstream through the writes that read it.
 
 ```
-sql-lineage trace --dialect <name> [--database <name>] [--schema <name>] [--json] <relation>.<column> <path>...
-sql-lineage uses --dialect <name> [--database <name>] [--schema <name>] [--json] <relation>.<column> <path>...
+static-sql-lineage trace --dialect <name> [--database <name>] [--schema <name>] [--json] <relation>.<column> <path>...
+static-sql-lineage uses --dialect <name> [--database <name>] [--schema <name>] [--json] <relation>.<column> <path>...
 ```
 
 - The options and the paths are `graph`'s, and the scripts are read as `graph` reads them.
@@ -334,7 +334,7 @@ One write in brief: its target, its mode, its place, its answer and the places o
 clauses.
 
 ```
-sql-lineage outline --dialect <name> [--database <name>] [--schema <name>] [--json] <id> <path>...
+static-sql-lineage outline --dialect <name> [--database <name>] [--schema <name>] [--json] <id> <path>...
 ```
 
 - The options and the paths are `graph`'s; `<id>`, a write's id as `graph` prints it.
@@ -385,7 +385,7 @@ What this build is:
 
 ```json
 {
-  "tool": "sql-lineage",
+  "tool": "static-sql-lineage",
   "version": "0.0.0",
   "protocols": [1],
   "engine": {
@@ -397,7 +397,7 @@ What this build is:
 }
 ```
 
-- `version`: the version of `sql-lineage`.
+- `version`: the version of `static-sql-lineage`.
 - `protocols`: the versions of the request that this build reads.
 - `engine`: the SQL engine, with its version and source as `Cargo.lock` pins them. The
   source is given verbatim, so a fork would show its commit.

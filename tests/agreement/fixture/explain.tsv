@@ -1,2 +1,2 @@
-# parent relation	parent column	child relation	child column	dbt	sql-lineage	verdict	reason
+# parent relation	parent column	child relation	child column	dbt	static-sql-lineage	verdict	reason
 # The fixture: dbt's edges and the definition's agree, a seed and a source over one relation being one parent.

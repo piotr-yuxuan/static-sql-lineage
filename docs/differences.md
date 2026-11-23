@@ -61,9 +61,9 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   calls a derive. Class: a defect of the definition.
 - In a chain of `USING` joins whose middle relation shares a column with the first,
   such as `select * from t join w using (k) join v using (k)`, Snowflake drops the
-  middle relation's column from the `*`, where sql-lineage names it and refuses the
-  write as `duplicate_column`, as a Snowflake view refuses duplicate names. Class: an
-  intended gap.
+  middle relation's column from the `*`, where static-sql-lineage names it and refuses
+  the write as `duplicate_column`, as a Snowflake view refuses duplicate names. Class:
+  an intended gap.
 - T-SQL's `INSERT t (...) SELECT ...`, without `INTO`, as SQL Server's scripts write it,
   and `DELETE FROM t FROM t JOIN ...` are refused `unparsed`, and reported as refused
   writes by `graph`, where the Write entry reads them as writes: polyglot-sql parses

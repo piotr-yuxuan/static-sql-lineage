@@ -1,8 +1,8 @@
 # Concepts
 
-The kernel of `sql-lineage`: the few concepts from which every other term, type and
-command is defined. Each entry says what the concept means, what it is not, the words
-it rejects, its home in the code, its operations, and scenarios with a verdict. A
+The kernel of `static-sql-lineage`: the few concepts from which every other term, type
+and command is defined. Each entry says what the concept means, what it is not, the
+words it rejects, its home in the code, its operations, and scenarios with a verdict. A
 scenario's identifier is carried by the test that checks it.
 
 - A kernel concept holds a fact that no other concept holds. A derived term holds none:
