@@ -755,11 +755,6 @@ fn whens(
     with: Option<&With>,
     nulls: &[Expression],
 ) -> Vec<(Expression, Vec<Identifier>)> {
-    let column = |expression: &Expression| match expression {
-        Expression::Identifier(identifier) => Some(identifier.clone()),
-        Expression::Column(column) => Some(column.name.clone()),
-        _ => None,
-    };
     let clauses = merge.whens.iter().flat_map(|whens| match whens.as_ref() {
         Expression::Whens(whens) => whens.expressions.as_slice(),
         _ => &[],
@@ -773,13 +768,13 @@ fn whens(
             Expression::Tuple(action) => match action.expressions.as_slice() {
                 [Expression::Var(keyword), Expression::Tuple(set)] if keyword.this.eq_ignore_ascii_case("update") => {
                     let pairs = set.expressions.iter().filter_map(|pair| match pair {
-                        Expression::Eq(pair) => Some((pair.right.clone(), column(&pair.left)?)),
+                        Expression::Eq(pair) => Some((pair.right.clone(), assigned(&pair.left)?.clone())),
                         _ => None,
                     });
                     pairs.unzip()
                 }
                 [_, Expression::Tuple(named), Expression::Tuple(values)] => {
-                    (values.expressions.clone(), named.expressions.iter().filter_map(column).collect())
+                    (values.expressions.clone(), named.expressions.iter().filter_map(assigned).cloned().collect())
                 }
                 [_, Expression::Tuple(values)] => (values.expressions.clone(), Vec::new()),
                 _ => continue,
@@ -790,6 +785,16 @@ fn whens(
         pieces.push((piece, named));
     }
     pieces
+}
+
+/// The column that `expression`, the target of an assignment or an item of a column list,
+/// names, by its last part; none for any other expression, such as a tuple.
+fn assigned(expression: &Expression) -> Option<&Identifier> {
+    match expression {
+        Expression::Identifier(identifier) => Some(identifier),
+        Expression::Column(column) => Some(&column.name),
+        _ => None,
+    }
 }
 
 /// The synthetic `SELECT` of a piece of an `UPDATE`, a `DELETE` or a `MERGE`: `values`
