@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use polyglot_sql::expressions::{Cte, Expression, Join, JoinKind, Select};
+use polyglot_sql::expressions::{Cte, Expression, Join, JoinKind, Literal, Select};
 use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
@@ -62,7 +62,8 @@ impl Write {
     }
 
     /// The relations that `query` reads: its table references that name no CTE in scope,
-    /// as the engine scopes them, ordered by their spelling.
+    /// as the engine scopes them, and those that Snowflake's `IDENTIFIER` names by its one
+    /// string literal in a `FROM` or a join, ordered by their spelling.
     pub fn relations(&self, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
@@ -73,6 +74,28 @@ impl Write {
                 _ => None,
             }))
             .collect();
+        // The engine scopes `IDENTIFIER('<name>')` as a table that the SQL does not spell.
+        let selects = query.dfs().filter_map(|node| match node {
+            Expression::Select(select) => Some(select),
+            _ => None,
+        });
+        let sources = selects.flat_map(|select| {
+            (select.from.iter().flat_map(|from| &from.expressions)).chain(select.joins.iter().map(|join| &join.this))
+        });
+        relations.extend(sources.filter_map(|source| {
+            let Expression::Function(function) = (match source {
+                Expression::Alias(alias) => &alias.this,
+                source => source,
+            }) else {
+                return None;
+            };
+            let [Expression::Literal(literal)] = function.args.as_slice() else { return None };
+            let Literal::String(text) = literal.as_ref() else { return None };
+            function
+                .name
+                .eq_ignore_ascii_case("identifier")
+                .then(|| RelationName::read(text, dialect, defaults).ok())?
+        }));
         relations.sort_by_key(ToString::to_string);
         relations
     }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! What is said of one write: its output columns, its edges, its gaps and its refusal.
 
+use polyglot_sql::expressions::Expression;
+use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::validation::{SchemaValidationOptions, validate_with_schema};
 use polyglot_sql::{AnalyzeQueryOptions, QueryAnalysis, ValidationSeverity, analyze_query};
 use serde::Serialize;
@@ -115,6 +117,12 @@ impl Answer {
         if !alike.is_empty() {
             return answer.ended(gaps.into_iter().chain(alike).collect());
         }
+        // polyglot gives a pivot's grouping column no use, and `UNPIVOT`'s name column a copy
+        // of the columns it unpivots (#559, #560).
+        if query.dfs().any(|node| matches!(node, Expression::Pivot(_) | Expression::Unpivot(_))) {
+            gaps.push(Gap::of(GapReason::AnalysisFailed, None, "the engine does not trace PIVOT and UNPIVOT"));
+            return answer.ended(gaps);
+        }
         let options =
             AnalyzeQueryOptions { dialect: dialect.polyglot(), schema: Some(schema.clone()), complexity_guard: None };
         // The projection that names each output column: the one at its place, else the only
@@ -143,6 +151,12 @@ impl Answer {
             gaps.push(Gap::of(GapReason::AnalysisFailed, None, "the analysis names other output columns"));
             return answer.ended(gaps);
         };
+        // polyglot leaves an output column that a `*` as a function's argument feeds with no
+        // upstream (#556); `count(*)` holds no `*`.
+        let starred = |node: &Expression| matches!(node, Expression::Function(function) if function.args.iter().any(|arg| matches!(arg, Expression::Star(_))));
+        if query.dfs().any(starred) {
+            gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
+        }
         let children: Vec<End> =
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
         let holders = write.holders(&query, dialect);

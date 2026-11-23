@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! The clauses of the proof of concept's catalogue that its Snowflake cases leave out,
 //! as the Edge entry of `docs/concepts.md` and its `definition.md` give them: uses in
-//! subqueries, filtering branches, keys that a join merges, an aggregate's order.
+//! subqueries, filtering branches, keys that a join merges, an aggregate's order; and
+//! the gaps or refusals of the clauses that polyglot does not trace.
 
 use serde_json::json;
 
@@ -247,4 +248,43 @@ fn within_group_derives() {
         trace(&[("s", &["k", "a", "b"])], sql),
         ["s.k -> t.k copy", "s.a -> t.l derive", "s.b -> t.l derive", "s.k -> t.l rows"]
     );
+}
+
+#[test]
+fn pivot_is_a_gap() {
+    let sql = "select p.region as region from sales pivot (sum(amount) for quarter in ('Q1', 'Q2')) as p";
+    let answer = &respond(&request(&[("sales", &["region", "quarter", "amount"])], &[("t", sql)]))[0];
+    assert_eq!(answer["columns"], json!(["region"]));
+    assert_eq!(outline(answer), ["gap analysis_failed - -"]);
+}
+
+#[test]
+fn unpivot_is_a_gap() {
+    let sql = "select id, metric, val from wide unpivot (val for metric in (a, b))";
+    assert_eq!(trace(&[("wide", &["id", "a", "b"])], sql), ["gap analysis_failed - -"]);
+}
+
+#[test]
+fn a_star_as_an_argument_is_a_gap() {
+    for function in ["object_construct(*)", "hash(*)"] {
+        let found = trace(&[("users", &["id", "name"])], &format!("select id, {function} as obj from users"));
+        assert_eq!(found, ["users.id -> t.id copy", "gap wildcard - -"], "{function}");
+    }
+}
+
+#[test]
+fn a_star_as_an_argument_in_a_cte_is_a_gap() {
+    let sql = "with c as (select id, hash(*) as h from users) select id, h from c";
+    assert_eq!(trace(&[("users", &["id", "name"])], sql), ["users.id -> t.id copy", "gap wildcard - -"]);
+}
+
+#[test]
+fn table_flatten_is_refused() {
+    let sql = "select o.id, f.value:sku::string as sku from orders o, table(flatten(input => o.items)) f";
+    assert_eq!(trace(&[("orders", &["id", "items"])], sql), ["refused invalid"]);
+}
+
+#[test]
+fn star_ilike_is_refused() {
+    assert_eq!(trace(&[("users", &["id", "name"])], "select * ilike '%name%' from users"), ["refused unparsed"]);
 }
