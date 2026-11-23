@@ -8,7 +8,7 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, command, lines, read, run};
+use super::{assert_refused, command, lines, printed_json, read, run};
 
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
 fn graph(arguments: &[&str]) -> Output {
@@ -420,9 +420,7 @@ fn graph_counts_skipped_statements() {
 fn graph_json_lists_writes_and_findings() {
     let [a, c, d] = ["a-load", "c-base", "d-redefine"].map(migration);
     let (refused, cp1252) = ("tests/scripts/tsql/08-refused.sql", "tests/scripts/tsql/14-cp1252.sql");
-    let output = graph(&["--dialect", "tsql", "--json", &a, &c, &d, refused, cp1252]);
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    let mut graph: Value = serde_json::from_slice(&output.stdout).expect("the output is JSON");
+    let mut graph = printed_json(&["graph", "--dialect", "tsql", "--json", &a, &c, &d, refused, cp1252]);
     // polyglot's message, text for a person.
     let message = graph["findings"][0]["detail"].take();
     assert!(message.as_str().is_some_and(|message| message.contains("Expected Into")), "{message}");
@@ -512,8 +510,7 @@ fn walked(name: &str, column: &str, paths: &[&str]) -> Vec<String> {
 
 /// What `trace` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
 fn traced(column: &str, paths: &[&str]) -> Value {
-    let found = lines(&[&["trace", "--dialect", "tsql", "--json", column], paths].concat());
-    serde_json::from_str(&found.join("\n")).expect("the output is JSON")
+    printed_json(&[&["trace", "--dialect", "tsql", "--json", column], paths].concat())
 }
 
 /// The scripts of a load and its views: three tables, four loads of `dbo.Fact`, the last
@@ -738,9 +735,7 @@ fn an_unknown_write_is_refused() {
 
 #[test]
 fn commands_give_json_on_request() {
-    let json = |arguments: &[&str]| -> Value {
-        serde_json::from_str(&lines(&[arguments, &["--json", LINEAGE]].concat()).join("\n")).expect("JSON")
-    };
+    let json = |arguments: &[&str]| printed_json(&[arguments, &["--json", LINEAGE]].concat());
     let end = |relation: &str, column: &str| json!({"relation": relation, "column": column});
     let trace = json(&["trace", "--dialect", "tsql", "dbo.vTop.Total"]);
     assert_eq!(trace["column"], end("dbo.vTop", "Total"));
@@ -783,8 +778,7 @@ fn uses_reports_the_scripts_refused_writes() {
         let found = walked(name, "dbo.O.Id", &[path]);
         assert!(matches!(found.as_slice(), [line] if line.starts_with(&format!("refused: {path}:2:1 "))), "{found:?}");
     }
-    let found = lines(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
-    let walk: Value = serde_json::from_str(&found.join("\n")).expect("the output is JSON");
+    let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
     let refused = &walk["refusals"][0];
     assert_eq!((&walk["edges"], &refused["place"]), (&json!([]), &json!(format!("{path}:2:1"))));
     assert!(refused["detail"].is_string() && refused.get("write").is_none(), "{walk}");
@@ -800,8 +794,7 @@ fn walks_report_dynamic_sql_not_read() {
     let expected = [edge, format!("not_read: {path}:2:1 dynamic SQL")];
     assert_eq!(walked("uses", "dbo.O.Id", &[path]), expected);
     assert_eq!(walked("trace", "dbo.vO.Id", &[path]), expected);
-    let found = lines(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
-    let walk: Value = serde_json::from_str(&found.join("\n")).expect("the output is JSON");
+    let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
     assert_eq!(walk["not_read"], json!([{"place": format!("{path}:2:1"), "detail": "dynamic SQL"}]));
     assert_eq!(walk["refusals"], json!([]));
 }

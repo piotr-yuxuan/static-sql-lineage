@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, lines, outline, request, request_in, respond, trace, trace_in};
+use super::{answers, assert_refused, lines, outline, printed_json, request, request_in, respond, trace, trace_in};
 
 const CTE: &str = "with orders as (select id from raw.orders) select id from orders";
 
@@ -249,8 +249,7 @@ const DECLARED: &str = "tests/scripts/snowflake/04-declared.sql";
 
 /// What `trace` gives for `column` in the script of `catalog.declared-by-create-table`.
 fn declared(column: &str) -> Value {
-    let found = lines(&["trace", "--dialect", "snowflake", "--json", column, DECLARED]);
-    serde_json::from_str(&found.join("\n")).expect("the output is JSON")
+    printed_json(&["trace", "--dialect", "snowflake", "--json", column, DECLARED])
 }
 
 #[test]

@@ -44,6 +44,11 @@ fn lines(arguments: &[&str]) -> Vec<String> {
     String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
 }
 
+/// The JSON that the command line `arguments` prints, as [`lines`] reads it.
+fn printed_json(arguments: &[&str]) -> Value {
+    serde_json::from_str(&lines(arguments).join("\n")).expect("the output is JSON")
+}
+
 /// The binary's output for `input` on its standard input.
 fn answers(input: &[u8]) -> Output {
     let mut child = (binary().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
