@@ -125,9 +125,9 @@ have. A reject scenario names an answer that must not be given.
 - home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
-  - `Write::query`: the write's query, or its refusal.
-  - `Write::relations`: the relations that the write's query reads.
-  - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
+  - `Write::query`: the query that a piece's text holds, or its refusal.
+  - `Write::relations`: the relations that a piece's query reads, as its text names them.
+  - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.

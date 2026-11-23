@@ -3,6 +3,17 @@
 Where the code differs from a definition of `docs/concepts.md`, each difference classed
 as a defect of the code, a defect of the definition, an aspiration or an intended gap.
 
+- A T-SQL database whose collation is sensitive to case, or a column with such a
+  collation, is not modelled: under T-SQL every name compares as SQL Server's default
+  collation compares it, ignoring case. Class: an intended gap.
+- Under Snowflake and DuckDB, a table alias read in another case than it was given, as
+  `o.a` in `select o.a from s as O`, gives an `unresolved_reference` gap, where the
+  Edge entry gives the edge `s.a -> t.a`, `copy`, since the dialect's rules for case
+  make `o` and `O` one alias: polyglot-sql looks a qualifier up exactly. Class: a defect
+  of the code.
+- T-SQL's alias written before its expression, as in `select Total = a from s`, is read
+  as a comparison, and the write refused, where the Write entry names its output column
+  `Total`: polyglot-sql does not parse that form. Class: a defect of the code.
 - A `*` over a source whose columns a list renames, such as `with c (x) as (...)` or a
   derived table with column aliases, leaves a write's output columns unknown, a
   `wildcard` gap, where the Edge entry says that a column selected through `*` is a
