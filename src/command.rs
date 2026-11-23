@@ -53,7 +53,8 @@ impl Command {
     }
 
     /// What the command prints, or why it cannot run: a path that does not read. Each path
-    /// is read in the order given, a directory's files sorted by path, into the graph of
+    /// is read in the order given, a directory's files ending `.sql`, in any case, sorted by
+    /// path, into the graph of
     /// their writes: as JSON, or one line per write in migration order,
     /// `<id> <target> <- <relation>, ...`; one per finding, after its kind and a colon; then
     /// the number of statements skipped.
@@ -61,13 +62,18 @@ impl Command {
         let unread = |path: &PathBuf, error: std::io::Error| format!("{} does not read: {error}", path.display());
         let mut scripts = Vec::new();
         for given in &self.paths {
-            let (mut pending, mut files) = (vec![given.clone()], Vec::new());
-            while let Some(path) = pending.pop() {
-                if path.is_dir() {
+            // Each path to read, with whether it is a directory: a link to one found under a
+            // directory is not, so that a cyclic link ends.
+            let (mut pending, mut files) = (vec![(given.clone(), given.is_dir())], Vec::new());
+            while let Some((path, directory)) = pending.pop() {
+                if directory {
                     let entries = std::fs::read_dir(&path).map_err(|error| unread(&path, error))?;
-                    let entries = entries.map(|entry| entry.map(|entry| entry.path())).collect::<Result<Vec<_>, _>>();
-                    pending.extend(entries.map_err(|error| unread(&path, error))?);
-                } else if path == *given || path.extension().is_some_and(|extension| extension == "sql") {
+                    let entries =
+                        entries.map(|entry| entry.and_then(|entry| Ok((entry.path(), entry.file_type()?.is_dir()))));
+                    pending.extend(entries.collect::<std::io::Result<Vec<_>>>().map_err(|error| unread(&path, error))?);
+                } else if path == *given
+                    || path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("sql"))
+                {
                     files.push(path);
                 }
             }

@@ -217,14 +217,30 @@ fn write_ids_are_their_places() {
 
 #[test]
 fn a_directory_is_read_in_path_order() {
-    // Its files ending `.sql`, at any depth, sorted by path; `notes.txt` is not read.
+    // Its files ending `.sql`, in any case, at any depth, sorted by path; `notes.txt` is not
+    // read.
     let expected = [
         "tests/scripts/tsql/order/a/c.sql:1:1 dbo.vC <- dbo.Orders",
         "tests/scripts/tsql/order/a.sql:1:1 dbo.vA <- dbo.Orders",
         "tests/scripts/tsql/order/b.sql:1:1 dbo.vB <- dbo.Orders",
+        "tests/scripts/tsql/order/d.SQL:1:1 dbo.vD <- dbo.Orders",
         "skipped: 0",
     ];
     assert_eq!(tsql(&["tests/scripts/tsql/order"]), expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_to_a_directory_is_not_followed() {
+    // A link to its own directory, found under it, would read the directory again and again.
+    let scratch = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("links-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).expect("a scratch directory");
+    std::fs::write(scratch.join("a.sql"), "CREATE VIEW dbo.vA AS SELECT Id FROM dbo.Orders\n").expect("a script");
+    std::os::unix::fs::symlink(".", scratch.join("again")).expect("a link");
+    let path = scratch.display().to_string();
+    let found = tsql(&[&path]);
+    std::fs::remove_dir_all(&scratch).expect("the scratch directory removed");
+    assert_eq!(found, [format!("{path}/a.sql:1:1 dbo.vA <- dbo.Orders"), "skipped: 0".to_string()]);
 }
 
 /// The ids of the writes that `graph` prints for `paths` in `dialect`, with `options`.
