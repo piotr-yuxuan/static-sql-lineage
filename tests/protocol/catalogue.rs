@@ -262,6 +262,25 @@ fn a_key_merged_in_a_cte_follows_its_join() {
 }
 
 #[test]
+fn a_transformed_key_through_a_cte_derives() {
+    let joins = [
+        ("inner", ["s.k -> t.x derive", "u.k -> t.x derive"]),
+        ("left", ["s.k -> t.x derive", "u.k -> t.x rows"]),
+        ("right", ["s.k -> t.x rows", "u.k -> t.x derive"]),
+        ("full", ["s.k -> t.x derive", "u.k -> t.x derive"]),
+    ];
+    for (join, expected) in joins {
+        let merged = format!("select k from s {join} join u using (k)");
+        for sql in [
+            format!("with c as ({merged}) select upper(k) as x from c"),
+            format!("select upper(k) as x from ({merged}) d"),
+        ] {
+            assert_eq!(trace(&[("s", &["k", "a"]), ("u", &["k", "c"])], &sql), expected, "{sql}");
+        }
+    }
+}
+
+#[test]
 fn a_key_merged_across_three_sources_is_a_gap() {
     let sql = "select k from s join u using (k) join v using (k)";
     let found = trace(&[("s", &["k"]), ("u", &["k"]), ("v", &["k"])], sql);

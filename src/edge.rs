@@ -293,11 +293,13 @@ impl Reach {
 
     /// The kind with which a projection's reference of `kind`, from `parent`, reaches the
     /// output column at `place`, by the engine's lineage of that column where the write
-    /// needs it: rows through the filtering branch of an `INTERSECT` or an `EXCEPT`; for a
-    /// key that a join merges, the kind of the side that it comes through, in the
-    /// outermost `SELECT` or the CTE or derived table whose step the lineage names; none
-    /// where the lineage does not say, such as for a key merged across more than two
-    /// sources, or whose right side the lineage does not tell from its left.
+    /// needs it: the weaker of its own and that of its path, rows through the filtering
+    /// branch of an `INTERSECT` or an `EXCEPT`. For a key that a join merges, in the
+    /// outermost `SELECT` or the CTE or derived table whose step the lineage names, the
+    /// path gives the kind of the side that it comes through, and its steps' own
+    /// expressions stand for the reference's kind, which the engine takes from the merge's
+    /// `COALESCE`. None where the lineage does not say, such as for a key merged across
+    /// more than two sources, or whose right side the lineage does not tell from its left.
     pub fn kind(
         &self,
         place: usize,
@@ -315,39 +317,58 @@ impl Reach {
             }
             _ => None,
         };
-        // The keys merged into the column of `node`: the outermost `SELECT`'s, at the
-        // lineage's root, or those of the CTE or derived table that its step names.
-        let merged = |node: &LineageNode, root: bool| -> Vec<&Key> {
+        // A step copies when its own expression is a column, aliased or not.
+        let expressed = |node: &LineageNode| {
+            let mut expression = &node.expression;
+            loop {
+                expression = match expression {
+                    Expression::Alias(alias) => &alias.this,
+                    Expression::Paren(paren) => &paren.this,
+                    Expression::Annotated(annotated) => &annotated.this,
+                    Expression::Column(_) => return Kind::Copy,
+                    _ => return Kind::Derive,
+                };
+            }
+        };
+        // The kinds of the left and right sides of the key merged into the column of
+        // `node`, with the right's relation or CTE: the outermost `SELECT`'s, at the root,
+        // or those of the CTE or derived table that its step names; none for no key, and
+        // none at all where the lineage does not tell the sides.
+        let sides = |node: &LineageNode, root: bool| {
             let step = matches!(node.source_kind, SourceKind::Cte | SourceKind::DerivedTable);
             let owns = |key: &&Key| match &key.owner {
                 None => root,
                 Some(owner) => step && owner.reported_as(&node.source_name),
             };
-            keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect()
+            let merged: Vec<&Key> = keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect();
+            let names = |right: &RelationName| {
+                node.downstream.iter().filter(|next| right.reported_as(&next.source_name)).count()
+            };
+            match merged.as_slice() {
+                [] => Some(None),
+                [Key { join, right: Some(right), .. }] if names(right) == 1 => Some(Some((Kind::sides(*join)?, right))),
+                _ => None,
+            }
         };
-        let mut pending = vec![(step, None, true)];
+        // Each step with the kind that its path gives, if any, the kind of the steps' own
+        // expressions down to it, and whether the path crosses a merge.
+        let mut pending = vec![(step, None, Kind::Copy, false, true)];
         let mut reached = Vec::new();
-        while let Some((node, through, root)) = pending.pop() {
+        while let Some((node, through, own, crossed, root)) = pending.pop() {
             let filtering =
                 node.set_branch.filter(|branch| branch.ordinal == 1 && branch.operator != SetOperator::Union);
             let through = through.max(filtering.map(|_| Kind::Rows));
+            let sides = sides(node, root)?;
+            // A merge's own expression is its `COALESCE`, which its sides' kinds replace.
+            let own = sides.map_or(own.max(expressed(node)), |_| own);
             if leaf(node).as_ref() == Some(parent) {
-                reached.push(through.unwrap_or(kind));
+                let reference = if crossed { own } else { kind };
+                reached.push(through.map_or(reference, |through| through.max(reference)));
             }
-            // A merged key's right side is the step that names the join's relation or CTE.
-            let names = |right: &RelationName, next: &LineageNode| right.reported_as(&next.source_name);
-            let sides = match merged(node, root).as_slice() {
-                [] => None,
-                [Key { join, right: Some(right), .. }]
-                    if node.downstream.iter().filter(|next| names(right, next)).count() == 1 =>
-                {
-                    Some((Kind::sides(*join)?, right))
-                }
-                _ => return None,
-            };
             pending.extend(node.downstream.iter().map(|next| {
-                let side = sides.map(|((left, right), joined)| if names(joined, next) { right } else { left });
-                (next, through.max(side), false)
+                let side = sides
+                    .map(|((left, right), joined)| if joined.reported_as(&next.source_name) { right } else { left });
+                (next, through.max(side), own, crossed || sides.is_some(), false)
             }));
         }
         Some(reached.into_iter().min().unwrap_or(kind))
