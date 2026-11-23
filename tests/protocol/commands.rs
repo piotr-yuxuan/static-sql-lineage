@@ -503,9 +503,10 @@ fn a_create_table_as_is_not_blanked() {
     );
 }
 
-/// The lines that the command `name` prints for `column` in the scripts at `paths` in T-SQL.
-fn walked(name: &str, column: &str, paths: &[&str]) -> Vec<String> {
-    lines(&[&[name, "--dialect", "tsql", column], paths].concat())
+/// The lines that the command `name` prints for `argument`, a column or a write, in the
+/// scripts at `paths` in T-SQL.
+fn walked(name: &str, argument: &str, paths: &[&str]) -> Vec<String> {
+    lines(&[&[name, "--dialect", "tsql", argument], paths].concat())
 }
 
 /// What `trace` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
@@ -670,11 +671,6 @@ fn an_unknown_column_is_refused() {
     assert_eq!(walked("uses", "dbo.vTop.Total", &[LINEAGE]), [""]);
 }
 
-/// The lines that `outline` prints for the write `id` in the scripts at `paths` in T-SQL.
-fn outlined(id: &str, paths: &[&str]) -> Vec<String> {
-    lines(&[&["outline", "--dialect", "tsql", id], paths].concat())
-}
-
 #[test]
 fn outline_gives_a_write_in_brief() {
     // A replace write and its answer; a contribute write, refused, its detail text for a person.
@@ -689,8 +685,8 @@ fn outline_gives_a_write_in_brief() {
         "clause: SELECT 3:26".to_string(),
         "clause: FROM 3:53".to_string(),
     ];
-    assert_eq!(outlined(&view(3), &[LINEAGE]), expected);
-    let refused = outlined(&load(4), &[LINEAGE]);
+    assert_eq!(walked("outline", &view(3), &[LINEAGE]), expected);
+    let refused = walked("outline", &load(4), &[LINEAGE]);
     let fields = [format!("id: {}", load(4)), "target: dbo.Fact".to_string(), "mode: contribute".to_string()];
     assert_eq!(refused[..3], fields);
     assert_eq!(refused[3..5], ["place: 4:1", "columns: -"]);
@@ -703,7 +699,8 @@ fn outline_places_clauses() {
     // GROUP (ORDER BY ...)`, nor `FROM` in a string; a join at its first word.
     let path = "tests/scripts/tsql/21-clauses.sql";
     let clauses = |id: &str| -> Vec<String> {
-        outlined(id, &[path]).into_iter().filter_map(|line| line.strip_prefix("clause: ").map(str::to_string)).collect()
+        let found = walked("outline", id, &[path]);
+        found.into_iter().filter_map(|line| line.strip_prefix("clause: ").map(str::to_string)).collect()
     };
     let view = ["WITH 3:1", "SELECT 4:1", "FROM 7:1", "LEFT OUTER JOIN 8:1", "ON 8:33", "CROSS APPLY 9:1"];
     let view = [view.as_slice(), &["WHERE 10:1", "GROUP BY 11:1", "HAVING 12:1"]].concat();
@@ -720,7 +717,7 @@ fn outline_places_clauses_inside_an_existence_check() {
     let file = read(path);
     let line = file.lines().nth(1).expect("the script's second line");
     let place = |words: &str| format!("clause: {words} 2:{}", line.find(words).expect("the words are on the line") + 1);
-    let found = outlined(&format!("{path}:2:1"), &[path]);
+    let found = walked("outline", &format!("{path}:2:1"), &[path]);
     assert_eq!(found[3], "place: 2:1");
     let clauses = ["SELECT", "FROM", "WHERE", "GROUP BY"].map(place);
     assert_eq!(found[found.len() - 4..], clauses);
