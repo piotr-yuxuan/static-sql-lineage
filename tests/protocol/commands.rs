@@ -172,6 +172,8 @@ fn a_refused_write_is_reported_with_its_place() {
     assert_eq!(found[..2], writes);
     assert!(found[2].starts_with(&format!("refused: {path}:2:1 ")), "{found:?}");
     assert!(found[2].contains("Expected Into"), "{found:?}");
+    // At the place in the file of `dbo`, where polyglot stops, not its place in the statement.
+    assert!(found[2].ends_with(", at 2:8") && !found[2].contains("line 1"), "{found:?}");
     assert_eq!(found[3..], ["skipped: 2"]);
 }
 

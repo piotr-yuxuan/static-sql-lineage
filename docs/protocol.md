@@ -206,7 +206,7 @@ load.sql:1:1 dbo.Fact <- dbo.Stage
 load.sql:5:1 dbo.Loop1 <- dbo.Loop2
 load.sql:6:1 dbo.Loop2 <- dbo.Loop1
 views.sql:3:1 [dbo].[vA] <- dbo.Fact
-refused: load.sql:2:1 Parse error at line 1, column 8: Expected Into, got Var ('dbo')
+refused: load.sql:2:1 Expected Into, got Var ('dbo') near [INSERT dbo.Fact (], at 2:8
 not_read: legacy.sql not UTF-8, nor UTF-16 after a byte order mark
 cycle: load.sql:5:1, load.sql:6:1 (dbo.Loop1, dbo.Loop2)
 replaced_twice: [dbo].[vA] (views.sql:3:1, redefine.sql:1:1)
@@ -219,7 +219,7 @@ With `--json`, the same as one object:
 {
   "writes": [{"id": "load.sql:1:1", "target": "dbo.Fact", "reads": ["dbo.Stage"]}],
   "findings": [
-    {"kind": "refused", "place": "load.sql:2:1", "detail": "Parse error at ..."},
+    {"kind": "refused", "place": "load.sql:2:1", "detail": "Expected Into, ..., at 2:8"},
     {"kind": "not_read", "place": "legacy.sql", "detail": "not UTF-8, nor UTF-16 ..."},
     {"kind": "cycle", "writes": ["load.sql:5:1", "load.sql:6:1"], "relations": ["dbo.Loop1", "dbo.Loop2"]},
     {"kind": "replaced_twice", "relation": "[dbo].[vA]", "writes": ["views.sql:3:1", "redefine.sql:1:1"]}
@@ -229,7 +229,8 @@ With `--json`, the same as one object:
 ```
 
 - `place`: a place, or for a file that does not decode its path alone. `detail`: text for
-  a person, which this contract does not fix.
+  a person, which this contract does not fix; for `refused`, polyglot-sql's message, then
+  the line and the column in the file of the token at which it stops.
 - The findings of the reading come first, in reading order; then the cycles, in
   migration order; then the relations replaced twice, by their first replace write.
 

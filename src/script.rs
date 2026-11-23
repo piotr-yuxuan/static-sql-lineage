@@ -164,6 +164,13 @@ impl Script {
                     // A window that fails at its last token ran out of text: it grows.
                     Err(error) if !hard && error.start().is_some_and(|at| start + at >= tokens[to - 1].span.start) => {}
                     parsed => {
+                        // polyglot's message, at the place in the file where it stops, not in the window.
+                        let parsed = parsed.map_err(|error| match error {
+                            polyglot_sql::Error::Parse { message, start: at, .. } => {
+                                format!("{message}, at {}", Place::at(&starts, start + at))
+                            }
+                            error => error.to_string(),
+                        });
                         script.statement(parsed, &window, &tokens[from..to], Place::at(&starts, start), dialect);
                         from = to + usize::from(hard);
                     }
@@ -180,7 +187,7 @@ impl Script {
     /// does not parse is refused, reported when its first words make it a write.
     fn statement(
         &mut self,
-        parsed: polyglot_sql::Result<Expression>,
+        parsed: Result<Expression, String>,
         text: &str,
         tokens: &[Token],
         place: Place,
@@ -204,7 +211,7 @@ impl Script {
                     words.first() == Some(first) && needs(before, &head) && needs(anywhere, &words)
                 };
                 if WRITES.iter().any(write) {
-                    self.findings.push(Finding::Refused { place: id, detail: error.to_string() });
+                    self.findings.push(Finding::Refused { place: id, detail: error });
                 } else {
                     self.skipped += 1;
                 }
