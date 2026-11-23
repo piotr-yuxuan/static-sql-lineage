@@ -12,7 +12,7 @@ use polyglot_sql::expressions::{
 use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
 use polyglot_sql::traversal::{ExpressionWalk, get_merge_target};
 use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
-use polyglot_sql::{ColumnUseContext, LineageNode, TokenType, generate, lineage_at_with_schema, parse_one};
+use polyglot_sql::{ColumnUseContext, LineageNode, Token, TokenType, generate, lineage_at_with_schema, parse_one};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
@@ -911,4 +911,9 @@ fn with(mut query: Expression, with: Option<With>) -> Expression {
         _ => {}
     }
     query
+}
+
+/// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
+pub fn nesting(token: &Token) -> i32 {
+    i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
 }

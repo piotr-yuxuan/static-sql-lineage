@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Defaults, Name, RelationName};
-use crate::write::{Place, Write};
+use crate::write::{Place, Write, nesting};
 
 /// The first words of T-SQL's statements, before which a window may end; not `WITH`, which
 /// also starts a table hint.
@@ -334,11 +334,6 @@ impl Script {
             _ => self.skipped += 1,
         }
     }
-}
-
-/// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
-fn nesting(token: &Token) -> i32 {
-    i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
 }
 
 /// The parse of `text`, a statement, under `dialect`. In T-SQL, a declaration, a
