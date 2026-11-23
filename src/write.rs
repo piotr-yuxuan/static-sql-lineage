@@ -94,7 +94,8 @@ impl Write {
 /// or, when a `*` leaves them unknown, the relation that it reads, if any. A query gives
 /// those of its outermost select list, or its left branch's, as [`listed`] names them; a
 /// CTE among `ctes`, those in scope, gives its query's, and a relation of the catalog its
-/// columns, as the catalog spells them.
+/// columns, as the catalog spells them. A CTE with a list of columns, or a source with
+/// column aliases, leaves them unknown.
 fn named<'a>(
     query: &'a Expression,
     ctes: &[&'a Cte],
@@ -113,8 +114,8 @@ fn named<'a>(
             Expression::Union(set) => (&set.with, &set.left),
             Expression::Intersect(set) => (&set.with, &set.left),
             Expression::Except(set) => (&set.with, &set.left),
-            Expression::Subquery(subquery) => (&None, &subquery.this),
-            Expression::Table(table) => {
+            Expression::Subquery(subquery) if subquery.column_aliases.is_empty() => (&None, &subquery.this),
+            Expression::Table(table) if table.column_aliases.is_empty() => {
                 let cte = ctes
                     .iter()
                     .rposition(|cte| table.schema.is_none() && cte.alias.name.eq_ignore_ascii_case(&table.name.name));
@@ -123,7 +124,7 @@ fn named<'a>(
                     let (_, columns) = catalog.get(&relation).ok_or_else(|| Some(relation.to_string()))?;
                     return Ok(columns.iter().cloned().map(Some).collect());
                 };
-                let cte: &Cte = ctes[at];
+                let cte: &Cte = Some(ctes[at]).filter(|cte| cte.columns.is_empty()).ok_or(None)?;
                 ctes.truncate(at);
                 (&None, &cte.this)
             }

@@ -2,7 +2,7 @@
 //! Output columns through a `*`, each a `copy` as the Edge entry of `docs/concepts.md`
 //! says, and named as what the `*` reads names it, as its Relation entry says.
 
-use super::{request, respond, trace};
+use super::{outline, request, respond, trace};
 
 /// The output columns of the answer to `sql` against `catalog`, its target `t`.
 fn columns(catalog: &[(&str, &[&str])], sql: &str) -> serde_json::Value {
@@ -54,4 +54,19 @@ fn a_star_over_several_relations_is_a_wildcard_gap() {
 #[test]
 fn an_unnamed_output_through_a_star_is_a_wildcard_gap() {
     assert_eq!(trace(&[("s", &["a"])], "with c as (select a + 1 from s) select * from c"), ["gap wildcard - -"]);
+}
+
+#[test]
+fn a_star_over_a_cte_with_a_column_list_is_a_wildcard_gap() {
+    let firsts = [
+        "with c (x) as (select a from s) select * from c",
+        "select * from (select a from s) as d (x)",
+        "select * from s as d (x)",
+    ];
+    for first in firsts {
+        let answers = respond(&request(&[("s", &["a"])], &[("u", first), ("v", "select a as z from u")]));
+        assert_eq!(answers[0]["columns"], serde_json::Value::Null, "{first}");
+        assert_eq!(outline(&answers[0]), ["gap wildcard - -"], "{first}");
+        assert_eq!(outline(&answers[1]), ["gap unknown_relation u -"], "{first}");
+    }
 }

@@ -12,9 +12,10 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   gives an `unattributed_use` gap, where the Edge entry says that `IN` and `EXISTS`
   decide rows: polyglot-sql does not say which projection or clause holds a subquery.
   Plan 005 places it from the tree. Class: an aspiration.
-- A `*` over several sources, such as the relations of a join, leaves a write's output
-  columns unknown, a `wildcard` gap, where the Edge entry says that a column selected
-  through `*` is a `copy`. Class: an aspiration.
+- A `*` over several sources, such as the relations of a join, or over one whose
+  columns a list renames, such as `with c (x) as (...)` or a derived table with column
+  aliases, leaves a write's output columns unknown, a `wildcard` gap, where the Edge
+  entry says that a column selected through `*` is a `copy`. Class: an aspiration.
 - The filtering branch of `INTERSECT` and `EXCEPT` gives a `copy` to each output
   column, since polyglot-sql puts its columns in each projection's upstream as
   `Direct`, where the catalogue of clauses carried over from the proof of concept says
