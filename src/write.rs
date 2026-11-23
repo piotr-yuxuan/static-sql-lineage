@@ -46,10 +46,13 @@ pub enum Holder {
 }
 
 /// A key that a join merges in a `SELECT` of a write's query: the CTE or derived table
-/// whose select it is, none for the outermost; the column that its list names for it; the
-/// kind of the join; and the relation or CTE that the join joins, when it joins one.
+/// whose select it is, none for the outermost; whether the engine's lineage names that
+/// select's step, which it does not for a branch of a set operation or a subquery; the
+/// column that its list names for it; the kind of the join; and the relation or CTE that
+/// the join joins, when it joins one.
 pub struct Key {
     pub owner: Option<Name>,
+    pub placed: bool,
     pub column: Name,
     pub join: JoinKind,
     pub right: Option<RelationName>,
@@ -207,10 +210,9 @@ impl Write {
         found
     }
 
-    /// The keys that the joins of `query` merge in its outermost `SELECT`, a CTE's or a
-    /// derived table's, selected bare, aliased or not, or through a `*`; none when a join
-    /// merges a key in a branch of a set operation or in a subquery, or among sources whose
-    /// columns are unknown, where the sides of its keys are not told.
+    /// The keys that the joins of `query` merge in each of its `SELECT`s, selected bare,
+    /// aliased or not, or through a `*`; none when a join merges a key among sources whose
+    /// columns are unknown, where its keys are not told.
     pub fn keys(&self, query: &Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Option<Vec<Key>> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
@@ -235,7 +237,7 @@ impl Write {
                 continue;
             }
             let placed = !["subqueries[", "udtfs[", "branches["].iter().any(|kind| path.contains(kind));
-            let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok().filter(|_| placed)?;
+            let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
             // Each column of the list with the column of the sources that it selects.
             let listed = select_list(select).flat_map(|expression| match expression {
                 Expression::Star(star) if star.table.is_none() => {
@@ -250,7 +252,7 @@ impl Write {
                 let merged = columns.iter().filter(|(column, _)| *column == selected).flat_map(|(_, joins)| joins);
                 keys.extend(merged.map(|&at| {
                     let (join, right) = (select.joins[at].kind, right(&select.joins[at]));
-                    Key { owner: owner.clone(), column: named.clone(), join, right }
+                    Key { owner: owner.clone(), placed, column: named.clone(), join, right }
                 }));
             }
         }

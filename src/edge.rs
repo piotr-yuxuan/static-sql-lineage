@@ -333,10 +333,12 @@ impl Reach {
         // The kinds of the left and right sides of the key merged into the column of
         // `node`, with the right's relation or CTE: the outermost `SELECT`'s, at the root,
         // or those of the CTE or derived table that its step names; none for no key, and
-        // none at all where the lineage does not tell the sides.
+        // none at all where the lineage does not tell the sides, nor which step is the
+        // merge of a key in a branch or a subquery, which any step of its name may be.
         let sides = |node: &LineageNode, root: bool| {
             let step = matches!(node.source_kind, SourceKind::Cte | SourceKind::DerivedTable);
             let owns = |key: &&Key| match &key.owner {
+                _ if !key.placed => true,
                 None => root,
                 Some(owner) => step && owner.reported_as(&node.source_name),
             };
@@ -346,7 +348,9 @@ impl Reach {
             };
             match merged.as_slice() {
                 [] => Some(None),
-                [Key { join, right: Some(right), .. }] if names(right) == 1 => Some(Some((Kind::sides(*join)?, right))),
+                [Key { placed: true, join, right: Some(right), .. }] if names(right) == 1 => {
+                    Some(Some((Kind::sides(*join)?, right)))
+                }
                 _ => None,
             }
         };

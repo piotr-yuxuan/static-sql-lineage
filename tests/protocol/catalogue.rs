@@ -281,6 +281,21 @@ fn a_transformed_key_through_a_cte_derives() {
 }
 
 #[test]
+fn a_key_merged_in_a_branch_is_a_gap_for_its_column_alone() {
+    let sql = "select k, a from s join u using (k) union all select k, c from u";
+    let expected = [
+        "s.k -> t.k rows",
+        "u.k -> t.k rows",
+        "s.a -> t.a copy",
+        "s.k -> t.a rows",
+        "u.c -> t.a copy",
+        "u.k -> t.a rows",
+        "gap unattributed_use - k",
+    ];
+    assert_eq!(trace(&[("s", &["k", "a"]), ("u", &["k", "c"])], sql), expected);
+}
+
+#[test]
 fn a_key_merged_across_three_sources_is_a_gap() {
     let sql = "select k from s join u using (k) join v using (k)";
     let found = trace(&[("s", &["k"]), ("u", &["k"]), ("v", &["k"])], sql);
