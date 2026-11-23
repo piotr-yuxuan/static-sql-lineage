@@ -171,6 +171,22 @@ fn a_filter_branch_in_a_chain_decides_rows() {
 }
 
 #[test]
+fn a_subquery_in_a_filter_branch_decides_rows_of_every_column() {
+    let sql = "select a, b from s except select x, (select max(z) from v where c > 0) from u";
+    let expected = [
+        "s.a -> t.a copy",
+        "u.x -> t.a rows",
+        "v.c -> t.a rows",
+        "v.z -> t.a rows",
+        "s.b -> t.b copy",
+        "u.x -> t.b rows",
+        "v.c -> t.b rows",
+        "v.z -> t.b rows",
+    ];
+    assert_eq!(trace(&[("s", &["a", "b"]), ("u", &["x"]), ("v", &["z", "c"])], sql), expected);
+}
+
+#[test]
 fn an_inner_using_key_copies_both() {
     assert_eq!(using("inner"), [&["s.k -> t.k copy", "u.k -> t.k copy"][..], &USING_ROWS].concat());
 }

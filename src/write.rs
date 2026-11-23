@@ -146,26 +146,34 @@ impl Write {
     pub fn holders(&self, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
+        let all = scopes(&root, &sql, dialect);
+        // A branch that filters an `INTERSECT` or an `EXCEPT`, or a branch of one, decides
+        // rows by its select list.
+        let filters = |path: &str| {
+            let filtered = |scope: &Scope| matches!(query_of(scope), Expression::Intersect(_) | Expression::Except(_));
+            let set = |at: usize| all.iter().any(|(parent, scope, _)| *parent == path[..at] && filtered(scope));
+            path.match_indices(".branches[1]").any(|(at, _)| set(at))
+        };
         let mut found = Vec::new();
-        for (path, scope, owner) in scopes(&root, &sql, dialect) {
-            let query = match &scope.expression {
-                Expression::Cte(cte) => &cte.this,
-                query => query,
-            };
-            let Expression::Select(select) = query else { continue };
+        for (path, scope, owner) in &all {
+            let Expression::Select(select) = query_of(scope) else { continue };
             if path.contains(".subqueries[") || path.contains(".udtfs[") {
                 continue;
             }
             // In the select list, the output column at its place or, in a CTE or a
             // derived table, the column that the list names there.
+            let clause = |context| Some(Holder::Clause(context));
+            let filtering = filters(path);
             let star = select_list(select).position(|expression| matches!(expression, Expression::Star(_)));
             let listed = select_list(select).enumerate().map(|(at, expression)| {
+                if filtering {
+                    return (clause(ColumnUseContext::SetOperationFilter), expression);
+                }
                 let holder = owner.as_ref().map_or(Some(Holder::Output(at)), |owner| {
                     Some(Holder::Column(owner.clone(), name(expression, &sql, dialect)?))
                 });
                 (holder.filter(|_| star.is_none_or(|star| at < star)), expression)
             });
-            let clause = |context| Some(Holder::Clause(context));
             let ons = select.joins.iter().flat_map(|join| join.on.iter().chain(&join.match_condition));
             let groups = select.group_by.iter().flat_map(|group| &group.expressions);
             let orders = select.order_by.iter().flat_map(|order| order.expressions.iter().map(|key| &key.this));
@@ -226,11 +234,7 @@ impl Write {
         };
         let mut keys = Vec::new();
         for (path, scope, owner) in scopes(&root, &sql, dialect) {
-            let query = match &scope.expression {
-                Expression::Cte(cte) => &cte.this,
-                query => query,
-            };
-            let Expression::Select(select) = query else { continue };
+            let Expression::Select(select) = query_of(scope) else { continue };
             if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
                 continue;
             }
@@ -462,6 +466,14 @@ fn listed<'a>(
         names.extend(columns);
     }
     Ok(names)
+}
+
+/// The query of `scope`, that of its CTE for a CTE's.
+fn query_of(scope: &Scope) -> &Expression {
+    match &scope.expression {
+        Expression::Cte(cte) => &cte.this,
+        query => query,
+    }
 }
 
 /// Whether `join` is `NATURAL`, which merges the columns that both its sides have.
