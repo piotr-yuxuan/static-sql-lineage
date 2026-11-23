@@ -1,0 +1,14 @@
+# parent relation	parent column	child relation	child column	dbt	sql-lineage	verdict	reason
+# dbt calls a copy the value that one function or branch selects unchanged; the definition derives it.
+"shop"."main"."stg_orders"	amount	"shop"."main"."p_case"	placed_amount	copy	derive	meaning	a CASE result is amount on some rows and 0 on others: definition.md derives it, dbt calls the branch a copy
+"shop"."main"."stg_orders"	status	"shop"."main"."p_case"	status	copy	derive	meaning	coalesce(status, 'unknown') computes a value, as edge.coalesce-is-derive says; dbt calls the selected argument a copy
+"shop"."main"."stg_orders"	order_date	"shop"."main"."p_group"	last_order	copy	derive	meaning	max(order_date) is an aggregate, which derives; dbt calls the selected value a copy
+"shop"."main"."stg_orders"	amount	"shop"."main"."p_subquery"	max_placed	copy	derive	meaning	max(o.amount) is an aggregate, which derives; dbt calls the selected value a copy
+# The correlated subquery of p_subquery decides the rows of its column alone.
+"shop"."main"."stg_customers"	customer_id	"shop"."main"."p_subquery"	max_placed	derive	rows	meaning	c.customer_id is read by the subquery's WHERE, which decides rows; dbt counts the outer side of a correlated predicate as an input of the value
+# A relation's rows have no order: ORDER BY decides them only under a limit.
+"shop"."main"."stg_orders"	amount	"shop"."main"."p_order"	order_id	rows	-	meaning	ORDER BY with no LIMIT keeps every row, as edge.order-without-limit says; dbt counts it as deciding rows
+# The key that USING merges, selected through a star.
+"shop"."main"."stg_orders"	customer_id	"shop"."main"."p_using_full"	customer_id	copy	derive	error: dbt	a full join's merged key is coalesce(left, right): the right key gives it on the rows that only the right side has
+"shop"."main"."stg_customers"	customer_id	"shop"."main"."p_using_full"	customer_id	rows	derive	error: dbt	the right key gives the merged value on the rows that only the right side has, not only their selection
+"shop"."main"."stg_customers"	customer_id	"shop"."main"."p_using_star_inner"	customer_id	rows	copy	meaning	an inner join's merged key is this key's value on every row too: definition.md copies both keys, dbt the left one alone

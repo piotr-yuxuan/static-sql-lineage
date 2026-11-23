@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! What is said of one write: its output columns, its edges, its gaps and its refusal.
 
+use polyglot_sql::expressions::Expression;
+use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::validation::{SchemaValidationOptions, validate_with_schema};
-use polyglot_sql::{AnalyzeQueryOptions, ValidationSeverity, analyze_query};
+use polyglot_sql::{AnalyzeQueryOptions, QueryAnalysis, ValidationSeverity, analyze_query};
 use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::edge::{Edge, End, Kind, Reach};
+use crate::edge::{Edge, End, Reach};
 use crate::relation::Name;
 use crate::write::{Outputs, Write};
 
@@ -34,9 +36,9 @@ pub struct Gap {
 }
 
 impl Gap {
-    /// A gap of `reason` that concerns no relation and no column.
-    fn of(reason: GapReason, detail: impl Into<String>) -> Gap {
-        Gap { reason, relation: None, column: None, detail: detail.into() }
+    /// A gap of `reason` that concerns no relation, and the output column `column`, if any.
+    pub fn of(reason: GapReason, column: Option<String>, detail: impl Into<String>) -> Gap {
+        Gap { reason, relation: None, column, detail: detail.into() }
     }
 }
 
@@ -84,7 +86,7 @@ impl Answer {
         let mut gaps: Vec<Gap> = (unknown.into_iter())
             .map(|relation| Gap {
                 relation: Some(relation.to_string()),
-                ..Gap::of(GapReason::UnknownRelation, "unknown to the catalog")
+                ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
             })
             .collect();
         let schema = catalog.schema(relations);
@@ -100,7 +102,7 @@ impl Answer {
         let outputs = match write.outputs(&query, catalog, dialect, defaults) {
             Ok(Outputs::Named(outputs)) => outputs,
             Ok(Outputs::Unknown(relation)) => {
-                gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, "the columns of a * are unknown") });
+                gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, None, "the columns of a * are unknown") });
                 return answer.ended(gaps);
             }
             Err(refusal) => return answer.refused(refusal),
@@ -110,61 +112,60 @@ impl Answer {
             .flat_map(|(at, one)| {
                 known[at + 1..].iter().filter(|other| one.alike(other)).map(move |other| (one, other))
             })
-            .map(|(one, other)| Gap::of(GapReason::AmbiguousRelation, format!("{one} and {other}")))
+            .map(|(one, other)| Gap::of(GapReason::AmbiguousRelation, None, format!("{one} and {other}")))
             .collect();
         if !alike.is_empty() {
             return answer.ended(gaps.into_iter().chain(alike).collect());
         }
-        let options = AnalyzeQueryOptions { dialect: dialect.polyglot(), schema: Some(schema), complexity_guard: None };
+        // polyglot gives a pivot's grouping column no use, and `UNPIVOT`'s name column a copy
+        // of the columns it unpivots (#559, #560).
+        if query.dfs().any(|node| matches!(node, Expression::Pivot(_) | Expression::Unpivot(_))) {
+            gaps.push(Gap::of(GapReason::AnalysisFailed, None, "the engine does not trace PIVOT and UNPIVOT"));
+            return answer.ended(gaps);
+        }
+        let options =
+            AnalyzeQueryOptions { dialect: dialect.polyglot(), schema: Some(schema.clone()), complexity_guard: None };
+        // The projection that names each output column: the one at its place, else the only
+        // one that does, as the engine orders a `*` over a join as DuckDB does.
+        let order = |analysis: &QueryAnalysis| -> Option<Vec<usize>> {
+            let projections = &analysis.projections;
+            let found = (outputs.iter().enumerate()).map(|(place, output)| {
+                let named = |at: &usize| projections[*at].name.as_deref().is_some_and(|name| output.reported_as(name));
+                let mut others = (0..projections.len()).filter(named);
+                match (named(&place), others.next(), others.next()) {
+                    (true, ..) => Some(place),
+                    (false, Some(at), None) => Some(at),
+                    _ => None,
+                }
+            });
+            found.collect::<Option<Vec<usize>>>().filter(|_| projections.len() == outputs.len())
+        };
         let analysis = match analyze_query(&write.sql, options) {
-            Ok(analysis)
-                if analysis.projections.len() == outputs.len()
-                    && (analysis.projections.iter().zip(&outputs)).all(|(projection, output)| {
-                        projection.name.as_deref().is_some_and(|name| output.reported_as(name))
-                    }) =>
-            {
-                analysis
-            }
-            failed => {
-                let detail = failed
-                    .err()
-                    .map_or("the analysis names other output columns".to_string(), |error| error.to_string());
-                gaps.push(Gap::of(GapReason::AnalysisFailed, detail));
+            Ok(analysis) => analysis,
+            Err(error) => {
+                gaps.push(Gap::of(GapReason::AnalysisFailed, None, error.to_string()));
                 return answer.ended(gaps);
             }
         };
-        let reach = Reach::of(&query);
-        let unplaced = analysis.column_uses.iter().filter(|use_| reach.rows(use_).is_none());
-        gaps.extend(unplaced.map(|use_| {
-            let detail = format!("{:?} at {}: {}", use_.context, use_.scope_path, use_.expression_sql);
-            Gap::of(GapReason::UnattributedUse, detail)
-        }));
-        let rows: Vec<_> = (analysis.column_uses.iter().filter(|use_| reach.rows(use_) == Some(true)))
-            .flat_map(|use_| use_.references.iter().map(|used| (&used.reference, Kind::Rows)))
-            .collect();
-        let found =
-            (analysis.projections.iter().zip(&outputs)).enumerate().flat_map(|(place, (projection, output))| {
-                let child = End { relation: write.target.clone(), column: output.to_string() };
-                let values = projection
-                    .upstream
-                    .iter()
-                    .filter_map(|reference| Some((reference, Kind::of(reference.path_transform_kind?)?)));
-                values.chain(rows.iter().copied()).map(move |(reference, kind)| {
-                    (place, output, Edge::of_reference(reference, kind, child.clone(), relations, catalog))
-                })
-            });
-        let mut edges = Vec::new();
-        for (place, output, found) in found {
-            match found {
-                Ok(Some(edge)) => edges.push((place, edge)),
-                Ok(None) => {}
-                Err(detail) => gaps
-                    .push(Gap { column: Some(output.to_string()), ..Gap::of(GapReason::UnresolvedReference, detail) }),
-            }
+        let Some(order) = order(&analysis) else {
+            gaps.push(Gap::of(GapReason::AnalysisFailed, None, "the analysis names other output columns"));
+            return answer.ended(gaps);
+        };
+        // polyglot leaves an output column that a `*` as a function's argument feeds with no
+        // upstream (#556); `count(*)` holds no `*`.
+        let starred = |node: &Expression| matches!(node, Expression::Function(function) if function.args.iter().any(|arg| matches!(arg, Expression::Star(_))));
+        if query.dfs().any(starred) {
+            gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
-        edges.sort();
-        edges.dedup_by(|one, other| one.0 == other.0 && one.1.parent == other.1.parent);
-        Answer { edges: edges.into_iter().map(|(_, edge)| edge).collect(), ..answer }.ended(gaps)
+        let children: Vec<End> =
+            outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
+        let holders = write.holders(&query, dialect);
+        let keys = write.keys(&query, catalog, dialect, defaults);
+        let steps = Write::steps(&query, &holders, keys.as_deref(), &order, &schema, dialect);
+        let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
+        let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog);
+        gaps.extend(found);
+        Answer { edges, ..answer }.ended(gaps)
     }
 
     /// This answer refused, with nothing traced.

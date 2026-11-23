@@ -2,7 +2,10 @@
 //! The binary run as a caller runs it, as `docs/protocol.md` gives its uses: here
 //! `--describe` and the arguments it refuses, and the helpers of the modules.
 
+mod agreement;
 mod answers;
+mod cases;
+mod catalogue;
 mod edges;
 mod requests;
 mod scenarios;

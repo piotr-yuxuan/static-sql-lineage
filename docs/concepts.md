@@ -123,11 +123,14 @@ have. A reject scenario names an answer that must not be given.
   Whether `DELETE ... WHERE` is a write is open (`decisions.md`, Q4).
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`.
+- home: `Write`, `Outputs`, `Holder`, `Key`.
 - operations:
   - `Write::query`: the write's query, or its refusal.
   - `Write::relations`: the relations that the write's query reads.
   - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
+  - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
+  - `Write::steps`: the engine's lineage of each output column, through the query's steps.
+  - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
@@ -174,9 +177,13 @@ have. A reject scenario names an answer that must not be given.
 - home: `Edge`, `End`, `Kind`, `Reach`.
 - operations:
   - `Kind::of`: the kind of a projection's upstream reference.
+  - `Kind::sides`: the kinds of a merged key's two sides, by the kind of the join that merges it.
   - `Reach::of`: where the clauses of one write's query reach.
   - `Reach::rows`: whether a use of a column decides the rows of every output column.
+  - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
+  - `End::of`: the end that the engine's names of a relation and of its column resolve to.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
+  - `Edge::of_analysis`: the edges and gaps of a write's projections and uses, from the engine's analysis.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.
 - accept `edge.coalesce-is-derive`: query `select coalesce(a, 0) as a from s`: the

@@ -130,12 +130,6 @@ fn a_clause_in_an_unread_cte_is_a_gap() {
 }
 
 #[test]
-fn a_use_in_a_subquery_is_a_gap() {
-    let sql = "select a from s where exists (select 1 from u where u.k = s.a)";
-    assert_eq!(trace(&[("s", &["a"]), ("u", &["k"])], sql), ["s.a -> t.a copy", "gap unattributed_use - -"]);
-}
-
-#[test]
 fn edges_spell_names_as_given() {
     let answers = respond(&request(&[("Raw.Orders", &["Id"])], &[("Stg.T", "select ID as \"Key\" from raw.orders")]));
     assert_eq!(outline(&answers[0]), ["Raw.Orders.Id -> Stg.T.\"Key\" copy"]);

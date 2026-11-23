@@ -2,9 +2,13 @@
 //! A write as the request gives it: its query, the relations it reads, and the names of
 //! its output columns.
 
-use polyglot_sql::expressions::{Cte, Expression, Select};
-use polyglot_sql::parse_one;
-use polyglot_sql::scope::{SourceKind, build_scope};
+use std::collections::HashSet;
+
+use polyglot_sql::expressions::{Cte, Expression, Join, JoinKind, Literal, Select};
+use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
+use polyglot_sql::traversal::ExpressionWalk;
+use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
+use polyglot_sql::{ColumnUseContext, LineageNode, lineage_at_with_schema, parse_one};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
@@ -28,6 +32,35 @@ pub enum Outputs {
     Unknown(Option<String>),
 }
 
+/// Where a subquery sits in the `SELECT` that holds it: in a clause, whose uses have the
+/// context it gives, or the same clause through a tuple's `IN`, which reads more columns
+/// of the subquery than the engine reports, its first; in the select list of the
+/// outermost query or of one of its branches, at an output column's place; or in that of
+/// a CTE or a derived table, whose name it gives with the column's.
+#[derive(Clone)]
+pub enum Holder {
+    Clause(ColumnUseContext),
+    Tuple(ColumnUseContext),
+    Output(usize),
+    Column(Name, Name),
+}
+
+/// A key that a join merges in a `SELECT` of a write's query: the CTE or derived table
+/// whose select it is, none for the outermost; whether the engine's lineage names that
+/// select's step, which it does not for a branch of a set operation or a subquery; the
+/// column that its list names, the key that the column reads, and whether an expression
+/// around the key computes the column; the kind of the join; and the relation or CTE that
+/// the join joins, when it joins one.
+pub struct Key {
+    pub owner: Option<Name>,
+    pub placed: bool,
+    pub column: Name,
+    pub read: Name,
+    pub computed: bool,
+    pub join: JoinKind,
+    pub right: Option<RelationName>,
+}
+
 impl Write {
     /// The write's query, the outermost one when it is parenthesised, as the engine
     /// reads it; refused when it is not one statement, or not a query.
@@ -45,20 +78,36 @@ impl Write {
     }
 
     /// The relations that `query` reads: its table references that name no CTE in scope,
-    /// as the engine scopes them, ordered by their spelling.
+    /// as the engine scopes them, and those that Snowflake's `IDENTIFIER` names by its one
+    /// string literal in a `FROM` or a join, ordered by their spelling.
     pub fn relations(&self, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
-        let (mut scopes, mut relations) = (vec![&root], Vec::new());
-        while let Some(scope) = scopes.pop() {
-            relations.extend(scope.sources.values().filter_map(|source| match (&source.kind, &source.expression) {
-                (SourceKind::Table, Expression::Table(table)) => RelationName::of(table, &sql, dialect, defaults),
-                _ => None,
-            }));
-            let children =
-                [&scope.subquery_scopes, &scope.derived_table_scopes, &scope.cte_scopes, &scope.union_scopes];
-            scopes.extend(children.into_iter().chain([&scope.udtf_scopes]).flatten());
-        }
+        let scoped = scopes(&root, &sql, dialect).into_iter().flat_map(|(_, scope, _)| scope.sources.values());
+        let mut relations: Vec<RelationName> = (scoped.filter_map(|source| match (&source.kind, &source.expression) {
+            (SourceKind::Table, Expression::Table(table)) => RelationName::of(table, &sql, dialect, defaults),
+            _ => None,
+        }))
+        .collect();
+        // The engine scopes `IDENTIFIER('<name>')` as a table that the SQL does not spell.
+        let selects = query.dfs().filter_map(|node| match node {
+            Expression::Select(select) => Some(select),
+            _ => None,
+        });
+        relations.extend(selects.flat_map(|select| sources(select)).filter_map(|(_, source)| {
+            let Expression::Function(function) = (match source {
+                Expression::Alias(alias) => &alias.this,
+                source => source,
+            }) else {
+                return None;
+            };
+            let [Expression::Literal(literal)] = function.args.as_slice() else { return None };
+            let Literal::String(text) = literal.as_ref() else { return None };
+            function
+                .name
+                .eq_ignore_ascii_case("identifier")
+                .then(|| RelationName::read(text, dialect, defaults).ok())?
+        }));
         relations.sort_by_key(ToString::to_string);
         relations
     }
@@ -88,6 +137,251 @@ impl Write {
         }
         Ok(Outputs::Named(names))
     }
+
+    /// Each subquery of `query` that no subquery holds, by the scope path that the engine
+    /// gives it, with its holder; none for one that the engine numbers otherwise, or that
+    /// follows a `*` in its select list, where its place would count the `*` as one. The
+    /// engine numbers the subqueries of a `SELECT` by its `collect_subqueries`: the fields
+    /// that hold them, in the order of its struct, each walked by `walk_in_scope`, finding a
+    /// `Subquery` with no alias, the query of `EXISTS` and of `IN`, and that of `ANY` and
+    /// `ALL` twice, as a quantifier's and as a `Subquery`.
+    pub fn holders(&self, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
+        let sql: Vec<char> = self.sql.chars().collect();
+        let root = build_scope(query);
+        let all = scopes(&root, &sql, dialect);
+        // A branch that filters an `INTERSECT` or an `EXCEPT`, or a branch of one, decides
+        // rows by its select list.
+        let filters = |path: &str| {
+            let filtered = |scope: &Scope| matches!(query_of(scope), Expression::Intersect(_) | Expression::Except(_));
+            let set = |at: usize| all.iter().any(|(parent, scope, _)| *parent == path[..at] && filtered(scope));
+            path.match_indices(".branches[1]").any(|(at, _)| set(at))
+        };
+        let mut found = Vec::new();
+        for (path, scope, owner) in &all {
+            let Expression::Select(select) = query_of(scope) else { continue };
+            if path.contains(".subqueries[") || path.contains(".udtfs[") {
+                continue;
+            }
+            // In the select list, the output column at its place or, in a CTE or a
+            // derived table, the column that the list names there.
+            let clause = |context| Some(Holder::Clause(context));
+            let filtering = filters(path);
+            let star = select_list(select).position(|expression| matches!(expression, Expression::Star(_)));
+            let listed = select_list(select).enumerate().map(|(at, expression)| {
+                if filtering {
+                    return (clause(ColumnUseContext::SetOperationFilter), expression);
+                }
+                let holder = owner.as_ref().map_or(Some(Holder::Output(at)), |owner| {
+                    Some(Holder::Column(owner.clone(), name(expression, &sql, dialect)?))
+                });
+                (holder.filter(|_| star.is_none_or(|star| at < star)), expression)
+            });
+            let ons = select.joins.iter().flat_map(|join| join.on.iter().chain(&join.match_condition));
+            let groups = select.group_by.iter().flat_map(|group| &group.expressions);
+            let orders = select.order_by.iter().flat_map(|order| order.expressions.iter().map(|key| &key.this));
+            let clauses = (listed.chain(ons.map(|on| (clause(ColumnUseContext::Join), on))))
+                .chain(select.where_clause.iter().map(|filter| (clause(ColumnUseContext::Filter), &filter.this)))
+                .chain(groups.map(|key| (clause(ColumnUseContext::Group), key)))
+                .chain(select.having.iter().map(|having| (clause(ColumnUseContext::Having), &having.this)))
+                .chain(select.qualify.iter().map(|qualify| (clause(ColumnUseContext::Qualify), &qualify.this)))
+                .chain(orders.map(|key| (clause(ColumnUseContext::Order), key)));
+            let held: Vec<(Option<Holder>, &Expression)> = clauses
+                .flat_map(|(holder, clause)| {
+                    let mut seen = HashSet::new();
+                    let held = walk_in_scope(clause, false).filter_map(move |node| {
+                        let (query, tuple) = match node {
+                            Expression::Subquery(subquery) if subquery.alias.is_none() => (&subquery.this, false),
+                            Expression::Exists(exists) => (&exists.this, false),
+                            Expression::In(in_) => (in_.query.as_ref()?, matches!(in_.this, Expression::Tuple(_))),
+                            Expression::Any(quantified) | Expression::All(quantified) => (&quantified.subquery, false),
+                            _ => return None,
+                        };
+                        // A tuple's `IN` reads more columns of the subquery than the engine reports.
+                        match &holder {
+                            Some(Holder::Clause(context)) if tuple => Some((Some(Holder::Tuple(*context)), query)),
+                            holder => Some((holder.clone(), query)),
+                        }
+                    });
+                    held.filter(move |(_, query)| seen.insert(*query as *const Expression))
+                })
+                .collect();
+            found.extend(scope.subquery_scopes.iter().enumerate().map(|(at, subquery)| {
+                let holder = held.get(at).filter(|(_, query)| **query == subquery.expression);
+                (format!("{path}.subqueries[{at}]"), holder.and_then(|(holder, _)| holder.clone()))
+            }));
+        }
+        found
+    }
+
+    /// The keys that the joins of `query` merge in each of its `SELECT`s, selected bare,
+    /// aliased or not, through a `*`, or read bare by an expression of its select list;
+    /// none when a join merges a key among sources whose columns are unknown, where its
+    /// keys are not told.
+    pub fn keys(&self, query: &Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Option<Vec<Key>> {
+        let sql: Vec<char> = self.sql.chars().collect();
+        let root = build_scope(query);
+        let ctes: Vec<&Cte> = (root.cte_scopes.iter())
+            .filter_map(|cte| match &cte.expression {
+                Expression::Cte(cte) => Some(&**cte),
+                _ => None,
+            })
+            .collect();
+        let bare = |expression: &Expression| match expression {
+            Expression::Column(column) if column.table.is_none() => Name::of(&column.name, &sql, dialect),
+            _ => None,
+        };
+        let right = |join: &Join| match &join.this {
+            Expression::Table(table) => RelationName::of(table, &sql, dialect, defaults),
+            _ => None,
+        };
+        let mut keys = Vec::new();
+        for (path, scope, owner) in scopes(&root, &sql, dialect) {
+            let Expression::Select(select) = query_of(scope) else { continue };
+            if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
+                continue;
+            }
+            let placed = !["subqueries[", "udtfs[", "branches["].iter().any(|kind| path.contains(kind));
+            let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
+            // Each column of the list with each column of the sources that it reads bare, and
+            // whether an expression around it computes the column.
+            let listed = select_list(select).flat_map(|expression| match expression {
+                Expression::Star(star) if star.table.is_none() => {
+                    columns.iter().map(|(column, _)| (column.clone(), column.clone(), false)).collect()
+                }
+                Expression::Alias(alias) => {
+                    let named = name(expression, &sql, dialect);
+                    let computed = bare(&alias.this).is_none();
+                    let read = walk_in_scope(&alias.this, false).filter_map(bare);
+                    read.filter_map(|read| Some((named.clone()?, read, computed))).collect()
+                }
+                column => name(column, &sql, dialect)
+                    .zip(bare(column))
+                    .map(|(named, read)| (named, read, false))
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            });
+            for (named, read, computed) in listed {
+                let merged = columns.iter().filter(|(column, _)| *column == read).flat_map(|(_, joins)| joins);
+                keys.extend(merged.map(|&at| {
+                    let (join, right) = (select.joins[at].kind, right(&select.joins[at]));
+                    Key {
+                        owner: owner.clone(),
+                        placed,
+                        column: named.clone(),
+                        read: read.clone(),
+                        computed,
+                        join,
+                        right,
+                    }
+                }));
+            }
+        }
+        Some(keys)
+    }
+
+    /// The engine's lineage of each output column of `query`, the engine's projection
+    /// that `order` gives for it, against `schema`, none where the engine gives none; for a
+    /// write that holds an `INTERSECT` or an `EXCEPT`, a key that a join merges, as `keys`
+    /// says, or a subquery in a CTE's or a derived table's select list, as `holders` says,
+    /// and for no other.
+    pub fn steps(
+        query: &Expression,
+        holders: &[(String, Option<Holder>)],
+        keys: Option<&[Key]>,
+        order: &[usize],
+        schema: &ValidationSchema,
+        dialect: Dialect,
+    ) -> Vec<Option<LineageNode>> {
+        let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
+        let held = holders.iter().any(|(_, holder)| matches!(holder, Some(Holder::Column(..))));
+        if !(filtering || held || keys.is_some_and(|keys| !keys.is_empty())) {
+            return Vec::new();
+        }
+        let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
+        let lineage = |place| lineage_at_with_schema(place, query, Some(&schema), Some(dialect.polyglot()), false);
+        order.iter().map(|&at| lineage(at).ok()).collect()
+    }
+}
+
+/// Every scope of `root`, the engine's scopes of a query, with its path as the engine
+/// writes it, such as `root.ctes[0].subqueries[1]`, and the name of the CTE or derived
+/// table that it is, or is a branch of.
+fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &'a Scope, Option<Name>)> {
+    let (mut pending, mut found) = (vec![("root".to_string(), root, None)], Vec::new());
+    while let Some((path, scope, owner)) = pending.pop() {
+        let kinds = [
+            ("subqueries", &scope.subquery_scopes),
+            ("derived", &scope.derived_table_scopes),
+            ("ctes", &scope.cte_scopes),
+            ("branches", &scope.union_scopes),
+            ("udtfs", &scope.udtf_scopes),
+        ];
+        // A derived table's scope keeps its query, which the source that names it holds.
+        let derived = |child: &Scope| {
+            scope.sources.values().find_map(|source| match &source.expression {
+                Expression::Subquery(subquery) if subquery.this == child.expression => {
+                    Name::of(subquery.alias.as_ref()?, sql, dialect)
+                }
+                _ => None,
+            })
+        };
+        for (kind, children) in kinds {
+            pending.extend(children.iter().enumerate().map(|(at, child)| {
+                let owner = match (kind, &child.expression) {
+                    ("ctes", Expression::Cte(cte)) => Name::of(&cte.alias, sql, dialect),
+                    ("derived", _) => derived(child),
+                    ("branches", _) => owner.clone(),
+                    _ => None,
+                };
+                (format!("{path}.{kind}[{at}]"), child, owner)
+            }));
+        }
+        found.push((path, scope, owner));
+    }
+    found
+}
+
+/// The columns of the sources of `select`, as [`named`] gives them, each with the places
+/// of the joins that merge it: a key that a join's `USING` names, or that its `NATURAL`
+/// finds on both its sides, once. Snowflake puts a join's keys first, in the order of its
+/// `USING` or, for `NATURAL`, of its left side, then its left side's other columns, then
+/// its right side's; DuckDB keeps each key at its first place, and T-SQL merges none.
+fn joined<'a>(
+    select: &'a Select,
+    ctes: &[&'a Cte],
+    sql: &[char],
+    catalog: &Catalog,
+    dialect: Dialect,
+    defaults: &[Name],
+) -> Result<Vec<(Name, Vec<usize>)>, Option<String>> {
+    let columns_of = |source| {
+        let columns = named(source, ctes, sql, catalog, dialect, defaults)?;
+        columns.into_iter().collect::<Option<Vec<Name>>>().ok_or(None)
+    };
+    let mut columns = Vec::new();
+    for (at, source) in sources(select) {
+        let right = columns_of(source)?;
+        let Some(at) = at else {
+            columns.extend(right.into_iter().map(|column| (column, Vec::new())));
+            continue;
+        };
+        let join = &select.joins[at];
+        let using: Vec<Name> = join.using.iter().filter_map(|key| Name::of(key, sql, dialect)).collect();
+        let merges = |column: &Name| using.contains(column) || natural(join) && right.contains(column);
+        for (column, joins) in &mut columns {
+            if merges(column) {
+                joins.push(at);
+            }
+        }
+        let merged: Vec<&Name> =
+            columns.iter().filter(|(_, joins)| joins.contains(&at)).map(|(column, _)| column).collect();
+        let rest: Vec<Name> = right.iter().filter(|column| !merged.contains(column)).cloned().collect();
+        columns.extend(rest.into_iter().map(|column| (column, Vec::new())));
+        if dialect == Dialect::Snowflake {
+            columns.sort_by_key(|(column, joins)| (!joins.contains(&at), using.iter().position(|key| key == column)));
+        }
+    }
+    Ok(columns)
 }
 
 /// The names of the columns that `query` gives, `None` for one that it leaves unnamed;
@@ -136,9 +430,10 @@ fn named<'a>(
 }
 
 /// The names of the columns of `select`'s list: an alias names its column, so does a
-/// column, and a `*` gives those of the one source that its qualifier names, or of the
-/// only source of `select`, as [`named`] gives them, less those that it excludes, as it
-/// renames them. Unknown when a `*` reads several sources, or reaches an unnamed column.
+/// column, and a `*` gives those of the one source that its qualifier names, as [`named`]
+/// gives them, or, unqualified, those of all its sources, as [`joined`] joins them, less
+/// those that it excludes, as it renames them. Unknown when a `*` reaches an unnamed
+/// column.
 fn listed<'a>(
     select: &'a Select,
     ctes: &[&'a Cte],
@@ -147,31 +442,31 @@ fn listed<'a>(
     dialect: Dialect,
     defaults: &[Name],
 ) -> Result<Vec<Option<Name>>, Option<String>> {
-    let sources: Vec<&Expression> = (select.from.iter().flat_map(|from| &from.expressions))
-        .chain(select.joins.iter().map(|join| &join.this))
-        .collect();
     let mut names = Vec::new();
-    for expression in &select.expressions {
+    for expression in select_list(select) {
         let Expression::Star(star) = expression else {
-            names.push(match expression {
-                Expression::Alias(alias) => Name::of(&alias.alias, sql, dialect),
-                Expression::Column(column) => Name::of(&column.name, sql, dialect),
-                _ => None,
-            });
+            names.push(name(expression, sql, dialect));
             continue;
         };
-        let called = |source: &&Expression| match (&star.table, source) {
-            (None, _) => sources.len() == 1,
-            (Some(qualifier), Expression::Table(table)) => {
-                table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
+        let mut columns = match &star.table {
+            None => joined(select, ctes, sql, catalog, dialect, defaults)?
+                .into_iter()
+                .map(|(column, _)| Some(column))
+                .collect(),
+            Some(qualifier) => {
+                let called = |(_, source): &(Option<usize>, &Expression)| match source {
+                    Expression::Table(table) => {
+                        table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
+                    }
+                    Expression::Subquery(subquery) => {
+                        subquery.alias.as_ref().is_some_and(|alias| alias.name.eq_ignore_ascii_case(&qualifier.name))
+                    }
+                    _ => false,
+                };
+                let (_, source) = sources(select).find(called).ok_or(None)?;
+                named(source, ctes, sql, catalog, dialect, defaults)?
             }
-            (Some(qualifier), Expression::Subquery(subquery)) => {
-                subquery.alias.as_ref().is_some_and(|alias| alias.name.eq_ignore_ascii_case(&qualifier.name))
-            }
-            _ => false,
         };
-        let source = sources.iter().copied().find(called).ok_or(None)?;
-        let mut columns = named(source, ctes, sql, catalog, dialect, defaults)?;
         if columns.iter().any(Option::is_none) {
             return Err(None);
         }
@@ -188,4 +483,43 @@ fn listed<'a>(
         names.extend(columns);
     }
     Ok(names)
+}
+
+/// The sources of `select`: those of its `FROM`, then the table of each join, with the
+/// join's place.
+fn sources(select: &Select) -> impl Iterator<Item = (Option<usize>, &Expression)> {
+    let froms = select.from.iter().flat_map(|from| &from.expressions).map(|source| (None, source));
+    froms.chain(select.joins.iter().enumerate().map(|(at, join)| (Some(at), &join.this)))
+}
+
+/// The query of `scope`, that of its CTE for a CTE's.
+fn query_of(scope: &Scope) -> &Expression {
+    match &scope.expression {
+        Expression::Cte(cte) => &cte.this,
+        query => query,
+    }
+}
+
+/// Whether `join` is `NATURAL`, which merges the columns that both its sides have.
+fn natural(join: &Join) -> bool {
+    matches!(join.kind, JoinKind::Natural | JoinKind::NaturalLeft | JoinKind::NaturalRight | JoinKind::NaturalFull)
+}
+
+/// The expressions of the select list of `select`, each out of the `Annotated` that the
+/// engine wraps around a column after a comment.
+fn select_list(select: &Select) -> impl Iterator<Item = &Expression> {
+    select.expressions.iter().map(|expression| match expression {
+        Expression::Annotated(annotated) => &annotated.this,
+        expression => expression,
+    })
+}
+
+/// The name of a select list's `expression`, parsed from `sql`: its alias, or a column's
+/// own name; none for any other expression, which the engine would name.
+fn name(expression: &Expression, sql: &[char], dialect: Dialect) -> Option<Name> {
+    match expression {
+        Expression::Alias(alias) => Name::of(&alias.alias, sql, dialect),
+        Expression::Column(column) => Name::of(&column.name, sql, dialect),
+        _ => None,
+    }
 }

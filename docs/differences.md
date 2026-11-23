@@ -8,20 +8,53 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   catalog's bare `OrderId`, which SQL Server's default collation, insensitive to case,
   accepts. The Relation entry asks for the dialect's own rules. Class: a defect of the
   code.
-- A clause inside a subquery, such as the `WHERE` of an `EXISTS` or an `IN` subquery,
-  gives an `unattributed_use` gap, where the Edge entry says that `IN` and `EXISTS`
-  decide rows: polyglot-sql does not say which projection or clause holds a subquery.
-  Plan 005 places it from the tree. Class: an aspiration.
-- A `*` over several sources, such as the relations of a join, or over one whose
-  columns a list renames, such as `with c (x) as (...)` or a derived table with column
-  aliases, leaves a write's output columns unknown, a `wildcard` gap, where the Edge
-  entry says that a column selected through `*` is a `copy`. Class: an aspiration.
-- The filtering branch of `INTERSECT` and `EXCEPT` gives a `copy` to each output
-  column, since polyglot-sql puts its columns in each projection's upstream as
-  `Direct`, where the catalogue of clauses carried over from the proof of concept says
-  that the filtering branch decides rows, `rows`. Plan 005 closes it. Class: a defect
+- A `*` over a source whose columns a list renames, such as `with c (x) as (...)` or a
+  derived table with column aliases, leaves a write's output columns unknown, a
+  `wildcard` gap, where the Edge entry says that a column selected through `*` is a
+  `copy`. Class: an aspiration.
+- A write that holds a `PIVOT` gives `analysis_failed` and no edge, where the Edge entry
+  says that its grouping columns decide rows: polyglot-sql gives a pivot's grouping
+  column no use (#559). Class: a defect of the code.
+- A write that holds an `UNPIVOT` gives `analysis_failed` and no edge: polyglot-sql
+  traces its name column as a `copy` of the columns it unpivots (#560). Class: a defect
   of the code.
-- A `USING` key selected bare, the merged key, gives a `derive` from both keys, as
-  polyglot-sql reports it, where the catalogue says `copy` from both keys for an inner
-  join, and `copy` from the left key with `rows` from the right for a left join. Plan
-  005 closes it. Class: a defect of the code.
+- `TABLE(FLATTEN(...))` is refused `invalid`, where `LATERAL FLATTEN(...)` is traced:
+  polyglot-sql does not know the alias of the table function (#557). Class: a defect of
+  the code.
+- `select * ilike '<pattern>'` is refused `unparsed`: polyglot-sql does not parse it
+  (#561). Class: a defect of the code.
+- A `*` as a function's argument, such as `object_construct(*)` or `hash(*)`, gives a
+  `wildcard` gap, where the Edge entry derives the output column from every column the
+  `*` reads: polyglot-sql leaves that column with no upstream (#556). Class: a defect
+  of the code.
+- A tuple's `IN`, such as `(a, b) in (select x, c from u)`, gives an `unattributed_use`
+  gap for its clause, where the Edge entry says that `IN` decides rows: polyglot-sql
+  reports only the subquery's first column. Class: a defect of the code.
+- An outer column in a scalar subquery's select list, such as `s.b` in
+  `(select s.b + max(x) from u)`, gives an `unresolved_reference` gap, where the Edge
+  entry derives the output column from it: polyglot-sql reports it as unknown. Class: an
+  aspiration.
+- A scalar subquery after a `*` in a select list gives an `unattributed_use` gap for the
+  uses in it, where the Edge entry places them at the column that holds it: its place
+  counts the `*` as one. Class: an aspiration.
+- A key that `USING` or `NATURAL` merges across more than two sources, or whose sides
+  the engine's lineage does not tell apart, such as a relation joined to itself, gives
+  an `unattributed_use` gap for its output column, where the Edge entry gives each key
+  the kind of its join's side. Class: an aspiration.
+- A key that `USING` or `NATURAL` merges in a branch of a set operation or in a
+  subquery leaves the values of each output column whose lineage has a step of the
+  key's name to an `unattributed_use` gap, and one merged among sources whose columns
+  are unknown those of every output column, where the Edge entry gives each key the
+  kind of its join's side: the engine's lineage does not tell its sides there. Class: an
+  aspiration.
+- A subquery in a field of a `SELECT` other than its select list and the clauses that
+  decide rows or order them, such as `LIMIT`, `TOP`, `DISTINCT ON` or a join's pivots,
+  gives an `unattributed_use` gap for the uses in it. Class: an aspiration.
+- A pivot's `FOR` column is a `derive`, where `definition.md` of the proof of concept
+  calls it `rows`: a pivot aggregates a `CASE` on that column, which the Edge entry
+  calls a derive. Class: a defect of the definition.
+- In a chain of `USING` joins whose middle relation shares a column with the first,
+  such as `select * from t join w using (k) join v using (k)`, Snowflake drops the
+  middle relation's column from the `*`, where sql-lineage names it and refuses the
+  write as `duplicate_column`, as a Snowflake view refuses duplicate names. Class: an
+  intended gap.
