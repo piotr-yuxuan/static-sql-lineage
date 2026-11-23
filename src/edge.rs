@@ -44,6 +44,31 @@ pub struct End {
     pub column: String,
 }
 
+impl End {
+    /// The column, reported as `column`, of the one known relation among `relations` that
+    /// the engine reports as `source`: none for a relation unknown to the catalog, whose
+    /// gap says it; the engine's text when it names no such column, or several.
+    pub fn of(
+        source: &str,
+        column: &str,
+        relations: &[RelationName],
+        catalog: &Catalog,
+    ) -> Result<Option<End>, String> {
+        let unresolved = || format!("{source}.{column}");
+        let mut read = relations.iter().filter(|relation| relation.reported_as(source));
+        let relation = read.next().ok_or_else(unresolved)?;
+        if read.any(|other| other != relation) {
+            return Err(unresolved());
+        }
+        let Some((known, columns)) = catalog.get(relation) else { return Ok(None) };
+        let mut columns = columns.iter().filter(|known| known.reported_as(column));
+        match (columns.next(), columns.next()) {
+            (Some(column), None) => Ok(Some(End { relation: known.to_string(), column: column.to_string() })),
+            _ => Err(unresolved()),
+        }
+    }
+}
+
 /// `(parent relation, column) -> (child relation, column)`, with its kind.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Edge {
@@ -65,23 +90,10 @@ impl Edge {
         catalog: &Catalog,
     ) -> Result<Option<Edge>, String> {
         let source = reference.source_name.as_deref().unwrap_or_default();
-        let unresolved = || format!("{source}.{}", reference.column);
-        let resolved =
-            reference.confidence == ReferenceConfidence::Resolved && reference.source_kind == SourceKind::Table;
-        let mut read = relations.iter().filter(|relation| resolved && relation.reported_as(source));
-        let relation = read.next().ok_or_else(unresolved)?;
-        if read.any(|other| other != relation) {
-            return Err(unresolved());
+        if reference.confidence != ReferenceConfidence::Resolved || reference.source_kind != SourceKind::Table {
+            return Err(format!("{source}.{}", reference.column));
         }
-        let Some((known, columns)) = catalog.get(relation) else { return Ok(None) };
-        let mut columns = columns.iter().filter(|column| column.reported_as(&reference.column));
-        match (columns.next(), columns.next()) {
-            (Some(column), None) => {
-                let parent = End { relation: known.to_string(), column: column.to_string() };
-                Ok(Some(Edge { parent, child, kind }))
-            }
-            _ => Err(unresolved()),
-        }
+        Ok(End::of(source, &reference.column, relations, catalog)?.map(|parent| Edge { parent, child, kind }))
     }
 
     /// The edges to `children`, the ends of a write's output columns in their order, and
