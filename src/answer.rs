@@ -146,12 +146,8 @@ impl Answer {
         };
         let ends: Vec<End> =
             columns.iter().map(|column| End { relation: target.clone(), column: column.clone() }).collect();
-        let place = |edge: &Edge| ends.iter().position(|end| *end == edge.child);
-        edges.sort_by_cached_key(|edge| {
-            let (parent, child) = (&edge.parent, &edge.child);
-            (place(edge), parent.relation.to_string(), parent.column.to_string(), child.column.to_string(), edge.kind)
-        });
-        edges.dedup_by(|one, other| one.child == other.child && one.parent == other.parent);
+        let placed = edges.into_iter().map(|edge| (ends.iter().position(|end| *end == edge.child), edge));
+        let edges = Edge::ordered(placed.collect());
         (Answer { columns: known.map(|_| columns), edges, ..answer }.ended(gaps), false)
     }
 

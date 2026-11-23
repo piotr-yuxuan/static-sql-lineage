@@ -173,19 +173,25 @@ impl Edge {
             let source = reference.source_name.as_deref().unwrap_or_default();
             match value.map_or(Some(Kind::Rows), |kind| reach.kind(place, &edge.parent, kind, relations, catalog)) {
                 Some(Kind::Rows) if own.is_some_and(|own| own.reported_as(source)) => {}
-                Some(kind) => edges.push((place, Edge { kind, ..edge })),
+                Some(kind) => edges.push((Some(place), Edge { kind, ..edge })),
                 None => {
                     let detail = "the engine's lineage does not say how its values reach it";
                     gaps.push(Gap::of(GapReason::UnattributedUse, Some(child.column.to_string()), detail));
                 }
             }
         }
-        // By the child's place, then by the parent's spelling, as protocol 1 orders edges.
-        edges.sort_by_cached_key(|(place, edge)| {
-            (*place, edge.parent.relation.to_string(), edge.parent.column.to_string(), edge.kind)
+        (Edge::ordered(edges), gaps)
+    }
+
+    /// A write's `edges`, each with its child's place among the write's output columns,
+    /// none first: ordered by that place, then by the parent's spelling and the child's,
+    /// as protocol 1 orders edges, then by their kind; the first of each pair of ends.
+    pub fn ordered(mut edges: Vec<(Option<usize>, Edge)>) -> Vec<Edge> {
+        edges.sort_by_cached_key(|(place, Edge { parent, child, kind })| {
+            (*place, parent.relation.to_string(), parent.column.to_string(), child.column.to_string(), *kind)
         });
-        edges.dedup_by(|one, other| one.0 == other.0 && one.1.parent == other.1.parent);
-        (edges.into_iter().map(|(_, edge)| edge).collect(), gaps)
+        edges.dedup_by(|(_, one), (_, other)| one.child == other.child && one.parent == other.parent);
+        edges.into_iter().map(|(_, edge)| edge).collect()
     }
 }
 
