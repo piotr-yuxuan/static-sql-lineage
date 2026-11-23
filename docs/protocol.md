@@ -282,8 +282,9 @@ that it reads, for `uses`; it gives its refusal, and its gaps on the whole write
 column of its target that the walk follows, so that a write that is refused, or whose
 upstream is unknown, is not taken for a relation that no write fills. A walk also lists
 every refused write of the scripts, a statement whose first words make it a write and that
-does not parse, with its place and polyglot-sql's message: any of them may read or write the
-column, and the tool cannot tell which. A cycle is a set of columns that the walk follows,
+does not parse, with its place and polyglot-sql's message, and every finding `not_read`,
+dynamic SQL or a file that does not decode, with its place and detail: any of them may read
+or write the column, and the tool cannot tell which. A cycle is a set of columns that the walk follows,
 each of which reaches the others, or one that reaches itself.
 
 Refused, with status 2, nothing on standard output and one line on standard error, as
@@ -295,7 +296,8 @@ The text, by default: one line per edge, in the walk's order, indented by two sp
 each depth after the first, `<parent> -> <child> <kind> <id>, ...`, each end as
 `<relation>.<column>`, with the ids of its writes; then one line per gap and per refusal of
 the writes met, one per refused write of the scripts, `refused: <place> <detail>`, its
-detail on one line, and one per cycle, after its kind and a colon:
+detail on one line, one per finding not read, `not_read: <place> <detail>`, and one per
+cycle, after its kind and a colon:
 
 ```
 [dbo].[Fact].[Amount] -> dbo.vBase.Total copy views.sql:3:1
@@ -303,12 +305,14 @@ detail on one line, and one per cycle, after its kind and a colon:
 gap: views.sql:5:1 unknown_relation dbo.Missing -
 refused: load.sql:4:1 invalid
 refused: views.sql:9:1 Unexpected token: Create, at 10:1
+not_read: load.sql:6:1 dynamic SQL
 cycle: dbo.Loop1.Id, dbo.Loop2.Id
 ```
 
 With `--json`, the same as one object, each end a `relation` and a `column`, spelled as an
 edge of protocol 1 spells them; a refused write of the scripts is in `refusals` with its
-`place` and its `detail`, and no `write`:
+`place` and its `detail`, and no `write`; a finding not read is in `not_read`, with its
+`place` and its `detail`:
 
 ```json
 {
@@ -319,6 +323,7 @@ edge of protocol 1 spells them; a refused write of the scripts is in `refusals` 
   "gaps": [{"write": "views.sql:5:1", "reason": "unknown_relation", "relation": "dbo.Missing", "column": null}],
   "refusals": [{"write": "load.sql:4:1", "reason": "invalid"},
                {"place": "views.sql:9:1", "detail": "Unexpected token: Create, at 10:1"}],
+  "not_read": [{"place": "load.sql:6:1", "detail": "dynamic SQL"}],
   "cycles": [[{"relation": "dbo.Loop1", "column": "Id"}, {"relation": "dbo.Loop2", "column": "Id"}]]
 }
 ```

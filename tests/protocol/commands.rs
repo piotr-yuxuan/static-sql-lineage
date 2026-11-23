@@ -790,3 +790,18 @@ fn uses_reports_the_scripts_refused_writes() {
     assert!(refused["detail"].is_string() && refused.get("write").is_none(), "{walk}");
     assert_eq!(walk["refusals"].as_array().map(Vec::len), Some(1));
 }
+
+#[test]
+fn walks_report_dynamic_sql_not_read() {
+    // The `EXEC` of a string may read `dbo.O` or write `dbo.vO`: both walks list it after their
+    // edges, and the JSON in `not_read`.
+    let path = "tests/scripts/tsql/24-dynamic-writer.sql";
+    let edge = format!("dbo.O.Id -> dbo.vO.Id copy {path}:3:1");
+    let expected = [edge, format!("not_read: {path}:2:1 dynamic SQL")];
+    assert_eq!(walked("uses", "dbo.O.Id", &[path]), expected);
+    assert_eq!(walked("trace", "dbo.vO.Id", &[path]), expected);
+    let found = lines(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
+    let walk: Value = serde_json::from_str(&found.join("\n")).expect("the output is JSON");
+    assert_eq!(walk["not_read"], json!([{"place": format!("{path}:2:1"), "detail": "dynamic SQL"}]));
+    assert_eq!(walk["refusals"], json!([]));
+}

@@ -17,11 +17,12 @@ use crate::write::Write;
 
 /// The writes of scripts in migration order and their answers; the edges of all the
 /// answers, one per pair of ends, of the first kind where several writes give it, each with
-/// the ids of those writes; the scripts' refused writes; and the catalog as the scripts'
-/// declarations give it.
+/// the ids of those writes; the scripts' refused writes and what they do not read; and the
+/// catalog as the scripts' declarations give it.
 pub struct Lineage<'w> {
     writes: &'w [Scripted],
     refused: Vec<&'w Finding>,
+    not_read: Vec<&'w Finding>,
     pub answers: Vec<Answer>,
     edges: Vec<(Edge, Vec<String>)>,
     declared: Catalog,
@@ -30,14 +31,16 @@ pub struct Lineage<'w> {
 
 /// A walk over the lineage from a column, `from`: each edge that it follows, with the ids of
 /// its writes and the depth of its first reaching; the gaps and the refusals of the writes
-/// that it meets, each with its write's id; the scripts' refused writes, any of which may
-/// read or write the columns that it follows; and the cycles among those columns.
+/// that it meets, each with its write's id; the scripts' refused writes and what they do not
+/// read, such as dynamic SQL, any of which may read or write the columns that it follows;
+/// and the cycles among those columns.
 pub struct Walk<'l> {
     pub from: &'l End,
     pub edges: Vec<(&'l Edge, &'l [String], usize)>,
     pub gaps: Vec<(&'l str, &'l Gap)>,
     pub refusals: Vec<(&'l str, &'l Refusal)>,
     pub refused: Vec<&'l Finding>,
+    pub not_read: Vec<&'l Finding>,
     pub cycles: Vec<Vec<&'l End>>,
 }
 
@@ -48,6 +51,7 @@ impl<'w> Lineage<'w> {
     pub fn of(graph: &'w Graph, mut catalog: Catalog, dialect: Dialect) -> Lineage<'w> {
         let (writes, declared) = (graph.writes.as_slice(), catalog.clone());
         let refused = graph.findings.iter().filter(|finding| matches!(finding, Finding::Refused { write: true, .. }));
+        let not_read = graph.findings.iter().filter(|finding| matches!(finding, Finding::NotRead { .. }));
         let (mut answers, mut edges, mut found) = (Vec::new(), Vec::new(), HashMap::new());
         for scripted in writes {
             let (id, target, sql) = (scripted.id.clone(), scripted.target.to_string(), scripted.text.clone());
@@ -65,7 +69,8 @@ impl<'w> Lineage<'w> {
             }
             answers.push(answer);
         }
-        Lineage { writes, refused: refused.collect(), answers, edges, declared, dialect }
+        let (refused, not_read) = (refused.collect(), not_read.collect());
+        Lineage { writes, refused, not_read, answers, edges, declared, dialect }
     }
 
     /// The walk from `from`, upstream, from children to parents, or downstream: each column
@@ -130,14 +135,16 @@ impl<'w> Lineage<'w> {
             gaps.extend(given.map(|gap| (write.id.as_str(), gap)));
             refusals.extend(answer.refusal.iter().map(|refusal| (write.id.as_str(), refusal)));
         }
-        Some(Walk { from, edges, gaps, refusals, refused: self.refused.clone(), cycles })
+        let (refused, not_read) = (self.refused.clone(), self.not_read.clone());
+        Some(Walk { from, edges, gaps, refusals, refused, not_read, cycles })
     }
 }
 
 impl Walk<'_> {
     /// The walk as JSON, or as text: one line per edge, indented by two spaces for each depth
     /// after the first, with the ids of its writes; then one line per gap, per refusal, of the
-    /// writes met then of the scripts, and per cycle, after its kind and a colon.
+    /// writes met then of the scripts, per finding not read, and per cycle, after its kind and
+    /// a colon.
     pub fn printed(&self, json: bool) -> String {
         if json {
             let edges = self.edges.iter().map(|(edge, writes, depth)| {
@@ -150,15 +157,21 @@ impl Walk<'_> {
             });
             let refusals =
                 self.refusals.iter().map(|(write, refusal)| json!({"write": write, "reason": refusal.reason}));
-            let refused = self.refused.iter().filter_map(|finding| match finding {
-                Finding::Refused { place, detail, .. } => Some(json!({"place": place, "detail": detail})),
+            // A finding of the scripts, by its place and its detail.
+            let placed = |finding: &&Finding| match finding {
+                Finding::Refused { place, detail, .. } | Finding::NotRead { place, detail } => {
+                    Some(json!({"place": place, "detail": detail}))
+                }
                 _ => None,
-            });
+            };
             let (edges, gaps, refusals): (Vec<_>, Vec<_>, Vec<_>) =
-                (edges.collect(), gaps.collect(), refusals.chain(refused).collect());
+                (edges.collect(), gaps.collect(), refusals.chain(self.refused.iter().filter_map(placed)).collect());
+            let not_read: Vec<_> = self.not_read.iter().filter_map(placed).collect();
             let (from, cycles) = (self.from, &self.cycles);
-            return json!({"column": from, "edges": edges, "gaps": gaps, "refusals": refusals, "cycles": cycles})
-                .to_string();
+            return json!({
+                "column": from, "edges": edges, "gaps": gaps, "refusals": refusals, "not_read": not_read, "cycles": cycles,
+            })
+            .to_string();
         }
         let edges = self
             .edges
@@ -167,7 +180,7 @@ impl Walk<'_> {
         let gaps = self.gaps.iter().map(|(write, gap)| format!("gap: {write} {gap}"));
         let refusals =
             self.refusals.iter().map(|(write, refusal)| format!("refused: {write} {}", spelled(&refusal.reason)));
-        let refused = self.refused.iter().map(ToString::to_string);
+        let refused = self.refused.iter().chain(&self.not_read).map(ToString::to_string);
         let cycles = (self.cycles.iter())
             .map(|cycle| format!("cycle: {}", cycle.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
         edges.chain(gaps).chain(refusals).chain(refused).chain(cycles).collect::<Vec<_>>().join("\n")
