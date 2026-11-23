@@ -386,7 +386,7 @@ What this build is:
 ```json
 {
   "tool": "static-sql-lineage",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "protocols": [1],
   "engine": {
     "name": "polyglot-sql",
@@ -397,7 +397,8 @@ What this build is:
 }
 ```
 
-- `version`: the version of `static-sql-lineage`.
+- `version`: the version of `static-sql-lineage`, which each release raises, as
+  `docs/release-pipeline.md` says.
 - `protocols`: the versions of the request that this build reads.
 - `engine`: the SQL engine, with its version and source as `Cargo.lock` pins them. The
   source is given verbatim, so a fork would show its commit.
