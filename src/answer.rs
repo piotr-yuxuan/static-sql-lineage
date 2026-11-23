@@ -115,7 +115,8 @@ impl Answer {
         if !alike.is_empty() {
             return answer.ended(gaps.into_iter().chain(alike).collect());
         }
-        let options = AnalyzeQueryOptions { dialect: dialect.polyglot(), schema: Some(schema), complexity_guard: None };
+        let options =
+            AnalyzeQueryOptions { dialect: dialect.polyglot(), schema: Some(schema.clone()), complexity_guard: None };
         let analysis = match analyze_query(&write.sql, options) {
             Ok(analysis)
                 if analysis.projections.len() == outputs.len()
@@ -135,7 +136,9 @@ impl Answer {
         };
         let children: Vec<End> =
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
-        let reach = Reach::of(&query, outputs.len());
+        let holders = write.holders(&query, dialect);
+        let steps = Write::steps(&query, &holders, &schema, dialect, outputs.len());
+        let reach = Reach::of(&query, outputs.len(), holders, steps);
         let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, relations, catalog);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)

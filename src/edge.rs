@@ -4,12 +4,15 @@
 use polyglot_sql::expressions::{Expression, Select};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
-use polyglot_sql::{ColumnReferenceFact, ColumnUseContext, QueryAnalysis, ReferenceConfidence, TransformKind};
+use polyglot_sql::{
+    ColumnReferenceFact, ColumnUseContext, LineageNode, QueryAnalysis, ReferenceConfidence, TransformKind,
+};
 use serde::Serialize;
 
 use crate::answer::{Gap, GapReason};
 use crate::catalog::Catalog;
 use crate::relation::RelationName;
+use crate::write::Holder;
 
 /// How a parent column reaches a child column, in the order in which one is kept when
 /// several apply.
@@ -125,19 +128,28 @@ impl Edge {
 
 /// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
 /// keeps rows by their order, whether its outermost query does, which CTEs of its
-/// outermost `WITH` that query reads, directly or through others of that `WITH`, and the
-/// places of its output columns.
+/// outermost `WITH` that query reads, directly or through others of that `WITH`, the
+/// places of its output columns, the holders of its subqueries, and the engine's lineage
+/// of each output column, where the write needs it.
 pub struct Reach {
     limited: bool,
     outermost: bool,
     read: Vec<usize>,
     every: Vec<usize>,
+    holders: Vec<(String, Option<Holder>)>,
+    steps: Vec<Option<LineageNode>>,
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`, which has `outputs` output columns. A CTE is
-    /// matched by its name as the engine matches it, ignoring case.
-    pub fn of(query: &Expression, outputs: usize) -> Reach {
+    /// The reach of the clauses of `query`, which has `outputs` output columns, its
+    /// subqueries held as `holders` says, and the lineage of its output columns `steps`,
+    /// or none. A CTE is matched by its name as the engine matches it, ignoring case.
+    pub fn of(
+        query: &Expression,
+        outputs: usize,
+        holders: Vec<(String, Option<Holder>)>,
+        steps: Vec<Option<LineageNode>>,
+    ) -> Reach {
         let limited = |select: &Select| {
             select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
         };
@@ -175,32 +187,51 @@ impl Reach {
             }
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
-        Reach { limited: limited || outermost, outermost, read, every: (0..outputs).collect() }
+        Reach { limited: limited || outermost, outermost, read, every: (0..outputs).collect(), holders, steps }
     }
 
     /// The places of the output columns whose rows a use of `context` in the scope at
     /// `path` decides; none when where it reaches cannot be placed. A clause reaches
     /// every output column from the outermost query, its derived tables and its
-    /// branches, and from a CTE of its outermost `WITH` that it reads; not from a
-    /// subquery, a table function or another CTE.
+    /// branches, and from a CTE of its outermost `WITH` that it reads; not from a table
+    /// function or another CTE, nor when a tuple's `IN` in it leaves out columns that it
+    /// reads. A use in a subquery reaches what the subquery's holder does.
     pub fn rows(&self, path: &str, context: ColumnUseContext) -> Option<Vec<usize>> {
+        let tuple = |(subquery, holder): &(String, Option<Holder>)| {
+            subquery.rsplit_once('.').is_some_and(|(parent, _)| parent == path)
+                && matches!(holder, Some(Holder::Tuple(tuple)) if *tuple == context)
+        };
         let steps = path.strip_prefix("root").and_then(|steps| {
             match steps.strip_prefix(".ctes[").and_then(|rest| rest.split_once(']')) {
                 Some((at, rest)) => at.parse().ok().filter(|at| self.read.contains(at)).map(|_| rest),
                 None => Some(steps),
             }
         });
-        let placed = steps.is_some_and(|steps| {
-            steps.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
-        });
+        let placed = !self.holders.iter().any(tuple)
+            && steps.is_some_and(|steps| {
+                steps.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
+            });
+        // What a subquery at the path `subquery`, in the scope at `parent`, reaches: what a
+        // use of its clause there does; the output column at its place in the select list
+        // of the outermost query or a branch; the output columns whose lineage passes
+        // through its column in the select list of a CTE or a derived table.
+        let held = |parent: &str, subquery: &str| -> Option<Vec<usize>> {
+            let (_, holder) = self.holders.iter().find(|(path, _)| path == subquery)?;
+            match holder.as_ref()? {
+                Holder::Clause(context) => self.rows(parent, *context),
+                Holder::Tuple(_) => None,
+                Holder::Output(place) => Some(vec![*place]),
+                Holder::Column(source, column) => (self.every.iter())
+                    .map(|&place| {
+                        let mut nodes = self.steps.get(place)?.as_ref()?.walk();
+                        Some(nodes.any(|node| source.reported_as(&node.source_name) && column.reported_as(&node.name)))
+                            .map(|passes| passes.then_some(place))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|places| places.into_iter().flatten().collect()),
+            }
+        };
         match context {
-            ColumnUseContext::Join
-            | ColumnUseContext::Filter
-            | ColumnUseContext::Group
-            | ColumnUseContext::Having
-            | ColumnUseContext::Qualify
-            | ColumnUseContext::SetOperationFilter
-            | ColumnUseContext::TableFunctionInput => placed.then(|| self.every.clone()),
             // The engine counts these in the upstream of the projection that holds them.
             ColumnUseContext::WindowPartition
             | ColumnUseContext::WindowOrder
@@ -208,6 +239,10 @@ impl Reach {
             | ColumnUseContext::AggregateOrder => Some(Vec::new()),
             ColumnUseContext::Order if !self.limited => Some(Vec::new()),
             ColumnUseContext::Order => (self.outermost && path == "root").then(|| self.every.clone()),
+            _ => match path.find(".subqueries[") {
+                Some(at) => held(&path[..at], &path[..at + path[at..].find(']')? + 1]),
+                None => placed.then(|| self.every.clone()),
+            },
         }
     }
 }

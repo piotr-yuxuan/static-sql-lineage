@@ -3,6 +3,7 @@
 //! `--describe` and the arguments it refuses, and the helpers of the modules.
 
 mod answers;
+mod catalogue;
 mod edges;
 mod requests;
 mod scenarios;
