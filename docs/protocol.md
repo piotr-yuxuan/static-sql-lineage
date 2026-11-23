@@ -13,7 +13,9 @@ terms of `docs/concepts.md`.
 | the same, a request refused as a whole | 2 | nothing | one line, naming the reason |
 | `sql-lineage --describe` | 0 | the description, as JSON | nothing |
 | `sql-lineage graph`, its options and paths | 0 | the graph of the scripts' writes, as text or JSON | nothing |
-| the same, refused | 2 | nothing | one line, naming the reason |
+| `sql-lineage trace` or `sql-lineage uses`, its options, a column and paths | 0 | the column's edges upstream or downstream, as text or JSON | nothing |
+| `sql-lineage outline`, its options, a write's id and paths | 0 | the write in brief, as text or JSON | nothing |
+| any of these, refused | 2 | nothing | one line, naming the reason |
 | any other argument | 2 | nothing | one line, naming what was given |
 
 ## The request
@@ -189,8 +191,19 @@ Each file is a script, read in order:
 - SSMS's existence check, `EXEC sp_executesql` or `EXEC dbo.sp_executesql` with
   `@statement` a national string that parses as one statement, is read as that statement,
   at its `EXEC`'s place; any other dynamic SQL is a finding, `not_read`.
+- A `CREATE TABLE` with a column list and no query is a declaration: its relation, as its
+  statement names it, and its columns, computed ones included, go to the catalog of the
+  commands, in reading order, and it is not counted as skipped. One with no column, or a
+  column twice, is a finding, `refused`, its relation left unknown; one that declares its
+  relation again is a finding, `declared_twice`, and the later is kept. In T-SQL, its
+  storage clauses, which never bear on lineage, are replaced by spaces before it is
+  parsed: in its column list, `ROWGUIDCOL`, `SPARSE` and `FILESTREAM` after a column's first
+  token; after the list, outside parentheses, `TEXTIMAGE_ON` and `FILESTREAM_ON` with their
+  filegroup, `ON` with its filegroup, but not a partition scheme, and `WITH` with its
+  options. A `CREATE TABLE` with `AS` outside parentheses is not touched.
 - A statement that does not parse is a finding, `refused`, with polyglot-sql's message,
-  when its first words make it a write; any other statement is skipped, and counted.
+  when its first words make it a write or a declaration; any other statement is skipped,
+  and counted.
 
 A write depends on every write of each relation that it reads, other than its own
 target, and on the writes of its own target before it. Among the writes whose
@@ -210,6 +223,7 @@ load.sql:6:1 dbo.Loop2 <- dbo.Loop1
 views.sql:3:1 [dbo].[vA] <- dbo.Fact
 refused: load.sql:2:1 Expected Into, got Var ('dbo') near [INSERT dbo.Fact (], at 2:8
 not_read: legacy.sql not UTF-8, nor UTF-16 after a byte order mark
+declared_twice: tables.sql:7:1 [dbo].[Stage]
 cycle: load.sql:5:1, load.sql:6:1 (dbo.Loop1, dbo.Loop2)
 replaced_twice: [dbo].[vA] (views.sql:3:1, redefine.sql:1:1)
 skipped: 3
@@ -223,6 +237,7 @@ With `--json`, the same as one object:
   "findings": [
     {"kind": "refused", "place": "load.sql:2:1", "detail": "Expected Into, ..., at 2:8"},
     {"kind": "not_read", "place": "legacy.sql", "detail": "not UTF-8, nor UTF-16 ..."},
+    {"kind": "declared_twice", "place": "tables.sql:7:1", "relation": "[dbo].[Stage]"},
     {"kind": "cycle", "writes": ["load.sql:5:1", "load.sql:6:1"], "relations": ["dbo.Loop1", "dbo.Loop2"]},
     {"kind": "replaced_twice", "relation": "[dbo].[vA]", "writes": ["views.sql:3:1", "redefine.sql:1:1"]}
   ],
@@ -232,9 +247,124 @@ With `--json`, the same as one object:
 
 - `place`: a place, or for a file that does not decode its path alone. `detail`: text for
   a person, which this contract does not fix; for `refused`, polyglot-sql's message, then
-  the line and the column in the file of the token at which it stops.
+  the line and the column in the file of the token at which it stops, or the rule of the
+  catalog that a declaration breaks. `relation`, for `declared_twice`: the relation as the
+  later declaration names it.
 - The findings of the reading come first, in reading order; then the cycles, in
   migration order; then the relations replaced twice, by their first replace write.
+
+## `trace` and `uses`
+
+A column's edges, followed upstream through the writes that fill its relation to relations
+that no write fills, or downstream through the writes that read it.
+
+```
+sql-lineage trace --dialect <name> [--database <name>] [--schema <name>] [--json] <relation>.<column> <path>...
+sql-lineage uses --dialect <name> [--database <name>] [--schema <name>] [--json] <relation>.<column> <path>...
+```
+
+- The options and the paths are `graph`'s, and the scripts are read as `graph` reads them.
+- `<relation>.<column>`: its last part is the column, the rest the relation, each read under
+  the dialect, as a request's names are, the relation completed by the defaults: in T-SQL,
+  `dbo.vfact.amount` names `[dbo].[vFact].[Amount]`; in Snowflake, `t.b` names `t."B"`, and
+  `t."b"` another column.
+
+The writes are answered in migration order, each as protocol 1 answers it, with its
+statement's text and the defaults in force there, against the catalog as the scripts'
+declarations give it and the writes before it change it. The lineage is the edges of all
+the answers, one per pair of columns, where several writes give one pair the first of
+`copy`, `derive`, `rows` (R12), with the ids of those writes.
+
+The walk goes from the column, `trace` from children to parents and `uses` from parents to
+children, breadth first: each column once, each edge once, at the depth of its first
+reaching, from 1. A write is met at a column of its target, for `trace`, or of a relation
+that it reads, for `uses`; it gives its refusal, and its gaps on the whole write or on a
+column of its target that the walk follows, so that a write that is refused, or whose
+upstream is unknown, is not taken for a relation that no write fills. A cycle is a set of
+columns that the walk follows, each of which reaches the others, or one that reaches itself.
+
+Refused, with status 2, nothing on standard output and one line on standard error, as
+`graph` is, and for an argument that is not `<relation>.<column>`, or a column that no
+declaration, edge or answer's output column names. A column that one names, with no edge
+and nothing met, gives an empty line.
+
+The text, by default: one line per edge, in the walk's order, indented by two spaces for
+each depth after the first, the end that it reaches, its kind and the ids of its writes;
+then one line per gap, per refusal and per cycle met, after its kind and a colon:
+
+```
+[dbo].[Fact].[Amount] copy views.sql:3:1
+  dbo.Stage.Amount copy load.sql:1:1, load.sql:2:1
+gap: views.sql:5:1 unknown_relation dbo.Missing -
+refused: load.sql:4:1 invalid
+cycle: dbo.Loop1.Id, dbo.Loop2.Id
+```
+
+With `--json`, the same as one object, each end a `relation` and a `column`, spelled as an
+edge of protocol 1 spells them:
+
+```json
+{
+  "column": {"relation": "dbo.vBase", "column": "Total"},
+  "edges": [{"parent": {"relation": "[dbo].[Fact]", "column": "[Amount]"},
+             "child": {"relation": "dbo.vBase", "column": "Total"},
+             "kind": "copy", "writes": ["views.sql:3:1"], "depth": 1}],
+  "gaps": [{"write": "views.sql:5:1", "reason": "unknown_relation", "relation": "dbo.Missing", "column": null}],
+  "refusals": [{"write": "load.sql:4:1", "reason": "invalid"}],
+  "cycles": [[{"relation": "dbo.Loop1", "column": "Id"}, {"relation": "dbo.Loop2", "column": "Id"}]]
+}
+```
+
+## `outline`
+
+One write in brief: its target, its mode, its place, its answer and the places of its
+clauses.
+
+```
+sql-lineage outline --dialect <name> [--database <name>] [--schema <name>] [--json] <id> <path>...
+```
+
+- The options and the paths are `graph`'s; `<id>`, a write's id as `graph` prints it.
+- The answer is the write's, as `trace` answers it, in migration order.
+- A clause is placed at its first word, among the statement's words outside parentheses and
+  `CASE ... END`: `WITH`, as the statement's first word or after `AS`; `SELECT`, `INTO`,
+  `FROM`, `WHERE`, `GROUP BY`, `HAVING`, `QUALIFY`, `WINDOW`, `ORDER BY`, `LIMIT`, `UNION`,
+  `EXCEPT`, `INTERSECT`, `SET`, `VALUES`, `OUTPUT`, `WHEN`, `ON`, `USING`; and a join, from
+  its first word, such as `LEFT OUTER`, to its `JOIN` or `APPLY`. A word in a string or a
+  quoted name is none. For SSMS's existence check, the places are in the file, past the
+  string's `N'` and each doubled quote.
+
+Refused, with status 2, as `graph` is, and for an id that no write of the scripts has.
+
+The text, by default: one field per line, then the answer's edges, `edge: <parent> ->
+<child> <kind>`, its gaps, `gap: <reason> <relation> <column>`, `-` for none, and its
+refusal, `refused: <reason> <detail>`, then the clauses, `clause: <words> <place>`:
+
+```
+id: views.sql:3:1
+target: dbo.vBase
+mode: replace
+place: 3:1
+columns: id, Total
+edge: [dbo].[Fact].[Id] -> dbo.vBase.id copy
+edge: [dbo].[Fact].[Amount] -> dbo.vBase.Total copy
+clause: SELECT 3:26
+clause: FROM 3:53
+```
+
+`columns` is `-` when the answer has none. With `--json`, one object, whose `answer` is the
+write's answer as protocol 1 gives it:
+
+```json
+{"id": "views.sql:3:1", "target": "dbo.vBase", "mode": "replace", "place": "3:1",
+ "clauses": [{"keyword": "SELECT", "place": "3:26"}, {"keyword": "FROM", "place": "3:53"}],
+ "answer": {"write": "views.sql:3:1", "columns": ["id", "Total"],
+            "edges": [{"parent": {"relation": "[dbo].[Fact]", "column": "[Id]"},
+                       "child": {"relation": "dbo.vBase", "column": "id"}, "kind": "copy"},
+                      {"parent": {"relation": "[dbo].[Fact]", "column": "[Amount]"},
+                       "child": {"relation": "dbo.vBase", "column": "Total"}, "kind": "copy"}],
+            "gaps": [], "refusal": null}}
+```
 
 ## `--describe`
 

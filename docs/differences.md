@@ -106,3 +106,15 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   list of statements' first words does not end the statement before it, which is
   refused and reported where it is a write, though the Write entry reads it. Class: a
   defect of the code.
+- In a script in T-SQL, a declaration that holds an inline `INDEX`, a memory-optimised
+  table's `HASH` index, `MASKED WITH` or `ENCRYPTED WITH` is refused, and its relation left
+  unknown, where the Catalog entry declares its relation and its columns: polyglot-sql
+  parses none of them, and they are not among the storage clauses replaced by spaces.
+  Class: a defect of the code.
+- In a script in Snowflake, a declaration with `cluster by` followed by `comment`, or with
+  a masking policy on a column, is refused, and its relation left unknown, where the
+  Catalog entry declares its relation and its columns: polyglot-sql parses `cluster by`
+  alone and `comment` alone, not both, and no masking policy. Class: a defect of the code.
+- A column that `ALTER TABLE ... ADD` adds to a declared relation is not added to its
+  columns, where the Catalog entry knows the columns that the scripts give a relation: the
+  statement is skipped. Class: an aspiration.
