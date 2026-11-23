@@ -9,7 +9,8 @@ check of its own: the checks are in the `Makefile`, and the release in `scripts/
 that no branch is checked twice. A newer run of the same reference cancels the one under way.
 Its permission is `contents: read`. Its one job, `check`, runs `nix develop -c make check` on
 `ubuntu-24.04`, with Nix from `cache.nixos.org` and this repository's own Actions cache, and has
-30 minutes. The `Makefile`'s cap of four workers stays, as GitHub's runners have no more. The dev
+30 minutes. The `Makefile`'s cap of four workers stays, as GitHub's runners for a public
+repository have no more. The dev
 shell takes the C linker (`cc`) from the runner, as it does on a laptop.
 
 ## The workflow CD
@@ -70,9 +71,10 @@ A version commit is told by its message, its one parent, and what it changes: `C
 
 ## What the owner sets on GitHub
 
-Nothing, as the repository stands: Actions may run every action, and a workflow's own
-`permissions` give CD its `contents: write` whatever the default for workflows. Rules on `main`,
-if any are added, must let `github-actions[bot]` commit through the API.
+Nothing, as the settings stood when the pipeline was added: Actions may run every action, `main`
+has neither protection nor ruleset, and a workflow's own `permissions` give CD its `contents:
+write` whatever the default for workflows. Rules on `main`, if any are added, must let
+`github-actions[bot]` commit through the API, or each release fails at its version commit.
 
 ## Raise a version by hand
 
