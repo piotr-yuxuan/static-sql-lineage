@@ -148,8 +148,8 @@ impl Write {
             }
             // In the select list, the output column at its place or, in a CTE or a
             // derived table, the column that the list names there.
-            let star = select.expressions.iter().position(|expression| matches!(expression, Expression::Star(_)));
-            let listed = select.expressions.iter().enumerate().map(|(at, expression)| {
+            let star = select_list(select).position(|expression| matches!(expression, Expression::Star(_)));
+            let listed = select_list(select).enumerate().map(|(at, expression)| {
                 let holder = owner.as_ref().map_or(Some(Holder::Output(at)), |owner| {
                     Some(Holder::Column(owner.clone(), name(expression, &sql, dialect)?))
                 });
@@ -211,8 +211,8 @@ impl Write {
         let Ok(columns) = joined(select, &ctes, &sql, catalog, dialect, defaults) else {
             return vec![Vec::new(); outputs.len()];
         };
-        let starred = (select.expressions.iter())
-            .any(|expression| matches!(expression, Expression::Star(star) if star.table.is_none()));
+        let starred =
+            select_list(select).any(|expression| matches!(expression, Expression::Star(star) if star.table.is_none()));
         let bare = |expression: &Expression| match expression {
             Expression::Column(column) if column.table.is_none() => Name::of(&column.name, &sql, dialect),
             _ => None,
@@ -223,10 +223,8 @@ impl Write {
         };
         (outputs.iter())
             .map(|output| {
-                let named = select
-                    .expressions
-                    .iter()
-                    .find(|expression| name(expression, &sql, dialect).as_ref() == Some(output));
+                let named =
+                    select_list(select).find(|expression| name(expression, &sql, dialect).as_ref() == Some(output));
                 let key = match named {
                     Some(Expression::Alias(alias)) => bare(&alias.this),
                     Some(column) => bare(column),
@@ -408,7 +406,7 @@ fn listed<'a>(
         .chain(select.joins.iter().map(|join| &join.this))
         .collect();
     let mut names = Vec::new();
-    for expression in &select.expressions {
+    for expression in select_list(select) {
         let Expression::Star(star) = expression else {
             names.push(name(expression, sql, dialect));
             continue;
@@ -448,6 +446,15 @@ fn listed<'a>(
         names.extend(columns);
     }
     Ok(names)
+}
+
+/// The expressions of the select list of `select`, each out of the `Annotated` that the
+/// engine wraps around a column after a comment.
+fn select_list(select: &Select) -> impl Iterator<Item = &Expression> {
+    select.expressions.iter().map(|expression| match expression {
+        Expression::Annotated(annotated) => &annotated.this,
+        expression => expression,
+    })
 }
 
 /// The name of a select list's `expression`, parsed from `sql`: its alias, or a column's

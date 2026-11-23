@@ -131,6 +131,15 @@ fn a_star_over_a_pivot_is_a_wildcard_gap() {
 }
 
 #[test]
+fn a_column_after_a_comment_is_named() {
+    let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
+    let list = "select a,\n  -- the second\n  b\nfrom s";
+    assert_eq!(trace(catalog, list), ["s.a -> t.a copy", "s.b -> t.b copy"]);
+    let star = format!("with c as ({list}) select * from c");
+    assert_eq!(trace(catalog, &star), ["s.a -> t.a copy", "s.b -> t.b copy"]);
+}
+
+#[test]
 fn an_unnamed_output_through_a_star_is_a_wildcard_gap() {
     assert_eq!(trace(&[("s", &["a"])], "with c as (select a + 1 from s) select * from c"), ["gap wildcard - -"]);
 }
