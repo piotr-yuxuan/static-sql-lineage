@@ -170,11 +170,7 @@ fn listed<'a>(
     let mut names = Vec::new();
     for expression in &select.expressions {
         let Expression::Star(star) = expression else {
-            names.push(match expression {
-                Expression::Alias(alias) => Name::of(&alias.alias, sql, dialect),
-                Expression::Column(column) => Name::of(&column.name, sql, dialect),
-                _ => None,
-            });
+            names.push(name(expression, sql, dialect));
             continue;
         };
         let called = |source: &&Expression| match (&star.table, source) {
@@ -205,4 +201,14 @@ fn listed<'a>(
         names.extend(columns);
     }
     Ok(names)
+}
+
+/// The name of a select list's `expression`, parsed from `sql`: its alias, or a column's
+/// own name; none for any other expression, which the engine would name.
+fn name(expression: &Expression, sql: &[char], dialect: Dialect) -> Option<Name> {
+    match expression {
+        Expression::Alias(alias) => Name::of(&alias.alias, sql, dialect),
+        Expression::Column(column) => Name::of(&column.name, sql, dialect),
+        _ => None,
+    }
 }
