@@ -119,6 +119,8 @@ docs/concepts.md     the kernel, its derived terms, and scenarios with their ver
 docs/differences.md  where the code differs from a definition, each difference classed
 docs/diagrams/       views of the two documents above: the kernel, the use cases
 docs/protocol.md     how a caller runs the binary, and what it answers
+docs/release-pipeline.md
+                     CI and CD: what each runs, and what a release writes and decides
 docs/work/           plans and their notes, not tracked
 src/                 one module per home of `docs/concepts.md`: relation, write, edge,
                      answer, catalog, request, dialect, describe, script (files read
@@ -136,5 +138,6 @@ tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edg
                      the explanations of each difference
 tests/tools/         the tests of scripts/release.py; tests/bin/fake-gh stands in for gh
 scripts/release.py   CD's release: the version commit, the release and its notes
-.github/workflows/   CI, `make check` on every push
+.github/workflows/   CI, `make check` on every push; CD, a release after each green push
+                     to main
 ```

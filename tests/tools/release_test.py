@@ -10,6 +10,7 @@ import base64
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -201,6 +202,110 @@ class WithVersion(unittest.TestCase):
         ):
             with self.subTest(path=path), self.assertRaises(release.ReleaseError):
                 release.with_version(path, text, "1.2.3")
+
+
+FROM_HERE = "github.event_name == 'push' || github.event.pull_request.head.repo.fork"
+CARGO_CACHE = ["~/.cargo/registry", "~/.cargo/git", "target"]
+CD_GATE = """    if: >-
+      !github.event.repository.fork && (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_repository.full_name == github.repository)
+      )
+"""
+
+
+class Workflows(unittest.TestCase):
+    """What ties the workflows to the script and to the checks, as no local run can trigger them."""
+
+    def setUp(self):
+        self.cd = (ROOT / ".github/workflows/cd.yml").read_text()
+        self.ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        # Each job of CI, by name: the lines indented under it.
+        body = self.ci[self.ci.index("\njobs:\n") :]
+        self.jobs = {
+            match[1]: match[2] for match in re.finditer(r"(?m)^  ([\w-]+):\n((?:(?:    .*)?\n)*)", body)
+        }
+
+    def test_ci_has_one_job_on_linux_that_runs_make_check(self):
+        self.assertEqual(list(self.jobs), ["check"])
+        self.assertRegex(self.jobs["check"], r"(?m)^    runs-on: ubuntu-24\.04$")
+        self.assertIn("      - run: nix develop -c make check\n", self.jobs["check"])
+
+    def test_ci_checks_a_push_or_a_fork_s_pull_request(self):
+        self.assertRegex(self.jobs["check"], rf"(?m)^    if: {re.escape(FROM_HERE)}$")
+
+    def test_ci_caches_cargo_s_downloads_and_target_keyed_on_its_job_and_lock_files(self):
+        job = self.jobs["check"]
+        blocks = re.findall(r"path: \|\n((?: {12}.*\n)+)", job)
+        self.assertEqual([block.split() for block in blocks], [CARGO_CACHE])
+        key = re.search(r"(?m)^          key: (.+)$", job)[1]
+        prefix = re.search(r"restore-keys: (.+)", job)[1]
+        self.assertIn("github.job", key)
+        self.assertIn("hashFiles('Cargo.lock', 'flake.lock')", key)
+        self.assertTrue(key.startswith(prefix))
+
+    def test_ci_restores_the_store_between_the_installer_and_the_first_shell(self):
+        job = self.jobs["check"]
+        installer = job.index("uses: cachix/install-nix-action@")
+        cache = job.index("uses: nix-community/cache-nix-action@")
+        self.assertLess(installer, cache)
+        self.assertLess(cache, job.index("run: nix develop"))
+
+    def test_ci_keys_the_store_on_the_flake_and_on_a_prefix_of_that_key(self):
+        key = re.search(r"primary-key: (.+)", self.ci)[1]
+        prefix = re.search(r"restore-prefixes-first-match: (.+)", self.ci)[1]
+        self.assertIn("hashFiles('flake.nix', 'flake.lock')", key)
+        self.assertTrue(key.startswith(prefix))
+
+    def test_ci_trusts_no_other_cache(self):
+        for word in ("substituters", "accept-flake-config"):
+            with self.subTest(word):
+                self.assertNotIn(word, self.ci)
+
+    def test_ci_may_only_read(self):
+        self.assertRegex(self.ci, r"(?m)^permissions:\n  contents: read\n\n")
+
+    def test_cd_gives_the_script_what_the_runner_does_not(self):
+        for name in (
+            "GH_TOKEN",
+            *(name for name in release.SETTINGS if not name.startswith("GITHUB_")),
+        ):
+            with self.subTest(name):
+                self.assertRegex(self.cd, rf"(?m)^ +{name}: ")
+
+    def test_cd_raises_the_patch_part_unless_asked_by_hand(self):
+        self.assertIn("RELEASE_BUMP: ${{ inputs.bump || 'patch' }}", self.cd)
+
+    def test_cd_goes_on_only_after_a_success_of_a_push_here_or_by_hand_on_main(self):
+        self.assertIn(CD_GATE, self.cd)
+
+    def test_cd_releases_the_commit_that_ci_checked_one_run_at_a_time_never_cancelled(self):
+        self.assertIn(
+            "RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}", self.cd
+        )
+        self.assertRegex(self.cd, r"(?m)^  group: release\n  cancel-in-progress: false$")
+
+    def test_cd_may_read_the_runs_of_ci_and_write_a_release(self):
+        self.assertRegex(self.cd, r"(?m)^  actions: read$")
+        self.assertRegex(self.cd, r"(?m)^  contents: write$")
+
+    def test_cd_checks_out_what_ci_checked_and_follows_the_workflow_named_ci(self):
+        self.assertRegex(
+            self.cd, r"ref: \$\{\{ github\.event\.workflow_run\.head_sha \|\| github\.sha \}\}"
+        )
+        self.assertRegex(self.cd, r"workflows: \[CI\]")
+        self.assertRegex(self.ci, r"(?m)^name: CI$")
+
+    def test_every_action_is_pinned_by_a_full_commit(self):
+        for text in (self.ci, self.cd):
+            uses = re.findall(r"uses: (\S+)( # v\S+)?", text)
+            self.assertTrue(uses)
+            for action, version in uses:
+                with self.subTest(action):
+                    self.assertRegex(action, r"@[0-9a-f]{40}$")
+                    self.assertTrue(version)
 
 
 class Bounds(unittest.TestCase):
