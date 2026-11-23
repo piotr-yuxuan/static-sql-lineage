@@ -63,9 +63,7 @@ impl Request {
 
     /// The response to this request, or why it is refused as a whole.
     pub fn respond(self) -> Result<Response, String> {
-        let dialect = (Dialect::named(&self.dialect)).ok_or_else(|| {
-            format!("the dialect {:?} is not one of this build's: {:?}", self.dialect, Dialect::built())
-        })?;
+        let dialect = Dialect::named(&self.dialect)?;
         let defaults = self.defaults.read(dialect)?;
         let mut catalog = Catalog::declared(&self.catalog, dialect, &defaults)?;
         let targets: Vec<RelationName> = (self.writes.iter())

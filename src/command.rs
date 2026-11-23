@@ -77,8 +77,7 @@ impl Command {
             }
         }
         let given = dialect.ok_or_else(|| format!("{name} needs --dialect"))?;
-        let dialect = (Dialect::named(&given))
-            .ok_or_else(|| format!("the dialect {given:?} is not one of this build's: {:?}", Dialect::built()))?;
+        let dialect = Dialect::named(&given)?;
         let defaults = Defaults::given(database, schema, dialect);
         defaults.read(dialect)?;
         let graph = verb == Verb::Graph;
