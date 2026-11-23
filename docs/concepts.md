@@ -123,8 +123,9 @@ have. A reject scenario names an answer that must not be given.
   Whether `DELETE ... WHERE` is a write is open (`decisions.md`, Q4).
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`, `Holder`, `Key`.
+- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`.
 - operations:
+  - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
   - `Write::query`: the write's query, or its refusal.
   - `Write::relations`: the relations that the write's query reads.
   - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
@@ -219,6 +220,7 @@ have. A reject scenario names an answer that must not be given.
 - home: `Answer`, `Gap`, `GapReason`, `Refusal`, `RefusalReason`.
 - operations:
   - `Answer::of`: the answer to one write against the catalog.
+  - `Answer::of_piece`: the answer to one piece of a write, merged into the write's.
 - accept `answer.unknown-star`: query `select * from r`, with no catalog: an
   `unknown_relation` gap for `r` and a `wildcard` gap; no edge.
 - reject `answer.silent-none`: for that query, no edge and no gap.

@@ -10,8 +10,8 @@ use serde::Serialize;
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::edge::{Edge, End, Reach};
-use crate::relation::Name;
-use crate::write::{Outputs, Write};
+use crate::relation::{Name, RelationName};
+use crate::write::{Outputs, Piece, Write};
 
 /// The answer to one write.
 #[derive(Serialize)]
@@ -67,21 +67,47 @@ pub struct Refusal {
 pub enum RefusalReason {
     Unparsed,
     NotAQuery,
+    OtherTarget,
     Invalid,
     UnnamedColumn,
     DuplicateColumn,
 }
 
 impl Answer {
-    /// The answer to `write`, against `catalog` as it stands just before it.
-    pub fn of(write: &Write, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Answer {
+    /// The answer to `write`, whose target is `target`, against `catalog` as it stands just
+    /// before it, and whether the write replaces its target, as one may that does not
+    /// parse.
+    pub fn of(
+        write: &Write,
+        target: &RelationName,
+        catalog: &Catalog,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> (Answer, bool) {
         let answer =
             Answer { write: write.id.clone(), columns: None, edges: Vec::new(), gaps: Vec::new(), refusal: None };
-        let query = match Write::query(&write.sql, dialect) {
+        let (_, replaces, pieces) = match write.pieces(target, dialect, defaults) {
+            Ok(read) => read,
+            Err(refusal) => {
+                let replaces = matches!(refusal.reason, RefusalReason::Unparsed);
+                return (answer.refused(refusal), replaces);
+            }
+        };
+        let mut answers = pieces.iter().map(|piece| Answer::of_piece(write, piece, catalog, dialect, defaults));
+        (answers.next().expect("a replace write is one piece"), replaces)
+    }
+
+    /// The answer to `piece`, one of `write`'s, against `catalog`: its output columns, or
+    /// its target's columns onto which they map, its edges and its gaps, or its refusal.
+    pub fn of_piece(write: &Write, piece: &Piece, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Answer {
+        let answer =
+            Answer { write: write.id.clone(), columns: None, edges: Vec::new(), gaps: Vec::new(), refusal: None };
+        let sql = &piece.text;
+        let query = match Write::query(sql, dialect) {
             Ok(query) => query,
             Err(refusal) => return answer.refused(refusal),
         };
-        let relations = &Write::relations(&write.sql, &query, dialect, defaults);
+        let relations = &Write::relations(sql, &query, dialect, defaults);
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
         let mut gaps: Vec<Gap> = (unknown.into_iter())
             .map(|relation| Gap {
@@ -90,8 +116,7 @@ impl Answer {
             })
             .collect();
         let schema = catalog.schema(relations);
-        let checked =
-            validate_with_schema(&write.sql, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
+        let checked = validate_with_schema(sql, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
         let errors: Vec<String> = (checked.errors.into_iter())
             .filter(|error| error.severity == ValidationSeverity::Error && error.code != "E200")
             .map(|error| error.message)
@@ -99,7 +124,7 @@ impl Answer {
         if !errors.is_empty() {
             return answer.refused(Refusal { reason: RefusalReason::Invalid, detail: errors.join("; ") });
         }
-        let outputs = match Write::outputs(&write.sql, &query, catalog, dialect, defaults) {
+        let outputs = match Write::outputs(sql, &query, piece.columns.as_deref(), catalog, dialect, defaults) {
             Ok(Outputs::Named(outputs)) => outputs,
             Ok(Outputs::Unknown(relation)) => {
                 gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, None, "the columns of a * are unknown") });
@@ -126,13 +151,14 @@ impl Answer {
         let options =
             AnalyzeQueryOptions { dialect: dialect.polyglot(), schema: Some(schema.clone()), complexity_guard: None };
         // The projection that names each output column: the one at its place, else the only
-        // one that does, as the engine orders a `*` over a join as DuckDB does.
+        // one that does, as the engine orders a `*` over a join as DuckDB does; for a piece
+        // whose outputs map by position, the one at its place.
         let order = |analysis: &QueryAnalysis| -> Option<Vec<usize>> {
             let projections = &analysis.projections;
             let found = (outputs.iter().enumerate()).map(|(place, output)| {
                 let named = |at: &usize| projections[*at].name.as_deref().is_some_and(|name| output.reported_as(name));
                 let mut others = (0..projections.len()).filter(named);
-                match (named(&place), others.next(), others.next()) {
+                match (piece.columns.is_some() || named(&place), others.next(), others.next()) {
                     (true, ..) => Some(place),
                     (false, Some(at), None) => Some(at),
                     _ => None,
@@ -140,7 +166,7 @@ impl Answer {
             });
             found.collect::<Option<Vec<usize>>>().filter(|_| projections.len() == outputs.len())
         };
-        let analysis = match analyze_query(&write.sql, options) {
+        let analysis = match analyze_query(sql, options) {
             Ok(analysis) => analysis,
             Err(error) => {
                 gaps.push(Gap::of(GapReason::AnalysisFailed, None, error.to_string()));
@@ -159,8 +185,8 @@ impl Answer {
         }
         let children: Vec<End> =
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
-        let holders = Write::holders(&write.sql, &query, dialect);
-        let keys = Write::keys(&write.sql, &query, catalog, dialect, defaults);
+        let holders = Write::holders(sql, &query, dialect);
+        let keys = Write::keys(sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&query, &holders, keys.as_deref(), &order, &schema, dialect);
         let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
         let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog);

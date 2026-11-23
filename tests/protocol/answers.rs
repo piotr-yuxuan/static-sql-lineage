@@ -22,11 +22,6 @@ fn sql_that_does_not_parse_is_refused() {
 }
 
 #[test]
-fn a_statement_is_not_a_query() {
-    assert_eq!(trace(&[("s", &["a"])], "create view v as select a from s"), ["refused not_a_query"]);
-}
-
-#[test]
 fn relations_alike_but_for_case_are_ambiguous() {
     let sql = "select o.x as p, p.y as q from \"Orders\" o join orders p on o.x = p.y";
     assert_eq!(trace(&[("\"Orders\"", &["x"]), ("orders", &["y"])], sql), ["gap ambiguous_relation - -"]);
