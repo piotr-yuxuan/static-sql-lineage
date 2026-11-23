@@ -3,10 +3,10 @@
 //! whose target is `T`, against the file's relations. Their expectations are the file's,
 //! which takes them from its `definition.md`, in protocol 1's terms: an edge spells its
 //! parent as the catalog does, and its child as the write's query, or a `*`, does; an
-//! "error" is a refusal, a "gap" a gap and no edge, and "outside" the refusal
-//! `not_a_query`. Five wait on polyglot: their tests are ignored, each naming the issue
-//! that it waits on; and the pivot's `FOR` column is a `derive`, as the Edge entry calls
-//! `CASE`.
+//! "error" is a refusal and a "gap" a gap and no edge; its one case "outside", a `MERGE`,
+//! is read as plan 006 reads a `MERGE`. Five wait on polyglot: their tests are ignored,
+//! each naming the issue that it waits on; and the pivot's `FOR` column is a `derive`, as
+//! the Edge entry calls `CASE`.
 
 use super::{outline, request, respond};
 
@@ -177,10 +177,20 @@ fn unquoted_relation_against_a_quoted_one() {
     assert_eq!(case("select id from db.s.mixedcase"), ["gap unknown_relation db.s.mixedcase -"]);
 }
 
+/// The file's `merge`, outside its scope then, written to its own target: its `ON`
+/// decides the rows of every column of the target from the source's key, and from none of
+/// the target's own (Q4); each `WHEN` copies the columns that it sets.
 #[test]
 fn merge() {
     let sql = "merge into db.s.my_model t using db.s.events s on t.id = s.id \
         when matched then update set t.updated_at = s.updated_at \
         when not matched then insert (id, updated_at) values (s.id, s.updated_at)";
-    assert_eq!(case(sql), ["refused not_a_query"]);
+    let catalog: Vec<(&str, &[&str])> = RELATIONS.iter().map(|(_, relation, columns)| (*relation, *columns)).collect();
+    let expected = [
+        "DB.S.EVENTS.ID -> DB.S.MY_MODEL.ID copy",
+        "DB.S.EVENTS.ID -> DB.S.MY_MODEL.PAYLOAD rows",
+        "DB.S.EVENTS.ID -> DB.S.MY_MODEL.UPDATED_AT rows",
+        "DB.S.EVENTS.UPDATED_AT -> DB.S.MY_MODEL.UPDATED_AT copy",
+    ];
+    assert_eq!(outline(&respond(&request(&catalog, &[("DB.S.MY_MODEL", sql)]))[0]), expected);
 }

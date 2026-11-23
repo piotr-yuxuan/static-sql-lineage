@@ -108,6 +108,22 @@ fn write_contribute_as_replace() {
     assert!(!found[1].iter().any(|line| line.starts_with("gap") || line.starts_with("refused")), "{found:?}");
 }
 
+/// The answer to `sql` against the catalog of `write.delete-decides-rows`.
+fn deleted(sql: &str) -> Vec<String> {
+    trace(&[("t", &["a", "b"]), ("s", &["k"])], sql)
+}
+
+#[test]
+fn write_delete_decides_rows() {
+    assert_eq!(deleted("delete from t where a in (select k from s)"), ["s.k -> t.a rows", "s.k -> t.b rows"]);
+}
+
+#[test]
+fn write_delete_own_condition() {
+    let found = deleted("delete from t where b < 0");
+    assert!(!found.iter().any(|line| line.contains(" -> ")), "{found:?}");
+}
+
 #[test]
 fn write_unnamed_output() {
     assert_eq!(trace(&[("s", &["a"])], "select a + 1 from s"), ["refused unnamed_column"]);

@@ -5,11 +5,11 @@
 use std::collections::HashSet;
 
 use polyglot_sql::expressions::{
-    AlterViewAction, Cte, Expression, From, Identifier, Join, JoinKind, Literal, Select, TableRef, ViewColumn, Where,
-    With,
+    AlterViewAction, Cte, Expression, From, Identifier, Join, JoinKind, Literal, Merge, Null, Select, TableRef,
+    ViewColumn, Where, With,
 };
 use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
-use polyglot_sql::traversal::ExpressionWalk;
+use polyglot_sql::traversal::{ExpressionWalk, get_merge_target};
 use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
 use polyglot_sql::{ColumnUseContext, LineageNode, TokenType, generate, lineage_at_with_schema, parse_one};
 use serde::Deserialize;
@@ -79,7 +79,8 @@ impl Write {
     /// and writes `target`, or the table of its `INTO`; a view, or a table made by
     /// `CREATE TABLE ... AS`, is its query, onto its column list, if any. An `INSERT` is
     /// its query; an `UPDATE`, the `SELECT` of its values over its sources, its target among
-    /// them. A contribute statement's pieces map onto the target's columns, as `catalog`
+    /// them; a `DELETE`, of a `NULL` for every column of the target; a `MERGE`, one for its
+    /// `ON` as a `DELETE`, then one for each `WHEN` clause. A contribute statement's pieces map onto the target's columns, as `catalog`
     /// knows them, or, the target unknown, onto those that the statement names; a piece
     /// that would need the target's columns is left out. Refused when the statement does not parse, is not a
     /// write that the tool reads, names another target than `target`, which completes it as
@@ -96,6 +97,8 @@ impl Write {
             .map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
         let sql: Vec<char> = self.sql.chars().collect();
         let known = catalog.get(target).map(|(_, columns)| columns);
+        // The values of a piece that decides the rows of every column of the target.
+        let nulls = vec![Expression::Null(Null); known.map_or(0, <[Name]>::len)];
         let not_a_write = || refused(RefusalReason::NotAQuery, "not a write that the tool reads".to_string());
         // The statement's target, none for a query's; whether it replaces it; whether its
         // pieces read its own row; each piece, its tree or none for the statement's own
@@ -141,12 +144,30 @@ impl Write {
                 let condition = update.where_clause.as_ref().map(|filter| filter.this.clone());
                 let sources = added.into_iter().chain(froms.cloned()).collect();
                 let piece = synthetic(values, sources, update.from_joins.clone(), condition, update.with.clone());
-                (
-                    Some(named.unwrap_or(&update.table)),
-                    false,
-                    true,
-                    vec![(Some(piece), columns(set, known, &sql, dialect))],
-                )
+                let columns = columns(set, known, &sql, dialect);
+                (Some(named.unwrap_or(&update.table)), false, true, vec![(Some(piece), columns)])
+            }
+            Expression::Delete(delete) => {
+                let alias = delete.alias.clone().or_else(|| delete.table.alias.clone());
+                let sources =
+                    std::iter::once(TableRef { alias, ..delete.table.clone() }).chain(delete.using.iter().cloned());
+                let sources = sources.map(|source| Expression::Table(Box::new(source))).collect();
+                let condition = delete.where_clause.as_ref().map(|filter| filter.this.clone());
+                let piece = synthetic(nulls, sources, delete.joins.clone(), condition, delete.with.clone());
+                (Some(&delete.table), false, true, vec![(Some(piece), Ok(known.map(<[Name]>::to_vec)))])
+            }
+            Expression::Merge(merge) => {
+                let Some(Expression::Table(table)) = get_merge_target(&statement) else { return Err(not_a_write()) };
+                let with = merge.with_.as_deref().and_then(|with| match with {
+                    Expression::With(with) => Some((**with).clone()),
+                    _ => None,
+                });
+                let sources = vec![(*merge.this).clone(), (*merge.using).clone()];
+                let whens = whens(merge, &sources, with.as_ref(), &nulls).into_iter();
+                let whens = whens.map(|(piece, named)| (Some(piece), columns(&named, known, &sql, dialect)));
+                let on = synthetic(nulls, sources, Vec::new(), merge.on.as_deref().cloned(), with);
+                let specs = std::iter::once((Some(on), Ok(known.map(<[Name]>::to_vec)))).chain(whens);
+                (Some(&**table), false, true, specs.collect())
             }
             // `SELECT ... INTO` names its target in the `SELECT`, or in the left branch of a
             // set operation, and is traced as the query that it is.
@@ -722,6 +743,53 @@ fn view_columns(
         opens = depth == 1 && matches!(token.token_type, TokenType::LParen | TokenType::Comma);
     }
     Ok(Some(names))
+}
+
+/// The `SELECT` of each `WHEN` clause of `merge`, its values over `sources`, under `with`,
+/// where its condition holds, with the columns that its `UPDATE SET` or its `INSERT` names;
+/// none for an `INSERT` without a list, whose values follow the target's columns, or for a
+/// `DELETE`, whose values are `nulls`, one for each column of the target.
+fn whens(
+    merge: &Merge,
+    sources: &[Expression],
+    with: Option<&With>,
+    nulls: &[Expression],
+) -> Vec<(Expression, Vec<Identifier>)> {
+    let column = |expression: &Expression| match expression {
+        Expression::Identifier(identifier) => Some(identifier.clone()),
+        Expression::Column(column) => Some(column.name.clone()),
+        _ => None,
+    };
+    let clauses = merge.whens.iter().flat_map(|whens| match whens.as_ref() {
+        Expression::Whens(whens) => whens.expressions.as_slice(),
+        _ => &[],
+    });
+    let mut pieces = Vec::new();
+    for clause in clauses {
+        let Expression::When(when) = clause else { continue };
+        // polyglot gives an action as a tuple of its keyword and its lists, a `DELETE` as its
+        // keyword alone.
+        let (values, named): (Vec<Expression>, Vec<Identifier>) = match when.then.as_ref() {
+            Expression::Tuple(action) => match action.expressions.as_slice() {
+                [Expression::Var(keyword), Expression::Tuple(set)] if keyword.this.eq_ignore_ascii_case("update") => {
+                    let pairs = set.expressions.iter().filter_map(|pair| match pair {
+                        Expression::Eq(pair) => Some((pair.right.clone(), column(&pair.left)?)),
+                        _ => None,
+                    });
+                    pairs.unzip()
+                }
+                [_, Expression::Tuple(named), Expression::Tuple(values)] => {
+                    (values.expressions.clone(), named.expressions.iter().filter_map(column).collect())
+                }
+                [_, Expression::Tuple(values)] => (values.expressions.clone(), Vec::new()),
+                _ => continue,
+            },
+            _ => (nulls.to_vec(), Vec::new()),
+        };
+        let piece = synthetic(values, sources.to_vec(), Vec::new(), when.condition.as_deref().cloned(), with.cloned());
+        pieces.push((piece, named));
+    }
+    pieces
 }
 
 /// The synthetic `SELECT` of a piece of an `UPDATE`, a `DELETE` or a `MERGE`: `values`

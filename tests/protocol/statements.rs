@@ -255,3 +255,89 @@ fn tsql_with_before_an_update_is_read() {
     let sql = "with c as (select k, x from s where flag = 1) update t set a = c.x from c where t.k = c.k";
     assert_eq!(trace("tsql", sql), ["s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy"]);
 }
+
+#[test]
+fn delete_using_decides_rows_of_every_column() {
+    let answer = &respond(&writes("snowflake", &[("t", "delete from t using s where t.k = s.k and s.flag = 0")]))[0];
+    assert_eq!(answer["columns"], json!(["k", "a", "b"]));
+    let expected = [
+        "s.flag -> t.k rows",
+        "s.k -> t.k rows",
+        "s.flag -> t.a rows",
+        "s.k -> t.a rows",
+        "s.flag -> t.b rows",
+        "s.k -> t.b rows",
+    ];
+    assert_eq!(outline(answer), expected);
+}
+
+#[test]
+fn tsql_delete_from_a_join_decides_rows() {
+    let expected = ["s.k -> t.k rows", "s.k -> t.a rows", "s.k -> t.b rows"];
+    for sql in ["delete t from t join s on t.k = s.k", "delete tt from t as tt join s on tt.k = s.k"] {
+        assert_eq!(trace("tsql", sql), expected, "{sql}");
+    }
+}
+
+#[test]
+fn merge_on_decides_rows_of_every_column() {
+    let found = trace("snowflake", "merge into t using s on t.k = s.k when matched then update set a = s.x");
+    assert_eq!(found, ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
+}
+
+#[test]
+fn merge_update_copies_the_columns_it_sets() {
+    let sql = "merge into t using s on t.k = s.k when matched then update set b = s.y + 1, a = s.x";
+    let expected = ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows", "s.y -> t.b derive"];
+    assert_eq!(trace("snowflake", sql), expected);
+}
+
+#[test]
+fn merge_insert_maps_its_list() {
+    let sql = "merge into t using s on t.k = s.k when not matched then insert (b, k) values (s.x, s.k)";
+    assert_eq!(trace("snowflake", sql), ["s.k -> t.k copy", "s.k -> t.a rows", "s.k -> t.b rows", "s.x -> t.b copy"]);
+}
+
+#[test]
+fn merge_insert_without_a_list_is_read() {
+    // polyglot's validation refuses it, reading the values as the target's columns;
+    // Snowflake maps them by position.
+    let sql = "merge into t using s on t.k = s.k when not matched then insert values (s.k, s.x, s.y)";
+    let expected = ["s.k -> t.k copy", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows", "s.y -> t.b copy"];
+    assert_eq!(trace("snowflake", sql), expected);
+}
+
+#[test]
+fn merge_delete_decides_rows_of_every_column() {
+    let sql = "merge into t using s on t.k = s.k when matched and s.flag = 0 then delete";
+    let expected = [
+        "s.flag -> t.k rows",
+        "s.k -> t.k rows",
+        "s.flag -> t.a rows",
+        "s.k -> t.a rows",
+        "s.flag -> t.b rows",
+        "s.k -> t.b rows",
+    ];
+    assert_eq!(trace("snowflake", sql), expected);
+}
+
+#[test]
+fn a_when_condition_decides_rows_of_its_columns_only() {
+    let sql = "merge into t using s on t.k = s.k when matched and s.flag = 1 then update set a = s.x";
+    let expected = ["s.k -> t.k rows", "s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"];
+    assert_eq!(trace("snowflake", sql), expected);
+}
+
+#[test]
+fn merge_of_a_column_the_target_lacks_is_refused() {
+    let merge = "merge into t using s on t.k = s.k when";
+    for clause in ["matched then update set nope = s.x", "not matched then insert (k, nope) values (s.k, s.x)"] {
+        assert_eq!(trace("snowflake", &format!("{merge} {clause}")), ["refused invalid"], "{clause}");
+    }
+}
+
+#[test]
+fn merge_into_an_alias_finds_its_target() {
+    let sql = "merge into t as tt using s as ss on tt.k = ss.k when matched then update set tt.a = ss.x";
+    assert_eq!(trace("snowflake", sql), ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
+}

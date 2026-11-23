@@ -146,6 +146,10 @@ have. A reject scenario names an answer that must not be given.
 - accept `write.duplicate-output`: query `select a, a as A from s`: a refusal.
 - reject `write.quoted-as-duplicate`: a refusal for `select a, a as "a" from s`, whose
   two columns are `A` and `a`.
+- accept `write.delete-decides-rows`: catalog `t` with `a` and `b`, `s` with `k`; write
+  `delete from t where a in (select k from s)`: the edges `s.k -> t.a` and
+  `s.k -> t.b`, `rows`; no gap.
+- reject `write.delete-own-condition`: for `delete from t where b < 0`, any edge.
 
 ## Edge
 
