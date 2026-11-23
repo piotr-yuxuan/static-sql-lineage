@@ -211,8 +211,7 @@ impl Write {
             Expression::Update(update) => {
                 // T-SQL's `UPDATE a ... FROM t AS a` names as its target the source that `a`
                 // names; any other target is added to the sources.
-                let known_as =
-                    |table: &TableRef| Name::of(table.alias.as_ref().unwrap_or(&table.name), &chars, dialect);
+                let known_as = |table: &TableRef| Name::of(known_by(table), &chars, dialect);
                 let froms = update.from_clause.iter().flat_map(|from| &from.expressions);
                 let named = froms.clone().find_map(|source| match source {
                     Expression::Table(table) if known_as(table) == known_as(&update.table) => Some(&**table),
@@ -744,9 +743,7 @@ fn listed<'a>(
                 .collect(),
             Some(qualifier) => {
                 let called = |(_, source): &(Option<usize>, &Expression)| match source {
-                    Expression::Table(table) => {
-                        Name::same(table.alias.as_ref().unwrap_or(&table.name), qualifier, sql, dialect)
-                    }
+                    Expression::Table(table) => Name::same(known_by(table), qualifier, sql, dialect),
                     Expression::Subquery(subquery) => {
                         subquery.alias.as_ref().is_some_and(|alias| Name::same(alias, qualifier, sql, dialect))
                     }
@@ -779,6 +776,11 @@ fn listed<'a>(
 fn sources(select: &Select) -> impl Iterator<Item = (Option<usize>, &Expression)> {
     let froms = select.from.iter().flat_map(|from| &from.expressions).map(|source| (None, source));
     froms.chain(select.joins.iter().enumerate().map(|(at, join)| (Some(at), &join.this)))
+}
+
+/// The identifier by which `table` is known in its query: its alias, else its name.
+fn known_by(table: &TableRef) -> &Identifier {
+    table.alias.as_ref().unwrap_or(&table.name)
 }
 
 /// The query of `scope`, that of its CTE for a CTE's.
