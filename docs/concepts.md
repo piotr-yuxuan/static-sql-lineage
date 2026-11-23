@@ -283,7 +283,7 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::named`: a dialect of the build by its name.
   - `Dialect::polyglot`: the dialect as polyglot-sql names it.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
-  - `Dialect::engine_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
+  - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.

@@ -155,7 +155,7 @@ impl Answer {
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
         let mut gaps: Vec<Gap> = unknown.into_iter().map(Gap::unknown).collect();
         let schema = catalog.schema(relations);
-        let text = dialect.engine_text(sql);
+        let text = dialect.polyglot_text(sql);
         let checked = validate_with_schema(&text, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
         let errors: Vec<String> = (checked.errors.into_iter())
             .filter(|error| error.severity == ValidationSeverity::Error && error.code != "E200")

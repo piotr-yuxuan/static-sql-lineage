@@ -54,11 +54,11 @@ impl Dialect {
         }
     }
 
-    /// The text that the engine reads for `sql`: under T-SQL, `sql` lowered whole, since
-    /// the engine keeps a delimited name's case where the dialect ignores it, as it
-    /// ignores the case of keywords, and no edge depends on a literal's; under the
+    /// The text that polyglot-sql reads for `sql`: under T-SQL, `sql` lowered whole,
+    /// since polyglot-sql keeps a delimited name's case where the dialect ignores it, as
+    /// it ignores the case of keywords, and no edge depends on a literal's; under the
     /// others, `sql` itself.
-    pub fn engine_text(self, sql: &str) -> String {
+    pub fn polyglot_text(self, sql: &str) -> String {
         match self {
             Dialect::Tsql => sql.to_lowercase(),
             Dialect::Snowflake | Dialect::Duckdb => sql.to_string(),
