@@ -177,6 +177,7 @@ have. A reject scenario names an answer that must not be given.
   - `Reach::of`: where the clauses of one write's query reach.
   - `Reach::rows`: whether a use of a column decides the rows of every output column.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
+  - `Edge::of_analysis`: the edges and gaps of a write's projections and uses, from the engine's analysis.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.
 - accept `edge.coalesce-is-derive`: query `select coalesce(a, 0) as a from s`: the

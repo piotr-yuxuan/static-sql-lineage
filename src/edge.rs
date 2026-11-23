@@ -4,9 +4,10 @@
 use polyglot_sql::expressions::{Expression, Select};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
-use polyglot_sql::{ColumnReferenceFact, ColumnUseContext, ColumnUseFact, ReferenceConfidence, TransformKind};
+use polyglot_sql::{ColumnReferenceFact, ColumnUseContext, QueryAnalysis, ReferenceConfidence, TransformKind};
 use serde::Serialize;
 
+use crate::answer::{Gap, GapReason};
 use crate::catalog::Catalog;
 use crate::relation::RelationName;
 
@@ -79,21 +80,64 @@ impl Edge {
             _ => Err(unresolved()),
         }
     }
+
+    /// The edges to `children`, the ends of a write's output columns in their order, and
+    /// the gaps, from the engine's `analysis` of its query: each projection's upstream
+    /// references by their kind, and each use's references as `rows` to the output
+    /// columns that `reach` places it at; one edge per pair of columns, of the first kind.
+    pub fn of_analysis(
+        analysis: &QueryAnalysis,
+        reach: &Reach,
+        children: &[End],
+        relations: &[RelationName],
+        catalog: &Catalog,
+    ) -> (Vec<Edge>, Vec<Gap>) {
+        let mut gaps = Vec::new();
+        let mut found: Vec<(usize, &ColumnReferenceFact, Kind)> = (analysis.projections.iter().enumerate())
+            .flat_map(|(place, projection)| {
+                let values = projection.upstream.iter();
+                values.filter_map(move |reference| Some((place, reference, Kind::of(reference.path_transform_kind?)?)))
+            })
+            .collect();
+        for use_ in &analysis.column_uses {
+            let Some(places) = reach.rows(&use_.scope_path, use_.context) else {
+                let detail = format!("{:?} at {}: {}", use_.context, use_.scope_path, use_.expression_sql);
+                gaps.push(Gap::of(GapReason::UnattributedUse, None, detail));
+                continue;
+            };
+            let used = places.into_iter().flat_map(|place| use_.references.iter().map(move |used| (place, used)));
+            found.extend(used.map(|(place, used)| (place, &used.reference, Kind::Rows)));
+        }
+        let mut edges = Vec::new();
+        for (place, reference, kind) in found {
+            let child = &children[place];
+            match Edge::of_reference(reference, kind, child.clone(), relations, catalog) {
+                Ok(Some(edge)) => edges.push((place, edge)),
+                Ok(None) => {}
+                Err(detail) => gaps.push(Gap::of(GapReason::UnresolvedReference, Some(child.column.clone()), detail)),
+            }
+        }
+        edges.sort();
+        edges.dedup_by(|one, other| one.0 == other.0 && one.1.parent == other.1.parent);
+        (edges.into_iter().map(|(_, edge)| edge).collect(), gaps)
+    }
 }
 
 /// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
-/// keeps rows by their order, whether its outermost query does, and which CTEs of its
-/// outermost `WITH` that query reads, directly or through others of that `WITH`.
+/// keeps rows by their order, whether its outermost query does, which CTEs of its
+/// outermost `WITH` that query reads, directly or through others of that `WITH`, and the
+/// places of its output columns.
 pub struct Reach {
     limited: bool,
     outermost: bool,
     read: Vec<usize>,
+    every: Vec<usize>,
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`. A CTE is matched by its name as the engine
-    /// matches it, ignoring case.
-    pub fn of(query: &Expression) -> Reach {
+    /// The reach of the clauses of `query`, which has `outputs` output columns. A CTE is
+    /// matched by its name as the engine matches it, ignoring case.
+    pub fn of(query: &Expression, outputs: usize) -> Reach {
         let limited = |select: &Select| {
             select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
         };
@@ -131,38 +175,39 @@ impl Reach {
             }
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
-        Reach { limited: limited || outermost, outermost, read }
+        Reach { limited: limited || outermost, outermost, read, every: (0..outputs).collect() }
     }
 
-    /// Whether `use_` decides the rows of every output column; none when where it
-    /// reaches cannot be placed. A clause reaches every output column from the outermost
-    /// query, its derived tables and its branches, and from a CTE of its outermost
-    /// `WITH` that it reads; not from a subquery, a table function or another CTE.
-    pub fn rows(&self, use_: &ColumnUseFact) -> Option<bool> {
-        let path = use_.scope_path.strip_prefix("root").and_then(|path| {
-            match path.strip_prefix(".ctes[").and_then(|rest| rest.split_once(']')) {
+    /// The places of the output columns whose rows a use of `context` in the scope at
+    /// `path` decides; none when where it reaches cannot be placed. A clause reaches
+    /// every output column from the outermost query, its derived tables and its
+    /// branches, and from a CTE of its outermost `WITH` that it reads; not from a
+    /// subquery, a table function or another CTE.
+    pub fn rows(&self, path: &str, context: ColumnUseContext) -> Option<Vec<usize>> {
+        let steps = path.strip_prefix("root").and_then(|steps| {
+            match steps.strip_prefix(".ctes[").and_then(|rest| rest.split_once(']')) {
                 Some((at, rest)) => at.parse().ok().filter(|at| self.read.contains(at)).map(|_| rest),
-                None => Some(path),
+                None => Some(steps),
             }
         });
-        let placed = path.is_some_and(|path| {
-            path.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
+        let placed = steps.is_some_and(|steps| {
+            steps.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
         });
-        match use_.context {
+        match context {
             ColumnUseContext::Join
             | ColumnUseContext::Filter
             | ColumnUseContext::Group
             | ColumnUseContext::Having
             | ColumnUseContext::Qualify
             | ColumnUseContext::SetOperationFilter
-            | ColumnUseContext::TableFunctionInput => placed.then_some(true),
+            | ColumnUseContext::TableFunctionInput => placed.then(|| self.every.clone()),
             // The engine counts these in the upstream of the projection that holds them.
             ColumnUseContext::WindowPartition
             | ColumnUseContext::WindowOrder
             | ColumnUseContext::WindowFrame
-            | ColumnUseContext::AggregateOrder => Some(false),
-            ColumnUseContext::Order if !self.limited => Some(false),
-            ColumnUseContext::Order => (self.outermost && use_.scope_path == "root").then_some(true),
+            | ColumnUseContext::AggregateOrder => Some(Vec::new()),
+            ColumnUseContext::Order if !self.limited => Some(Vec::new()),
+            ColumnUseContext::Order => (self.outermost && path == "root").then(|| self.every.clone()),
         }
     }
 }

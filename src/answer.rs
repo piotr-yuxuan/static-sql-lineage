@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::edge::{Edge, End, Kind, Reach};
+use crate::edge::{Edge, End, Reach};
 use crate::relation::Name;
 use crate::write::{Outputs, Write};
 
@@ -34,9 +34,9 @@ pub struct Gap {
 }
 
 impl Gap {
-    /// A gap of `reason` that concerns no relation and no column.
-    fn of(reason: GapReason, detail: impl Into<String>) -> Gap {
-        Gap { reason, relation: None, column: None, detail: detail.into() }
+    /// A gap of `reason` that concerns no relation, and the output column `column`, if any.
+    pub fn of(reason: GapReason, column: Option<String>, detail: impl Into<String>) -> Gap {
+        Gap { reason, relation: None, column, detail: detail.into() }
     }
 }
 
@@ -84,7 +84,7 @@ impl Answer {
         let mut gaps: Vec<Gap> = (unknown.into_iter())
             .map(|relation| Gap {
                 relation: Some(relation.to_string()),
-                ..Gap::of(GapReason::UnknownRelation, "unknown to the catalog")
+                ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
             })
             .collect();
         let schema = catalog.schema(relations);
@@ -100,7 +100,7 @@ impl Answer {
         let outputs = match write.outputs(&query, catalog, dialect, defaults) {
             Ok(Outputs::Named(outputs)) => outputs,
             Ok(Outputs::Unknown(relation)) => {
-                gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, "the columns of a * are unknown") });
+                gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, None, "the columns of a * are unknown") });
                 return answer.ended(gaps);
             }
             Err(refusal) => return answer.refused(refusal),
@@ -110,7 +110,7 @@ impl Answer {
             .flat_map(|(at, one)| {
                 known[at + 1..].iter().filter(|other| one.alike(other)).map(move |other| (one, other))
             })
-            .map(|(one, other)| Gap::of(GapReason::AmbiguousRelation, format!("{one} and {other}")))
+            .map(|(one, other)| Gap::of(GapReason::AmbiguousRelation, None, format!("{one} and {other}")))
             .collect();
         if !alike.is_empty() {
             return answer.ended(gaps.into_iter().chain(alike).collect());
@@ -129,42 +129,16 @@ impl Answer {
                 let detail = failed
                     .err()
                     .map_or("the analysis names other output columns".to_string(), |error| error.to_string());
-                gaps.push(Gap::of(GapReason::AnalysisFailed, detail));
+                gaps.push(Gap::of(GapReason::AnalysisFailed, None, detail));
                 return answer.ended(gaps);
             }
         };
-        let reach = Reach::of(&query);
-        let unplaced = analysis.column_uses.iter().filter(|use_| reach.rows(use_).is_none());
-        gaps.extend(unplaced.map(|use_| {
-            let detail = format!("{:?} at {}: {}", use_.context, use_.scope_path, use_.expression_sql);
-            Gap::of(GapReason::UnattributedUse, detail)
-        }));
-        let rows: Vec<_> = (analysis.column_uses.iter().filter(|use_| reach.rows(use_) == Some(true)))
-            .flat_map(|use_| use_.references.iter().map(|used| (&used.reference, Kind::Rows)))
-            .collect();
-        let found =
-            (analysis.projections.iter().zip(&outputs)).enumerate().flat_map(|(place, (projection, output))| {
-                let child = End { relation: write.target.clone(), column: output.to_string() };
-                let values = projection
-                    .upstream
-                    .iter()
-                    .filter_map(|reference| Some((reference, Kind::of(reference.path_transform_kind?)?)));
-                values.chain(rows.iter().copied()).map(move |(reference, kind)| {
-                    (place, output, Edge::of_reference(reference, kind, child.clone(), relations, catalog))
-                })
-            });
-        let mut edges = Vec::new();
-        for (place, output, found) in found {
-            match found {
-                Ok(Some(edge)) => edges.push((place, edge)),
-                Ok(None) => {}
-                Err(detail) => gaps
-                    .push(Gap { column: Some(output.to_string()), ..Gap::of(GapReason::UnresolvedReference, detail) }),
-            }
-        }
-        edges.sort();
-        edges.dedup_by(|one, other| one.0 == other.0 && one.1.parent == other.1.parent);
-        Answer { edges: edges.into_iter().map(|(_, edge)| edge).collect(), ..answer }.ended(gaps)
+        let children: Vec<End> =
+            outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
+        let reach = Reach::of(&query, outputs.len());
+        let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, relations, catalog);
+        gaps.extend(found);
+        Answer { edges, ..answer }.ended(gaps)
     }
 
     /// This answer refused, with nothing traced.
