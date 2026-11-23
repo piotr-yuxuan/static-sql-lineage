@@ -7,7 +7,7 @@ use std::fmt;
 use std::ops::Range;
 
 use polyglot_sql::expressions::{ExecuteStatement, Expression, Literal, TableConstraint};
-use polyglot_sql::{Token, TokenType, generate, parse_one};
+use polyglot_sql::{Token, TokenType, parse_one};
 use serde::Serialize;
 
 use crate::catalog::Catalog;
@@ -320,9 +320,7 @@ impl Script {
         if let (Some(read), Some(target)) = (read, target) {
             // Each piece's text, as answers read it: polyglot's scopes take no table from the
             // `Alias` that a `MERGE`'s tree holds for its target and its source.
-            let pieces = read.pieces.iter().map(|(piece, _)| {
-                piece.as_ref().map_or_else(|| Ok(text.to_string()), |piece| generate(piece, dialect.polyglot()))
-            });
+            let pieces = read.pieces.iter().map(|(piece, _)| Write::text(piece.as_ref(), text, dialect));
             let reads = pieces.flatten().flat_map(|piece| {
                 let query = Write::query(&piece, dialect).ok();
                 query.map(|query| Write::relations(&piece, &query, dialect, &defaults)).unwrap_or_default()

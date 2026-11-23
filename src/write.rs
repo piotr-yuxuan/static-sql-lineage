@@ -158,9 +158,7 @@ impl Write {
             if !reading.replaces && columns.is_none() {
                 continue;
             }
-            let text = tree.map_or_else(|| Ok(self.sql.clone()), |tree| generate(&tree, dialect.polyglot()));
-            let text = text.map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
-            pieces.push(Piece { text, columns, own: reading.own });
+            pieces.push(Piece { text: Write::text(tree.as_ref(), &self.sql, dialect)?, columns, own: reading.own });
         }
         Ok((found, reading.replaces, pieces))
     }
@@ -276,6 +274,14 @@ impl Write {
             _ => return Err(not_a_write()),
         };
         Ok(Reading { table, replaces, own, pieces })
+    }
+
+    /// The text of a piece of the statement `sql`, whose tree [`Write::read`] gives: the
+    /// statement's own text for none, else the tree generated under the dialect; refused
+    /// when it does not generate.
+    pub fn text(tree: Option<&Expression>, sql: &str, dialect: Dialect) -> Result<String, Refusal> {
+        let text = tree.map_or_else(|| Ok(sql.to_string()), |tree| generate(tree, dialect.polyglot()));
+        text.map_err(|error| Refusal { reason: RefusalReason::Unparsed, detail: error.to_string() })
     }
 
     /// The query that `sql` holds, the outermost one when it is parenthesised, as the
