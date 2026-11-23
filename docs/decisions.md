@@ -68,9 +68,10 @@ drafted at a time, and the owner may reorder for value.
 1. The skeleton: the crate, `make check`, the concept check and `--describe`. No new
    concept.
 2. Protocol 1 and replace writes: the request read, refused at its boundary and
-   traced, with the evidence of R7 and the names of R11; Q7 first. Reading a request
-   without tracing it would need a stub answer or fields that nothing reads, so the two
-   come together. Serves U1.
+   traced, with the evidence of R7 and the names of R11, in two plans: protocol 1 with
+   each write given as a query and its target, then the rest of R7's evidence. Q7 is
+   closed (see "Provenance"). Reading a request without tracing it would need a stub
+   answer or fields that nothing reads, so the two come together. Serves U1.
 3. Contribute writes; Q1 probed, and Q3 and Q4 ruled first. Serves U1 and U2.
 4. `graph`, `trace`, `uses` and `outline`, from answers alone: derived terms, no new
    kernel concept; Q9 first. Serves U2.
@@ -119,12 +120,11 @@ foreseen to ask.
 
 | # | Question | Closed by | Before step |
 |---|---|---|---|
-| Q1 | How polyglot-sql reads writes other than a query that defines its target: `INSERT ... SELECT`, `MERGE`, `UPDATE ... FROM`, `CREATE TABLE ... AS`, `SELECT ... INTO`, in each of the three dialects | a probe on synthetic SQL | 3 |
+| Q1 | How polyglot-sql reads writes other than a query that defines its target: `CREATE VIEW`, `CREATE MATERIALIZED VIEW`, `INSERT ... SELECT`, `MERGE`, `UPDATE ... FROM`, `CREATE TABLE ... AS`, `SELECT ... INTO`, in each of the three dialects | a probe on synthetic SQL | 3 |
 | Q2 | How it reads T-SQL routines and functions: `BEGIN ... END`, `#t` and `@t`, `IF ... ELSE`, dynamic SQL run by `EXEC`, inline and multi-statement table functions, `CROSS APPLY`, a scalar function whose body reads a table | a probe | 5 |
 | Q3 | A relation's lineage when several writes reach it: the union of their edges, which kind when two writes give one pair of columns different kinds, and what a refused contribute write does to its target | the owner, on scenarios | 3 |
 | Q4 | Whether `DELETE ... WHERE`, and `MERGE`'s matching condition, give `rows` edges to every column of the target | the owner | 3 |
 | Q6 | Whether every branch of a routine counts, so that lineage says what may happen; whether answers about a routine show its temporary relations or pass through them | the owner | 5 |
-| Q7 | Carrying a defined column's exact case to later writes needs to know whether each output name was quoted, which polyglot-sql's projection facts do not say | a probe: an upstream request, or a walk of the syntax tree | 2 |
 | Q8 | Whether the repository will be public | the owner | the first release |
 | Q9 | Whether a `CREATE TABLE` with a column list feeds the catalog, for the porting use, which reads files rather than a request | the owner | 4 |
 
@@ -134,3 +134,10 @@ The evidence is in dbt-lsp-plus's untracked `docs/work/`: in `column-lineage/`,
 `definition.md` (edges, kinds and answers), `findings.md` (the protocol),
 `investigation-2026-11-22.md` (polyglot-sql 0.14.3), `cases/`, `agreement/` and
 `snowflake-trial/`; and `migration-tools.md` for the porting of legacy views.
+
+Q7, whether a defined column's exact case can be carried to later writes, was closed
+by two probes, untracked in this repository's `docs/work/probes/`:
+`2026-11-22-q7-output-quoting/` and `2026-11-23-plan-004-names/`. The parsed tree says
+whether each output name was quoted, at its place in the outermost select list, and
+through a `*` in what the `*` reads; a replace write with an unnamed output column is
+refused, as Snowflake refuses it, and so is one with two columns named alike.
