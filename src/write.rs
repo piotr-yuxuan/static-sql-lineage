@@ -227,18 +227,29 @@ impl Write {
     }
 
     /// The relations that `query`, parsed from `sql`, reads: its table references that
-    /// name no CTE in scope, as the engine scopes them, and those that Snowflake's
-    /// `IDENTIFIER` names by its one string literal in a `FROM` or a join, ordered by their
-    /// spelling.
+    /// name no CTE in scope, as the engine scopes them and as the dialect compares names,
+    /// and those that Snowflake's `IDENTIFIER` names by its one string literal in a `FROM`
+    /// or a join, ordered by their spelling.
     pub fn relations(sql: &str, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
         let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
-        let scoped = scopes(&root, &sql, dialect).into_iter().flat_map(|(_, scope, _)| scope.sources.values());
-        let mut relations: Vec<RelationName> = (scoped.filter_map(|source| match (&source.kind, &source.expression) {
-            (SourceKind::Table, Expression::Table(table)) => RelationName::of(table, &sql, dialect, defaults),
-            _ => None,
-        }))
-        .collect();
+        // The engine's scopes match a CTE's name ignoring ASCII case alone.
+        let cte = |scope: &Scope, table: &TableRef| {
+            table.schema.is_none()
+                && scope.cte_sources.values().any(|source| {
+                    matches!(&source.expression, Expression::Cte(cte) if Name::same(&cte.alias, &table.name, &sql, dialect))
+                })
+        };
+        let scoped = (scopes(&root, &sql, dialect).into_iter())
+            .flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (scope, source)));
+        let mut relations: Vec<RelationName> =
+            (scoped.filter_map(|(scope, source)| match (&source.kind, &source.expression) {
+                (SourceKind::Table, Expression::Table(table)) if !cte(scope, table) => {
+                    RelationName::of(table, &sql, dialect, defaults)
+                }
+                _ => None,
+            }))
+            .collect();
         // The engine scopes `IDENTIFIER('<name>')` as a table that the SQL does not spell.
         let selects = query.dfs().filter_map(|node| match node {
             Expression::Select(select) => Some(select),
@@ -581,7 +592,9 @@ fn named<'a>(
             Expression::Except(set) => (&set.with, &set.left),
             Expression::Subquery(subquery) if subquery.column_aliases.is_empty() => (&None, &subquery.this),
             Expression::Table(table) if table.column_aliases.is_empty() => {
-                let cte = ctes.iter().rposition(|cte| table.schema.is_none() && Name::same(&cte.alias, &table.name));
+                let cte = ctes
+                    .iter()
+                    .rposition(|cte| table.schema.is_none() && Name::same(&cte.alias, &table.name, sql, dialect));
                 let Some(at) = cte else {
                     let relation = RelationName::of(table, sql, dialect, defaults).ok_or(None)?;
                     let (_, columns) = catalog.get(&relation).ok_or_else(|| Some(relation.to_string()))?;
@@ -624,9 +637,11 @@ fn listed<'a>(
                 .collect(),
             Some(qualifier) => {
                 let called = |(_, source): &(Option<usize>, &Expression)| match source {
-                    Expression::Table(table) => Name::same(table.alias.as_ref().unwrap_or(&table.name), qualifier),
+                    Expression::Table(table) => {
+                        Name::same(table.alias.as_ref().unwrap_or(&table.name), qualifier, sql, dialect)
+                    }
                     Expression::Subquery(subquery) => {
-                        subquery.alias.as_ref().is_some_and(|alias| Name::same(alias, qualifier))
+                        subquery.alias.as_ref().is_some_and(|alias| Name::same(alias, qualifier, sql, dialect))
                     }
                     _ => false,
                 };

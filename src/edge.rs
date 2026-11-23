@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::answer::{Gap, GapReason};
 use crate::catalog::Catalog;
+use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName};
 use crate::write::{Holder, Key};
 
@@ -187,17 +188,20 @@ pub struct Reach {
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`, which has `outputs` output columns, its
-    /// subqueries held as `holders` says, the keys that its joins merge `keys`, and the
-    /// lineage of its output columns `steps`, or none. A CTE is matched by its name as the
-    /// engine matches it, ignoring case.
+    /// The reach of the clauses of `query`, parsed from `sql`, which has `outputs` output
+    /// columns, its subqueries held as `holders` says, the keys that its joins merge
+    /// `keys`, and the lineage of its output columns `steps`, or none. A CTE is matched by
+    /// its name under the dialect.
     pub fn of<'q>(
+        sql: &str,
         query: &'q Expression,
         outputs: usize,
         holders: Vec<(String, Option<Holder>)>,
         keys: Option<Vec<Key>>,
         steps: Vec<Option<LineageNode>>,
+        dialect: Dialect,
     ) -> Reach {
+        let sql: Vec<char> = sql.chars().collect();
         let limited = |select: &Select| {
             select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
         };
@@ -220,13 +224,13 @@ impl Reach {
         // that it reads reads.
         let mut pending = named(query);
         for name in ctes.iter().flat_map(|cte| named(&cte.this)) {
-            if let Some(at) = pending.iter().position(|other| Name::same(other, name)) {
+            if let Some(at) = pending.iter().position(|other| Name::same(other, name, &sql, dialect)) {
                 pending.swap_remove(at);
             }
         }
         let mut read = Vec::new();
         while let Some(name) = pending.pop() {
-            let cte = ctes.iter().position(|cte| Name::same(&cte.alias, name));
+            let cte = ctes.iter().position(|cte| Name::same(&cte.alias, name, &sql, dialect));
             if let Some(at) = cte.filter(|at| !read.contains(at)) {
                 read.push(at);
                 pending.extend(named(&ctes[at].this));

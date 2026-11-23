@@ -137,6 +137,18 @@ fn tsql_a_table_alias_of_another_case_is_resolved() {
 }
 
 #[test]
+fn tsql_a_cte_named_in_another_case_is_read() {
+    let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
+    let literal = &respond(&tsql(catalog, &[("t", "with [Été] as (select 1 as x) select x from été")]))[0];
+    assert_eq!(literal["columns"], json!(["x"]));
+    assert!(outline(literal).is_empty(), "{literal}");
+    let starred = "with [Été] as (select a from s) select [été].* from [Été]";
+    assert_eq!(traced(catalog, starred), ["s.a -> t.a copy"]);
+    let filtered = "with [Été] as (select a from s where b > 0) select a from été";
+    assert_eq!(traced(catalog, filtered), ["s.a -> t.a copy", "s.b -> t.a rows"]);
+}
+
+#[test]
 fn tsql_edges_keep_their_spellings() {
     let catalog: &[(&str, &[&str])] = &[("[dbo].[Orders]", &["[OrderId]", "Amount"])];
     let writes = [("t", "select ORDERID as [Id], [amount] from DBO.ORDERS"), ("u", "select * from dbo.orders")];

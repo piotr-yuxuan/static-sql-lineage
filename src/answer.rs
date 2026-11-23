@@ -228,7 +228,7 @@ impl Answer {
         let holders = Write::holders(sql, &query, dialect);
         let keys = Write::keys(sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&text, &query, &holders, keys.as_deref(), &order, &schema, dialect);
-        let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
+        let reach = Reach::of(sql, &query, outputs.len(), holders, keys, steps, dialect);
         let own = piece.own.then_some(target);
         let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog, own);
         gaps.extend(found);
