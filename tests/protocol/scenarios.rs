@@ -91,6 +91,23 @@ fn column_defined_through_star() {
     assert_eq!(outline(&answers[1]), ["u.\"Total\" -> v.x copy"]);
 }
 
+/// The two answers of `write.contribute-keeps-columns`.
+fn contributed() -> Vec<Vec<String>> {
+    let writes = [("t", "insert into t (a) select x from s"), ("u", "create view u as select a, b from t")];
+    respond(&request(&[("t", &["a", "b"]), ("s", &["x"])], &writes)).iter().map(outline).collect()
+}
+
+#[test]
+fn write_contribute_keeps_columns() {
+    assert_eq!(contributed(), [vec!["s.x -> t.a copy"], vec!["t.a -> u.a copy", "t.b -> u.b copy"]]);
+}
+
+#[test]
+fn write_contribute_as_replace() {
+    let found = contributed();
+    assert!(!found[1].iter().any(|line| line.starts_with("gap") || line.starts_with("refused")), "{found:?}");
+}
+
 #[test]
 fn write_unnamed_output() {
     assert_eq!(trace(&[("s", &["a"])], "select a + 1 from s"), ["refused unnamed_column"]);

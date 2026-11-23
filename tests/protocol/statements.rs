@@ -128,3 +128,66 @@ fn a_statement_that_is_not_a_write_keeps_its_target() {
         assert_eq!(found[1], ["t.b -> w.b copy"], "{sql}");
     }
 }
+
+#[test]
+fn insert_maps_its_list_by_position() {
+    let answer =
+        &respond(&writes("snowflake", &[("t", "insert into t (b, a, k) select x, y + 1, k from s where flag = 1")]))[0];
+    // Ordered by the target's columns, `k`, `a`, `b`, which are its answer's.
+    assert_eq!(answer["columns"], json!(["k", "a", "b"]));
+    let expected = [
+        "s.flag -> t.k rows",
+        "s.k -> t.k copy",
+        "s.flag -> t.a rows",
+        "s.y -> t.a derive",
+        "s.flag -> t.b rows",
+        "s.x -> t.b copy",
+    ];
+    assert_eq!(outline(answer), expected);
+    let answer = &respond(&writes("snowflake", &[("t", "insert into t (b, a) select x, y from s")]))[0];
+    assert_eq!(answer["columns"], json!(["a", "b"]));
+}
+
+#[test]
+fn insert_without_a_list_maps_the_targets_columns() {
+    let found = trace("snowflake", "insert into t select k, x, y from s");
+    assert_eq!(found, ["s.k -> t.k copy", "s.x -> t.a copy", "s.y -> t.b copy"]);
+}
+
+#[test]
+fn an_insert_of_unnamed_outputs_is_read() {
+    let found = trace("snowflake", "insert into t select k, x + 1, k from s");
+    assert_eq!(found, ["s.k -> t.k copy", "s.x -> t.a derive", "s.k -> t.b copy"]);
+}
+
+#[test]
+fn insert_overwrite_keeps_the_targets_columns() {
+    let found =
+        traced("snowflake", &[("t", "insert overwrite into t (k, a) select k, x from s"), ("v", "select b from t")]);
+    assert_eq!(found, [vec!["s.k -> t.k copy", "s.x -> t.a copy"], vec!["t.b -> v.b copy"]]);
+}
+
+#[test]
+fn insert_of_another_count_is_refused() {
+    for sql in ["insert into t (k, a) select k, x, y from s", "insert into t select k, x from s"] {
+        assert_eq!(trace("snowflake", sql), ["refused invalid"], "{sql}");
+    }
+}
+
+#[test]
+fn insert_into_a_column_the_target_lacks_is_refused() {
+    assert_eq!(trace("snowflake", "insert into t (k, nope) select k, x from s"), ["refused invalid"]);
+}
+
+#[test]
+fn a_with_before_a_statement_is_read() {
+    let expected = ["s.flag -> t.k rows", "s.k -> t.k copy", "s.flag -> t.a rows", "s.x -> t.a copy"];
+    let cte = "with c as (select k, x from s where flag = 1)";
+    for sql in [
+        format!("{cte} insert into t (k, a) select k, x from c"),
+        format!("insert into t (k, a) {cte} select k, x from c"),
+    ] {
+        assert_eq!(trace("snowflake", &sql), expected, "{sql}");
+    }
+    assert_eq!(trace("snowflake", "insert into t (k, a) (select k, x from s)"), ["s.k -> t.k copy", "s.x -> t.a copy"]);
+}

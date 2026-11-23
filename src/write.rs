@@ -74,12 +74,16 @@ impl Write {
     /// The pieces that the write's statement is read into, its target as the statement
     /// names it, and whether it replaces its target. A query is one piece, its own text,
     /// and writes `target`, or the table of its `INTO`; a view, or a table made by
-    /// `CREATE TABLE ... AS`, is its query, onto its column list, if any. Refused when the
-    /// statement does not parse, is not a write that the tool reads, or names another
-    /// target than `target`, which completes it as it completes the request's names.
+    /// `CREATE TABLE ... AS`, is its query, onto its column list, if any. A contribute
+    /// statement's pieces map onto the target's columns, as `catalog` knows them, or, the
+    /// target unknown, onto those that the statement names; a piece that would need the
+    /// target's columns is left out. Refused when the statement does not parse, is not a
+    /// write that the tool reads, names another target than `target`, which completes it as
+    /// it completes the request's names, or a column that the target lacks.
     pub fn pieces(
         &self,
         target: &RelationName,
+        catalog: &Catalog,
         dialect: Dialect,
         defaults: &[Name],
     ) -> Result<(RelationName, bool, Vec<Piece>), Refusal> {
@@ -87,6 +91,7 @@ impl Write {
         let statement = (parse_one(&self.sql, dialect.polyglot()))
             .map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
         let sql: Vec<char> = self.sql.chars().collect();
+        let known = catalog.get(target).map(|(_, columns)| columns);
         let not_a_write = || refused(RefusalReason::NotAQuery, "not a write that the tool reads".to_string());
         // The statement's target, none for a query's; whether it replaces it; each piece,
         // its tree or none for the statement's own text, with its columns.
@@ -110,6 +115,11 @@ impl Write {
                 let columns = create.columns.iter().map(|column| Name::of(&column.name, &sql, dialect));
                 let columns = columns.collect::<Option<Vec<Name>>>().filter(|columns| !columns.is_empty());
                 (Some(&create.name), true, vec![(Some(query), Ok(columns))])
+            }
+            Expression::Insert(insert) => {
+                let query = insert.query.clone().filter(|_| !insert.by_name).ok_or_else(not_a_write)?;
+                let columns = columns(&insert.columns, known, &sql, dialect);
+                (Some(&insert.table), false, vec![(Some(with(query, insert.with.clone())), columns)])
             }
             // `SELECT ... INTO` names its target in the `SELECT`, or in the left branch of a
             // set operation, and is traced as the query that it is.
@@ -137,9 +147,13 @@ impl Write {
         };
         let mut pieces = Vec::new();
         for (tree, columns) in specs {
+            let columns = columns?;
+            if !replaces && columns.is_none() {
+                continue;
+            }
             let text = tree.map_or_else(|| Ok(self.sql.clone()), |tree| generate(&tree, dialect.polyglot()));
             let text = text.map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
-            pieces.push(Piece { text, columns: columns? });
+            pieces.push(Piece { text, columns });
         }
         Ok((found, replaces, pieces))
     }
@@ -622,6 +636,29 @@ fn name(expression: &Expression, sql: &[char], dialect: Dialect) -> Option<Name>
         Expression::Column(column) => Name::of(&column.name, sql, dialect),
         _ => None,
     }
+}
+
+/// The target's columns that `identifiers`, parsed from `sql`, name, as `known`, the
+/// target's columns, spells them, or as `sql` does when the target is unknown; or, for no
+/// identifier, every column of the target, unknown with it. Refused when the target lacks
+/// one.
+fn columns<'a>(
+    identifiers: impl IntoIterator<Item = &'a Identifier>,
+    known: Option<&[Name]>,
+    sql: &[char],
+    dialect: Dialect,
+) -> Result<Option<Vec<Name>>, Refusal> {
+    let named: Vec<Name> =
+        identifiers.into_iter().filter_map(|identifier| Name::of(identifier, sql, dialect)).collect();
+    if named.is_empty() {
+        return Ok(known.map(<[Name]>::to_vec));
+    }
+    let Some(known) = known else { return Ok(Some(named)) };
+    let found = named.iter().map(|name| {
+        let detail = format!("the target has no column {name}");
+        known.iter().find(|column| *column == name).cloned().ok_or(Refusal { reason: RefusalReason::Invalid, detail })
+    });
+    found.collect::<Result<_, _>>().map(Some)
 }
 
 /// The names of `columns`, the column list of the view `view`, read from the tokens of

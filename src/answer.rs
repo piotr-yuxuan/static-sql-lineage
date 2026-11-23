@@ -86,7 +86,7 @@ impl Answer {
     ) -> (Answer, bool) {
         let answer =
             Answer { write: write.id.clone(), columns: None, edges: Vec::new(), gaps: Vec::new(), refusal: None };
-        let (_, replaces, pieces) = match write.pieces(target, dialect, defaults) {
+        let (_, replaces, pieces) = match write.pieces(target, catalog, dialect, defaults) {
             Ok(read) => read,
             Err(refusal) => {
                 let replaces = matches!(refusal.reason, RefusalReason::Unparsed);
@@ -94,7 +94,34 @@ impl Answer {
             }
         };
         let mut answers = pieces.iter().map(|piece| Answer::of_piece(write, piece, catalog, dialect, defaults));
-        (answers.next().expect("a replace write is one piece"), replaces)
+        if replaces {
+            return (answers.next().expect("a replace write is one piece"), true);
+        }
+        let (mut edges, mut gaps) = (Vec::new(), Vec::new());
+        for piece in answers {
+            if piece.refusal.is_some() {
+                return (piece, false);
+            }
+            edges.extend(piece.edges);
+            gaps.extend(piece.gaps);
+        }
+        // A contribute write's columns are its target's that its pieces map onto, in the
+        // target's order, or, the target unknown, those that the statement names; its edges
+        // are ordered by them, one per pair of columns, of the first kind.
+        let known = catalog.get(target).map(|(_, columns)| columns);
+        let mapped = pieces.iter().flat_map(|piece| piece.columns.iter().flatten());
+        let columns: Vec<Name> = match known {
+            Some(known) => {
+                known.iter().filter(|column| mapped.clone().any(|other| other == *column)).cloned().collect()
+            }
+            None => mapped.cloned().collect(),
+        };
+        let ends: Vec<End> =
+            columns.iter().map(|column| End { relation: write.target.clone(), column: column.to_string() }).collect();
+        let place = |edge: &Edge| ends.iter().position(|end| *end == edge.child);
+        edges.sort_by(|one, other| (place(one), one).cmp(&(place(other), other)));
+        edges.dedup_by(|one, other| one.child == other.child && one.parent == other.parent);
+        (Answer { columns: known.map(|_| columns), edges, ..answer }.ended(gaps), false)
     }
 
     /// The answer to `piece`, one of `write`'s, against `catalog`: its output columns, or
