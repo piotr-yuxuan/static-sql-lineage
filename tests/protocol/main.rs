@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 
 /// The command that runs the built binary.
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_sql-lineage"))
+    Command::new(env!("CARGO_BIN_EXE_static-sql-lineage"))
 }
 
 fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
@@ -148,7 +148,7 @@ fn assert_refused(output: &Output, naming: &str) {
 #[test]
 fn describe_names_the_build() {
     let description = description();
-    assert_eq!(description["tool"], "sql-lineage");
+    assert_eq!(description["tool"], "static-sql-lineage");
     assert_eq!(description["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(description["protocols"], json!([1]));
     assert_eq!(description["engine"]["name"], "polyglot-sql");

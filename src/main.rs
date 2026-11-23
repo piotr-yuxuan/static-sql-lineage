@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
-//! `sql-lineage`: the column lineage of SQL that writes relations.  How to run it is in
-//! `docs/protocol.md`.
+//! `static-sql-lineage`: the column lineage of SQL that writes relations.  How to run it
+//! is in `docs/protocol.md`.
 
 mod answer;
 mod catalog;
@@ -51,7 +51,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(reason) => {
-            eprintln!("sql-lineage: {reason}");
+            eprintln!("static-sql-lineage: {reason}");
             ExitCode::from(2)
         }
     }
