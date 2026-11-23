@@ -50,12 +50,12 @@ impl Kind {
     }
 }
 
-/// One end of an edge: a relation and one of its columns, spelled as the catalog or the
-/// write that made them known spells them.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+/// One end of an edge: a relation and one of its columns, compared as names, spelled as
+/// the catalog or the write that made them known spells them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct End {
-    pub relation: String,
-    pub column: String,
+    pub relation: RelationName,
+    pub column: Name,
 }
 
 impl End {
@@ -77,14 +77,14 @@ impl End {
         let Some((known, columns)) = catalog.get(relation) else { return Ok(None) };
         let mut columns = columns.iter().filter(|known| known.reported_as(column));
         match (columns.next(), columns.next()) {
-            (Some(column), None) => Ok(Some(End { relation: known.to_string(), column: column.to_string() })),
+            (Some(column), None) => Ok(Some(End { relation: known.clone(), column: column.clone() })),
             _ => Err(unresolved()),
         }
     }
 }
 
 /// `(parent relation, column) -> (child relation, column)`, with its kind.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Edge {
     pub parent: End,
     pub child: End,
@@ -151,7 +151,7 @@ impl Edge {
                 Ok(Some(edge)) => edge,
                 Ok(None) => continue,
                 Err(detail) => {
-                    gaps.push(Gap::of(GapReason::UnresolvedReference, Some(child.column.clone()), detail));
+                    gaps.push(Gap::of(GapReason::UnresolvedReference, Some(child.column.to_string()), detail));
                     continue;
                 }
             };
@@ -161,11 +161,14 @@ impl Edge {
                 Some(kind) => edges.push((place, Edge { kind, ..edge })),
                 None => {
                     let detail = "the engine's lineage does not say how its values reach it";
-                    gaps.push(Gap::of(GapReason::UnattributedUse, Some(child.column.clone()), detail));
+                    gaps.push(Gap::of(GapReason::UnattributedUse, Some(child.column.to_string()), detail));
                 }
             }
         }
-        edges.sort();
+        // By the child's place, then by the parent's spelling, as protocol 1 orders edges.
+        edges.sort_by_cached_key(|(place, edge)| {
+            (*place, edge.parent.relation.to_string(), edge.parent.column.to_string(), edge.kind)
+        });
         edges.dedup_by(|one, other| one.0 == other.0 && one.1.parent == other.1.parent);
         (edges.into_iter().map(|(_, edge)| edge).collect(), gaps)
     }
