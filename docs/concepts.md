@@ -246,7 +246,10 @@ have. A reject scenario names an answer that must not be given.
 - tier: kernel
 - means: what is known of relations' names and columns. There is one per request, and
   each write reads it as it stands just before that write. It starts as the request
-  gives it, and the writes are read in the request's order. After each:
+  gives it or, for a command, as its scripts' declarations give it, in reading order:
+  each `CREATE TABLE` with a column list is a declared relation, under the rule that a
+  request's declared relation follows (`decisions.md`, R15). The writes are read in the
+  request's order, or a command's in migration order. After each:
   a replace write sets its target's columns to its output columns; a refused replace
   write, one that does not parse, or one whose `*` leaves its output columns unknown,
   makes its target unknown; a contribute write, refused or not, leaves its target as it
@@ -258,6 +261,7 @@ have. A reject scenario names an answer that must not be given.
 - home: `Catalog`, `Declared`.
 - operations:
   - `Catalog::declared`: the catalog that the request declares.
+  - `Catalog::declare`: one declared relation, with a column and no column twice, in place of an earlier one.
   - `Catalog::get`: a relation as the catalog knows it, with its columns.
   - `Catalog::schema`: what the engine is told of the known relations that a write reads.
   - `Catalog::record`: what a write makes of its target.
@@ -270,6 +274,11 @@ have. A reject scenario names an answer that must not be given.
   the first refused, the second the edge `t.a -> u.a`, `copy`.
 - reject `catalog.refused-contribute-as-unknown`: an `unknown_relation` gap for `t` in
   the second answer.
+- accept `catalog.declared-by-create-table`: a script of `create table s (a int, "B" int);`
+  then `create view t as select a, "B" from s;`: `trace t.a` gives the edge `s.a -> t.a`,
+  `copy`, and `trace t."B"` the edge `s."B" -> t."B"`, `copy`; no gap.
+- reject `catalog.declaration-as-a-write`: for that script, `s` traced as a write's target,
+  or an `unknown_relation` gap for `s`.
 
 ## Dialect
 
@@ -303,7 +312,7 @@ have. A reject scenario names an answer that must not be given.
 | Term | Defined as | Home |
 |---|---|---|
 | base relation | a relation that no write of the request has as its target; its columns come from the catalog. Avoid: source | |
-| lineage | the edges of all the answers to one request; where several writes give one pair of columns, the first of `copy`, `derive`, `rows` (`decisions.md`, R12) | |
+| lineage | the edges of all the answers to one request; where several writes give one pair of columns, the first of `copy`, `derive`, `rows` (`decisions.md`, R12) | `Lineage`, `Walk` |
 | graph | the relations and the writes between them: a write links its target to each relation its query reads | `Graph`, `Search` |
 | trace | a column's edges upstream, followed through earlier writes to base relations | |
 | uses | a column's edges downstream | |

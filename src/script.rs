@@ -43,8 +43,9 @@ const WRITES: [(TokenType, &[TokenType], &[TokenType]); 9] = [
 ];
 
 /// A write found in a script: its id, the place of its first token in its file; its
-/// target, as its statement names it; whether it replaces its target; and the relations
-/// that its pieces read, as they name them, without repeats.
+/// target, as its statement names it; whether it replaces its target; the relations that
+/// its pieces read, as they name them, without repeats; and, for its answer, its statement's
+/// text and the defaults in force there.
 #[derive(Serialize)]
 pub struct Scripted {
     pub id: String,
@@ -52,6 +53,10 @@ pub struct Scripted {
     #[serde(skip)]
     pub replaces: bool,
     pub reads: Vec<RelationName>,
+    #[serde(skip)]
+    pub text: String,
+    #[serde(skip)]
+    pub defaults: Vec<Name>,
 }
 
 /// What the reading of scripts finds besides their writes: a statement refused, with
@@ -271,7 +276,8 @@ impl Script {
             });
             let mut seen = HashSet::new();
             let reads = reads.filter(|relation| seen.insert(relation.clone())).collect();
-            self.writes.push(Scripted { id, target, replaces: read.replaces, reads });
+            let text = text.to_string();
+            self.writes.push(Scripted { id, target, replaces: read.replaces, reads, text, defaults });
             return;
         }
         // Dynamic SQL: `EXEC` of a string or a variable, or of `sp_executesql`, bare or under

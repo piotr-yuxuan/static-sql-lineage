@@ -90,6 +90,15 @@ given without a schema, by `--database` or by `USE`, takes the dialect's usual s
 `sp_executesql` of a national string as `@statement` that parses as one statement, is
 read as that statement, and any other dynamic SQL is reported as not read (D3).
 
+Taken with plan 009 under the owner's standing word, for the owner to see:
+
+- R15. A `CREATE TABLE` with a column list and no query, in a script, declares its
+  relation and its columns, computed ones included, to the catalog of the commands, under
+  the rule that a request's declared relation follows (Q9).
+- T-SQL's storage clauses in such a declaration, which never bear on lineage and which
+  polyglot-sql refuses, such as `TEXTIMAGE_ON` or `ROWGUIDCOL`, are replaced by spaces
+  before it is parsed, rather than fixed upstream (D3).
+
 ## Widening, in order
 
 Each step reuses what the steps before it built, so that the cheapest concepts come
@@ -157,7 +166,6 @@ foreseen to ask.
 | Q2 | How it reads T-SQL routines and functions: `BEGIN ... END`, `#t` and `@t`, `IF ... ELSE`, dynamic SQL run by `EXEC`, inline and multi-statement table functions, `CROSS APPLY`, a scalar function whose body reads a table | a probe | 5 |
 | Q6 | Whether every branch of a routine counts, so that lineage says what may happen; whether answers about a routine show its temporary relations or pass through them | the owner | 5 |
 | Q8 | Whether the repository will be public | the owner | the first release |
-| Q9 | Whether a `CREATE TABLE` with a column list feeds the catalog, for the porting use, which reads files rather than a request | the owner | 4 |
 
 ## Provenance
 

@@ -19,19 +19,19 @@ pub struct Answer {
     write: String,
     /// The output columns, when they are all known and the write is not refused.
     pub columns: Option<Vec<Name>>,
-    edges: Vec<Edge>,
-    gaps: Vec<Gap>,
-    refusal: Option<Refusal>,
+    pub edges: Vec<Edge>,
+    pub gaps: Vec<Gap>,
+    pub refusal: Option<Refusal>,
 }
 
 /// A place where an edge may be missing, and why.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Gap {
-    reason: GapReason,
+    pub reason: GapReason,
     /// The relation it concerns, as the write's SQL spells it.
-    relation: Option<String>,
-    /// The output column it concerns.
-    column: Option<String>,
+    pub relation: Option<String>,
+    /// The output column it concerns, as the write's SQL spells it.
+    pub column: Option<String>,
     detail: String,
 }
 

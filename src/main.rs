@@ -9,6 +9,7 @@ mod describe;
 mod dialect;
 mod edge;
 mod graph;
+mod lineage;
 mod relation;
 mod request;
 mod script;
@@ -36,8 +37,12 @@ fn main() -> ExitCode {
             Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
                 .expect("a description serialises"))
         }
-        [command, rest @ ..] if command == "graph" => Command::read(rest).and_then(|command| command.run()),
-        _ => Err(format!("given {arguments:?}; the uses are --describe, graph, or a request on standard input")),
+        [command, rest @ ..] if Command::NAMES.iter().any(|name| command == name) => {
+            Command::read(&command.to_string_lossy(), rest).and_then(|command| command.run())
+        }
+        _ => Err(format!("given {arguments:?}; the uses are --describe, {}, or a request on standard input", {
+            Command::NAMES.join(", ")
+        })),
     };
     match output {
         Ok(output) => {

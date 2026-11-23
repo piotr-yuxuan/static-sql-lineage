@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! Edges: how a column of a relation that a write reads reaches a column of its target.
 
+use std::fmt;
+
 use polyglot_sql::expressions::{Expression, Identifier, JoinKind, Select};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
@@ -52,10 +54,16 @@ impl Kind {
 
 /// One end of an edge: a relation and one of its columns, compared as names, spelled as
 /// the catalog or the write that made them known spells them.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct End {
     pub relation: RelationName,
     pub column: Name,
+}
+
+impl fmt::Display for End {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}.{}", self.relation, self.column)
+    }
 }
 
 impl End {
@@ -84,7 +92,7 @@ impl End {
 }
 
 /// `(parent relation, column) -> (child relation, column)`, with its kind.
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Edge {
     pub parent: End,
     pub child: End,

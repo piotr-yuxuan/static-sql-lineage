@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, outline, request, respond, trace};
+use super::{answers, assert_refused, lines, outline, request, respond, trace};
 
 const CTE: &str = "with orders as (select id from raw.orders) select id from orders";
 
@@ -246,4 +246,37 @@ fn dialect_tsql_ignores_case() {
 fn dialect_tsql_delimited_as_exact() {
     let found = ignoring_case();
     assert!(!found.iter().any(|line| line.starts_with("refused")), "{found:?}");
+}
+
+/// The script of `catalog.declared-by-create-table`, read by the commands.
+const DECLARED: &str = "tests/scripts/snowflake/04-declared.sql";
+
+/// What `trace` gives for `column` in the script of `catalog.declared-by-create-table`.
+fn declared(column: &str) -> Value {
+    let found = lines(&["trace", "--dialect", "snowflake", "--json", column, DECLARED]);
+    serde_json::from_str(&found.join("\n")).expect("the output is JSON")
+}
+
+#[test]
+fn catalog_declared_by_create_table() {
+    for (column, declared_as) in [("t.a", "a"), ("t.\"B\"", "\"B\"")] {
+        let found = declared(column);
+        let edge = json!({
+            "parent": {"relation": "s", "column": declared_as},
+            "child": {"relation": "t", "column": declared_as},
+            "kind": "copy",
+            "writes": [format!("{DECLARED}:2:1")],
+            "depth": 1,
+        });
+        assert_eq!((&found["edges"], &found["gaps"]), (&json!([edge]), &json!([])), "{column}");
+    }
+}
+
+#[test]
+fn catalog_declaration_as_a_write() {
+    let targets = lines(&["graph", "--dialect", "snowflake", DECLARED]);
+    assert!(!targets.iter().any(|line| line.split(' ').nth(1) == Some("s")), "{targets:?}");
+    let gaps = declared("t.a")["gaps"].clone();
+    let unknown = |gap: &Value| gap["reason"] == "unknown_relation" && gap["relation"] == "s";
+    assert!(!gaps.as_array().is_some_and(|gaps| gaps.iter().any(unknown)), "{gaps}");
 }

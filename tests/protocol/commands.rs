@@ -1,27 +1,23 @@
 // SPDX-License-Identifier: EUPL-1.2
-//! The command `graph`, run as a caller runs it on the scripts of `tests/scripts/`, as
-//! `docs/protocol.md` gives it. Expectations from plan 008, the probe's observations of
-//! the scripts of SQL Server's tools, and the rulings.
+//! The commands `graph`, `trace` and `uses`, run as a caller runs them on the scripts of
+//! `tests/scripts/`, as `docs/protocol.md` gives them. Expectations from plans 008 and 009,
+//! the probe's observations of the scripts of SQL Server's tools, the rulings and the Edge
+//! entry of `docs/concepts.md`.
 
 use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, binary, run};
+use super::{assert_refused, command, lines, run};
 
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
 fn graph(arguments: &[&str]) -> Output {
-    let command = binary().current_dir(env!("CARGO_MANIFEST_DIR")).arg("graph").args(arguments).output();
-    command.expect("the binary runs")
+    command(&[&["graph"], arguments].concat())
 }
 
 /// The lines that `graph` prints for `arguments`, which it does not refuse.
 fn printed(arguments: &[&str]) -> Vec<String> {
-    let output = graph(arguments);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert!(stderr.is_empty(), "stderr: {stderr}");
-    String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
+    lines(&[&["graph"], arguments].concat())
 }
 
 /// The lines that `graph` prints for the scripts at `paths` in T-SQL.
@@ -462,11 +458,12 @@ fn a_declaration_breaking_the_catalogs_rule_is_refused() {
 
 #[test]
 fn a_relation_declared_twice_is_reported() {
-    // `dbo.Stage`, then `[dbo].[Stage]`: one relation, declared again.
+    // `dbo.Stage`, then `[dbo].[Stage]`: one relation, declared again, the later kept.
     let path = "tests/scripts/tsql/17-declarations.sql";
     let found = tsql(&[path]);
     assert_eq!(found[0], format!("{path}:9:1 dbo.vStage <- dbo.Stage"));
     assert_eq!(found[3..], [format!("declared_twice: {path}:7:1 [dbo].[Stage]"), "skipped: 0".to_string()]);
+    assert_eq!(walked("trace", "dbo.vStage.Note", &[path]), [format!("[dbo].[Stage].[Note] copy {path}:9:1")]);
 }
 
 /// The lines that `graph` prints for the script of T-SQL's tables.
@@ -505,4 +502,169 @@ fn a_create_table_as_is_not_blanked() {
             format!("{path}:14:1 dbo.Spread <- dbo.Other, dbo.Stage")
         ]
     );
+}
+
+/// The lines that the command `name` prints for `column` in the scripts at `paths` in T-SQL.
+fn walked(name: &str, column: &str, paths: &[&str]) -> Vec<String> {
+    lines(&[&[name, "--dialect", "tsql", column], paths].concat())
+}
+
+/// What `trace` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
+fn traced(column: &str, paths: &[&str]) -> Value {
+    let found = lines(&[&["trace", "--dialect", "tsql", "--json", column], paths].concat());
+    serde_json::from_str(&found.join("\n")).expect("the output is JSON")
+}
+
+/// The scripts of a load and its views: three tables, four loads of `dbo.Fact`, the last
+/// refused, and four views, the first of which reads the second.
+const LINEAGE: &str = "tests/scripts/tsql/lineage";
+
+/// The id of the write at `line` of the load.
+fn load(line: usize) -> String {
+    format!("{LINEAGE}/2-load.sql:{line}:1")
+}
+
+/// The id of the write at `line` of the views.
+fn view(line: usize) -> String {
+    format!("{LINEAGE}/3-views.sql:{line}:1")
+}
+
+#[test]
+fn declarations_feed_the_catalog() {
+    // The view's `*` reads the declared columns, the column `sparse` and `[Blob]` among them.
+    let path = "tests/scripts/tsql/18-storage.sql";
+    assert_eq!(walked("trace", "dbo.vDoc.sparse", &[path]), [format!("[dbo].[Doc].sparse copy {path}:16:1")]);
+    assert_eq!(walked("trace", "dbo.vDoc.Blob", &[path]), [format!("[dbo].[Doc].[Blob] copy {path}:16:1")]);
+}
+
+#[test]
+fn trace_follows_edges_to_base_relations() {
+    // From the view to the table that the loads fill, then to the tables that they read, which
+    // no write fills; the refused load of the table is met on the way.
+    let expected = [
+        format!("[dbo].[Fact].[Amount] copy {}", view(3)),
+        format!("  dbo.Stage.Amount copy {}, {}", load(1), load(2)),
+        format!("  dbo.Stage2.Amount copy {}", load(3)),
+        format!("refused: {} invalid", load(4)),
+    ];
+    assert_eq!(walked("trace", "dbo.vBase.Total", &[LINEAGE]), expected);
+}
+
+#[test]
+fn trace_unites_the_edges_of_several_writes() {
+    // The first load copies `Amount`, the second derives it: one edge, a copy, of both (R12).
+    let found = traced("dbo.Fact.Amount", &[LINEAGE]);
+    let edge = json!({
+        "parent": {"relation": "dbo.Stage", "column": "Amount"},
+        "child": {"relation": "dbo.Fact", "column": "[Amount]"},
+        "kind": "copy",
+        "writes": [load(1), load(2)],
+        "depth": 1,
+    });
+    assert_eq!(found["edges"][0], edge);
+}
+
+#[test]
+fn trace_meets_a_declaration_spelled_otherwise() {
+    // The view reads `[dbo].[Fact]`, as declared; the loads write `dbo.Fact`: one relation.
+    let found = traced("dbo.vBase.Total", &[LINEAGE]);
+    assert_eq!(found["edges"][0]["parent"], json!({"relation": "[dbo].[Fact]", "column": "[Amount]"}));
+    assert_eq!(found["edges"][1]["child"], json!({"relation": "dbo.Fact", "column": "[Amount]"}));
+    assert_eq!(found["edges"][1]["depth"], 2);
+}
+
+#[test]
+fn trace_gives_gaps_and_refusals_on_the_way() {
+    // `vOther` reads a relation that no script declares, which its gap says, so that it is not
+    // taken for a base relation; a load of the table that `vBase` reads is refused.
+    let found = walked("trace", "dbo.vBoth.Id", &[LINEAGE]);
+    let met = [format!("gap: {} unknown_relation dbo.Missing -", view(5)), format!("refused: {} invalid", load(4))];
+    assert_eq!(found[found.len() - 2..], met);
+}
+
+#[test]
+fn trace_stops_at_a_cycle() {
+    // Each load reads the other's target: the walk comes back to its column, and stops.
+    let path = "tests/scripts/tsql/19-cycle.sql";
+    let expected = [format!("dbo.Loop2.Id copy {path}:3:1"), format!("  dbo.Loop1.Id copy {path}:4:1")];
+    let cycle = "cycle: dbo.Loop1.Id, dbo.Loop2.Id".to_string();
+    assert_eq!(walked("trace", "dbo.Loop1.Id", &[path]), [expected.as_slice(), &[cycle]].concat());
+}
+
+#[test]
+fn trace_lists_a_shared_column_once() {
+    // `vShared` is reached through `vLeft` and through `vRight`; what it reads is listed once,
+    // and no cycle.
+    let path = "tests/scripts/tsql/20-diamond.sql";
+    let expected = [
+        format!("dbo.vLeft.Id copy {path}:9:1"),
+        format!("dbo.vRight.Id rows {path}:9:1"),
+        format!("  dbo.vShared.Id copy {path}:5:1"),
+        format!("  dbo.vShared.Id copy {path}:7:1"),
+        format!("    dbo.Base.Id copy {path}:3:1"),
+    ];
+    assert_eq!(walked("trace", "dbo.vTop.Id", &[path]), expected);
+}
+
+#[test]
+fn trace_follows_a_write_after_its_dependencies() {
+    // `vTop` is read before `vBase`, which it reads; answered after it, it has its edge, and no
+    // gap.
+    let found = walked("trace", "dbo.vTop.Total", &[LINEAGE]);
+    assert_eq!(
+        found[..2],
+        [format!("dbo.vBase.Total copy {}", view(1)), format!("  [dbo].[Fact].[Amount] copy {}", view(3))]
+    );
+    assert!(!found.iter().any(|line| line.starts_with("gap:")), "{found:?}");
+}
+
+#[test]
+fn uses_follows_edges_downstream() {
+    // From a table that a load reads to the table that it fills, then to the views over it;
+    // the refused load reads the table too.
+    let expected = [
+        format!("dbo.Fact.[Amount] copy {}, {}", load(1), load(2)),
+        format!("  dbo.vBase.Total copy {}", view(3)),
+        format!("    dbo.vTop.Total copy {}", view(1)),
+        format!("    dbo.vBoth.Total copy {}", view(7)),
+        format!("refused: {} invalid", load(4)),
+    ];
+    assert_eq!(walked("uses", "dbo.Stage.Amount", &[LINEAGE]), expected);
+}
+
+#[test]
+fn uses_of_a_base_column_known_only_by_its_readers() {
+    // No write fills `dbo.Stage2`: its column is no answer's output and no edge's child, only
+    // the parent of its readers' edges.
+    let expected = [
+        format!("dbo.Fact.[Amount] copy {}", load(3)),
+        format!("  dbo.vBase.Total copy {}", view(3)),
+        format!("    dbo.vTop.Total copy {}", view(1)),
+        format!("    dbo.vBoth.Total copy {}", view(7)),
+    ];
+    assert_eq!(walked("uses", "dbo.Stage2.Amount", &[LINEAGE]), expected);
+}
+
+#[test]
+fn trace_reads_its_argument_under_the_dialect() {
+    // T-SQL ignores case, and the command's defaults complete the relation; in Snowflake, `b`
+    // means `"B"`, and `"b"` another column.
+    let expected = walked("trace", "dbo.vBase.Total", &[LINEAGE]);
+    assert_eq!(walked("trace", "DBO.VBASE.total", &[LINEAGE]), expected);
+    assert_eq!(lines(&["trace", "--dialect", "tsql", "--schema", "dbo", "vBase.Total", LINEAGE]), expected);
+    let path = "tests/scripts/snowflake/04-declared.sql";
+    let quoted = [format!("s.\"B\" copy {path}:2:1")];
+    assert_eq!(lines(&["trace", "--dialect", "snowflake", "t.\"B\"", path]), quoted);
+    assert_eq!(lines(&["trace", "--dialect", "snowflake", "T.b", path]), quoted);
+    assert_refused(&command(&["trace", "--dialect", "snowflake", "t.\"b\"", path]), "t.\"b\"");
+}
+
+#[test]
+fn an_unknown_column_is_refused() {
+    // No declaration, edge or output names these; nor does an argument with no relation.
+    assert_refused(&command(&["trace", "--dialect", "tsql", "dbo.vBase.Nope", LINEAGE]), "dbo.vBase.Nope");
+    assert_refused(&command(&["uses", "--dialect", "tsql", "dbo.Missing.Id", LINEAGE]), "dbo.Missing.Id");
+    assert_refused(&command(&["trace", "--dialect", "tsql", "Total", LINEAGE]), "Total");
+    // A known column with no edge downstream gives an empty walk.
+    assert_eq!(walked("uses", "dbo.vTop.Total", &[LINEAGE]), [""]);
 }
