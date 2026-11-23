@@ -3,6 +3,7 @@
 //! query of each, the relations it reads, and the names of its output columns.
 
 use std::collections::HashSet;
+use std::fmt;
 
 use polyglot_sql::expressions::{
     AlterViewAction, Cte, Expression, From, Identifier, Join, JoinKind, Literal, Merge, Null, Select, TableRef,
@@ -79,6 +80,29 @@ pub struct Piece {
 pub enum Columns {
     Named(Result<Option<Vec<Name>>, Refusal>),
     Listed(Vec<Identifier>),
+}
+
+/// Where a token of SQL text starts: its line and its column, both from 1, counted in
+/// characters.
+#[derive(Clone, Copy)]
+pub struct Place {
+    line: usize,
+    column: usize,
+}
+
+impl Place {
+    /// The place of the character at `offset` in a text whose lines start at `starts`: 0,
+    /// then the offset after each `\n`.
+    pub fn at(starts: &[usize], offset: usize) -> Place {
+        let line = starts.partition_point(|start| *start <= offset);
+        Place { line, column: offset - starts[line - 1] + 1 }
+    }
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}:{}", self.line, self.column)
+    }
 }
 
 /// A write's statement read without the catalog: the table that it names as its target,

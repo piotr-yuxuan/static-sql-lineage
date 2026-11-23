@@ -6,10 +6,13 @@ use std::path::PathBuf;
 
 use crate::dialect::Dialect;
 use crate::relation::Defaults;
+use crate::script::{Finding, Script};
 
-/// The command `graph` as the command line gives it: its paths, each a file, or a
-/// directory whose files ending `.sql` it reads.
+/// The command `graph` as the command line gives it: its dialect, its defaults, and its
+/// paths, each a file, or a directory whose files ending `.sql` it reads.
 pub struct Command {
+    dialect: Dialect,
+    defaults: Defaults,
     paths: Vec<PathBuf>,
 }
 
@@ -37,16 +40,21 @@ impl Command {
         let name = dialect.ok_or("graph needs --dialect")?;
         let dialect = (Dialect::named(&name))
             .ok_or_else(|| format!("the dialect {name:?} is not one of this build's: {:?}", Dialect::built()))?;
-        Defaults::given(database, schema, dialect).read(dialect)?;
+        let defaults = Defaults::given(database, schema, dialect);
+        defaults.read(dialect)?;
         if paths.is_empty() {
             return Err("graph needs a path".to_string());
         }
-        Ok(Command { paths })
+        Ok(Command { dialect, defaults, paths })
     }
 
-    /// What the command prints, or why it cannot run: a path that does not read.
+    /// What the command prints, or why it cannot run: a path that does not read. Each path
+    /// is read in the order given, a directory's files sorted by path: one line per write,
+    /// `<id> <target> <- <relation>, ...`; one per finding, after its kind; then the number
+    /// of statements skipped.
     pub fn run(&self) -> Result<String, String> {
         let unread = |path: &PathBuf, error: std::io::Error| format!("{} does not read: {error}", path.display());
+        let mut scripts = Vec::new();
         for given in &self.paths {
             let (mut pending, mut files) = (vec![given.clone()], Vec::new());
             while let Some(path) = pending.pop() {
@@ -60,9 +68,20 @@ impl Command {
             }
             files.sort();
             for file in files {
-                std::fs::read(&file).map_err(|error| unread(&file, error))?;
+                let bytes = std::fs::read(&file).map_err(|error| unread(&file, error))?;
+                scripts.push(Script::read(&file.display().to_string(), &bytes, self.dialect, self.defaults.clone()));
             }
         }
-        Ok(String::new())
+        let writes = scripts.iter().flat_map(|script| &script.writes).map(|write| {
+            let reads: Vec<String> = write.reads.iter().map(ToString::to_string).collect();
+            format!("{} {} <- {}", write.id, write.target, reads.join(", ")).trim_end().to_string()
+        });
+        let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
+        let findings = scripts.iter().flat_map(|script| &script.findings).map(|finding| match finding {
+            Finding::Refused { place, detail } => format!("refused: {place} {}", line(detail)),
+            Finding::NotRead { place, detail } => format!("not_read: {place} {}", line(detail)),
+        });
+        let skipped: usize = scripts.iter().map(|script| script.skipped).sum();
+        Ok(writes.chain(findings).chain([format!("skipped: {skipped}")]).collect::<Vec<_>>().join("\n"))
     }
 }

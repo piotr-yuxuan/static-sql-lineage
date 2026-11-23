@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use polyglot_sql::expressions::{Expression, Identifier, TableRef};
+use polyglot_sql::expressions::{Expression, Identifier, TableRef, UseKind};
 use polyglot_sql::optimizer::normalize_identifiers::normalize_identifier;
 use polyglot_sql::parse_one;
 use serde::{Deserialize, Serialize, Serializer};
@@ -164,7 +164,7 @@ impl fmt::Display for RelationName {
 }
 
 /// The request's default database and schema, as it gives them.
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Defaults {
     database: Option<String>,
@@ -177,6 +177,23 @@ impl Defaults {
     pub fn given(database: Option<String>, schema: Option<String>, dialect: Dialect) -> Defaults {
         let schema = schema.or_else(|| database.as_ref().map(|_| dialect.default_schema().to_string()));
         Defaults { database, schema }
+    }
+
+    /// The defaults after a `USE` of `kind` that names `parts`, each spelled as SQL text: a
+    /// schema alone keeps the database; a database takes its schema, or the dialect's usual
+    /// one. None for a `USE` of anything else, such as a role, or of a name that does not
+    /// read.
+    pub fn used(&self, kind: Option<UseKind>, parts: &[String], dialect: Dialect) -> Option<Defaults> {
+        let used = match (kind, parts) {
+            (Some(UseKind::Schema), [schema]) => {
+                Defaults { database: self.database.clone(), schema: Some(schema.clone()) }
+            }
+            (None | Some(UseKind::Database | UseKind::Schema), [database, schema @ ..]) if schema.len() < 2 => {
+                Defaults::given(Some(database.clone()), schema.first().cloned(), dialect)
+            }
+            _ => return None,
+        };
+        used.read(dialect).ok().map(|_| used)
     }
 
     /// The names that complete a name of one part, outermost first.

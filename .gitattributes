@@ -1,0 +1,2 @@
+# SQL scripts as the tools write them: CRLF and UTF-16 kept byte for byte.
+tests/scripts/** -text

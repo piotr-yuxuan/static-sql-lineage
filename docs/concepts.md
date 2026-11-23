@@ -74,6 +74,7 @@ have. A reject scenario names an answer that must not be given.
   - `RelationName::reported_as`: whether the engine's text for a relation is this one's.
   - `Defaults::read`: reads the request's defaults into the names that complete a name.
   - `Defaults::given`: the defaults that a command gives, a database without a schema taking the dialect's usual one.
+  - `Defaults::used`: the defaults after a `USE`.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -115,15 +116,15 @@ have. A reject scenario names an answer that must not be given.
   mapped onto the target's by an `INSERT` column list, by position, by `SET`, or by
   `MERGE`'s clauses. A `DELETE` is a contribute write that removes rows.
 - part, identity: the id that the caller gives it, unique in the request, which its
-  answer echoes. How a write read from a file is named is for the plan for the
-  commands.
-- part, location: where the write and each of its clauses start, as a line and a
-  column in the SQL text that holds them.
+  answer echoes. A write read from a script is named by its place,
+  `<path>:<line>:<column>`.
+- part, location: where the write and each of its clauses start, each a place: a line
+  and a column, both from 1, counted in characters, in the SQL text that holds them.
 - not: the relation, which may have several writes or none. Not a statement that reads
   no relation: `INSERT ... VALUES`, `TRUNCATE`, or `CREATE TABLE` with a column list.
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`, `Columns`, `Reading`.
+- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`, `Columns`, `Reading`, `Place`.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
   - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
@@ -133,6 +134,7 @@ have. A reject scenario names an answer that must not be given.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
+  - `Place::at`: the line and the column of an offset in a text of SQL.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
@@ -317,6 +319,7 @@ have. A reject scenario names an answer that must not be given.
 | response | one answer per write of the request, on standard output | `Response` |
 | protocol | the number of the request's and response's format; either side refuses another | `Protocol` |
 | describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
+| script | a file of SQL statements read in order, as a person or a tool wrote it; what a reader finds in it: writes, statements skipped, statements refused, each with its place | `Script`, `Scripted`, `Finding` |
 | command | `graph`, `trace`, `uses` or `outline`, as the command line names it, with its dialect, its defaults and its paths | `Command` |
 
 ## Kept apart

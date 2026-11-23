@@ -1,0 +1,1 @@
+Not SQL: a file that the reading of its directory leaves out.

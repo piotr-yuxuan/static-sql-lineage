@@ -10,6 +10,7 @@ mod dialect;
 mod edge;
 mod relation;
 mod request;
+mod script;
 mod write;
 
 use std::ffi::OsString;
