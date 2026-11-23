@@ -139,8 +139,13 @@ impl Write {
                     _ => None,
                 });
                 let added = named.is_none().then(|| Expression::Table(Box::new(update.table.clone())));
-                let (set, values): (Vec<&Identifier>, Vec<Expression>) =
-                    update.set.iter().map(|(column, value)| (column, value.clone())).unzip();
+                // polyglot gives every target as an expression, in `assignments`, once any is
+                // qualified.
+                let assignments =
+                    update.assignments.iter().map(|pair| Some((assigned(&pair.left)?, pair.right.clone())));
+                let pairs = update.set.iter().map(|(column, value)| Some((column, value.clone()))).chain(assignments);
+                let pairs = pairs.collect::<Option<Vec<_>>>().ok_or_else(not_a_write)?;
+                let (set, values): (Vec<&Identifier>, Vec<Expression>) = pairs.into_iter().unzip();
                 let condition = update.where_clause.as_ref().map(|filter| filter.this.clone());
                 let sources = added.into_iter().chain(froms.cloned()).collect();
                 let piece = synthetic(values, sources, update.from_joins.clone(), condition, update.with.clone());
@@ -163,7 +168,7 @@ impl Write {
                     _ => None,
                 });
                 let sources = vec![(*merge.this).clone(), (*merge.using).clone()];
-                let whens = whens(merge, &sources, with.as_ref(), &nulls).into_iter();
+                let whens = whens(merge, &sources, with.as_ref(), &nulls).ok_or_else(not_a_write)?.into_iter();
                 let whens = whens.map(|(piece, named)| (Some(piece), columns(&named, known, &sql, dialect)));
                 let on = synthetic(nulls, sources, Vec::new(), merge.on.as_deref().cloned(), with);
                 let specs = std::iter::once((Some(on), Ok(known.map(<[Name]>::to_vec)))).chain(whens);
@@ -688,23 +693,25 @@ fn name(expression: &Expression, sql: &[char], dialect: Dialect) -> Option<Name>
 
 /// The target's columns that `identifiers`, parsed from `sql`, name, as `known`, the
 /// target's columns, spells them, or as `sql` does when the target is unknown; or, for no
-/// identifier, every column of the target, unknown with it. Refused when the target lacks
-/// one.
+/// identifier, every column of the target, unknown with it. Refused when one does not
+/// read as a name, or the target lacks one.
 fn columns<'a>(
     identifiers: impl IntoIterator<Item = &'a Identifier>,
     known: Option<&[Name]>,
     sql: &[char],
     dialect: Dialect,
 ) -> Result<Option<Vec<Name>>, Refusal> {
-    let named: Vec<Name> =
-        identifiers.into_iter().filter_map(|identifier| Name::of(identifier, sql, dialect)).collect();
+    let refused = |detail: String| Refusal { reason: RefusalReason::Invalid, detail };
+    let named = identifiers.into_iter().map(|identifier| Name::of(identifier, sql, dialect));
+    let unread = || refused("a column of its list does not read as a name".to_string());
+    let named = named.collect::<Option<Vec<Name>>>().ok_or_else(unread)?;
     if named.is_empty() {
         return Ok(known.map(<[Name]>::to_vec));
     }
     let Some(known) = known else { return Ok(Some(named)) };
     let found = named.iter().map(|name| {
-        let detail = format!("the target has no column {name}");
-        known.iter().find(|column| *column == name).cloned().ok_or(Refusal { reason: RefusalReason::Invalid, detail })
+        let column = known.iter().find(|column| *column == name).cloned();
+        column.ok_or_else(|| refused(format!("the target has no column {name}")))
     });
     found.collect::<Result<_, _>>().map(Some)
 }
@@ -748,13 +755,14 @@ fn view_columns(
 /// The `SELECT` of each `WHEN` clause of `merge`, its values over `sources`, under `with`,
 /// where its condition holds, with the columns that its `UPDATE SET` or its `INSERT` names;
 /// none for an `INSERT` without a list, whose values follow the target's columns, or for a
-/// `DELETE`, whose values are `nulls`, one for each column of the target.
+/// `DELETE`, whose values are `nulls`, one for each column of the target. None when a
+/// clause names a target that is not a column.
 fn whens(
     merge: &Merge,
     sources: &[Expression],
     with: Option<&With>,
     nulls: &[Expression],
-) -> Vec<(Expression, Vec<Identifier>)> {
+) -> Option<Vec<(Expression, Vec<Identifier>)>> {
     let clauses = merge.whens.iter().flat_map(|whens| match whens.as_ref() {
         Expression::Whens(whens) => whens.expressions.as_slice(),
         _ => &[],
@@ -767,14 +775,15 @@ fn whens(
         let (values, named): (Vec<Expression>, Vec<Identifier>) = match when.then.as_ref() {
             Expression::Tuple(action) => match action.expressions.as_slice() {
                 [Expression::Var(keyword), Expression::Tuple(set)] if keyword.this.eq_ignore_ascii_case("update") => {
-                    let pairs = set.expressions.iter().filter_map(|pair| match pair {
+                    let pairs = set.expressions.iter().map(|pair| match pair {
                         Expression::Eq(pair) => Some((pair.right.clone(), assigned(&pair.left)?.clone())),
                         _ => None,
                     });
-                    pairs.unzip()
+                    pairs.collect::<Option<Vec<_>>>()?.into_iter().unzip()
                 }
                 [_, Expression::Tuple(named), Expression::Tuple(values)] => {
-                    (values.expressions.clone(), named.expressions.iter().filter_map(assigned).cloned().collect())
+                    let named = named.expressions.iter().map(|item| assigned(item).cloned());
+                    (values.expressions.clone(), named.collect::<Option<_>>()?)
                 }
                 [_, Expression::Tuple(values)] => (values.expressions.clone(), Vec::new()),
                 _ => continue,
@@ -784,7 +793,7 @@ fn whens(
         let piece = synthetic(values, sources.to_vec(), Vec::new(), when.condition.as_deref().cloned(), with.cloned());
         pieces.push((piece, named));
     }
-    pieces
+    Some(pieces)
 }
 
 /// The column that `expression`, the target of an assignment or an item of a column list,

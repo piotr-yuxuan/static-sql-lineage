@@ -363,3 +363,15 @@ fn a_contribute_write_to_an_unknown_target_is_a_gap() {
         assert_eq!(traced("snowflake", &[("w", sql)]).remove(0), expected, "{sql}");
     }
 }
+
+#[test]
+fn set_with_a_qualified_target_is_read() {
+    let expected = ["s.k -> t.a rows", "s.x -> t.a copy"];
+    for dialect in ["snowflake", "tsql", "duckdb"] {
+        assert_eq!(trace(dialect, "update t set t.a = s.x from s where t.k = s.k"), expected, "{dialect}");
+    }
+    assert_eq!(trace("tsql", "update x set x.a = s.x from t as x join s on x.k = s.k"), expected);
+    assert_eq!(trace("snowflake", "update t set t.b = s.y, a = s.x from s"), ["s.x -> t.a copy", "s.y -> t.b copy"]);
+    // A target that names no column, such as a tuple, is not read.
+    assert_eq!(trace("snowflake", "update t set (a, b) = (select x, y from s)"), ["refused not_a_query"]);
+}
