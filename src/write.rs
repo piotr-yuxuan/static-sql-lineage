@@ -447,11 +447,13 @@ impl Write {
     }
 
     /// The engine's lineage of each output column of `query`, the engine's projection
-    /// that `order` gives for it, against `schema`, none where the engine gives none; for a
-    /// write that holds an `INTERSECT` or an `EXCEPT`, a key that a join merges, as `keys`
-    /// says, or a subquery in a CTE's or a derived table's select list, as `holders` says,
-    /// and for no other.
+    /// that `order` gives for it, against `schema`, read from `text`, the text that the
+    /// engine reads for `query`; none where the engine gives none; for a write that holds
+    /// an `INTERSECT` or an `EXCEPT`, a key that a join merges, as `keys` says, or a
+    /// subquery in a CTE's or a derived table's select list, as `holders` says, and for no
+    /// other.
     pub fn steps(
+        text: &str,
         query: &Expression,
         holders: &[(String, Option<Holder>)],
         keys: Option<&[Key]>,
@@ -465,8 +467,10 @@ impl Write {
             return Vec::new();
         }
         let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
-        let lineage = |place| lineage_at_with_schema(place, query, Some(&schema), Some(dialect.polyglot()), false);
-        order.iter().map(|&at| lineage(at).ok()).collect()
+        let read = Write::query(text, dialect).ok();
+        let lineage =
+            |place| lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok();
+        order.iter().map(|&at| lineage(at)).collect()
     }
 }
 

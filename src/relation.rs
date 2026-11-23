@@ -6,7 +6,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use polyglot_sql::expressions::{Expression, Identifier, TableRef};
-use polyglot_sql::optimizer::normalize_identifiers::{get_normalization_strategy, normalize_identifier};
+use polyglot_sql::optimizer::normalize_identifiers::normalize_identifier;
 use polyglot_sql::parse_one;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -35,11 +35,10 @@ impl Name {
     /// an identifier that the parser made rather than read.
     pub fn of(identifier: &Identifier, sql: &[char], dialect: Dialect) -> Option<Name> {
         let span = identifier.span?;
-        let strategy = get_normalization_strategy(Some(dialect.polyglot()));
         Some(Name {
             spelling: sql.get(span.start..span.end)?.iter().collect(),
             text: identifier.name.clone(),
-            normalised: normalize_identifier(identifier.clone(), strategy).name,
+            normalised: normalize_identifier(identifier.clone(), dialect.strategy()).name,
         })
     }
 

@@ -155,7 +155,8 @@ impl Answer {
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
         let mut gaps: Vec<Gap> = unknown.into_iter().map(Gap::unknown).collect();
         let schema = catalog.schema(relations);
-        let checked = validate_with_schema(sql, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
+        let text = dialect.engine_text(sql);
+        let checked = validate_with_schema(&text, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
         let errors: Vec<String> = (checked.errors.into_iter())
             .filter(|error| error.severity == ValidationSeverity::Error && error.code != "E200")
             .map(|error| error.message)
@@ -205,7 +206,7 @@ impl Answer {
             });
             found.collect::<Option<Vec<usize>>>().filter(|_| projections.len() == outputs.len())
         };
-        let analysis = match analyze_query(sql, options) {
+        let analysis = match analyze_query(&text, options) {
             Ok(analysis) => analysis,
             Err(error) => {
                 gaps.push(Gap::of(GapReason::AnalysisFailed, None, error.to_string()));
@@ -226,7 +227,7 @@ impl Answer {
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
         let holders = Write::holders(sql, &query, dialect);
         let keys = Write::keys(sql, &query, catalog, dialect, defaults);
-        let steps = Write::steps(&query, &holders, keys.as_deref(), &order, &schema, dialect);
+        let steps = Write::steps(&text, &query, &holders, keys.as_deref(), &order, &schema, dialect);
         let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
         let own = piece.own.then_some(target);
         let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog, own);

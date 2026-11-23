@@ -3,11 +3,6 @@
 Where the code differs from a definition of `docs/concepts.md`, each difference classed
 as a defect of the code, a defect of the definition, an aspiration or an intended gap.
 
-- T-SQL's rule for quoting and case is polyglot-sql's `Lowercase`: a bare name folds to
-  lower case and a bracketed one keeps its case, so `[OrderId]` is refused against a
-  catalog's bare `OrderId`, which SQL Server's default collation, insensitive to case,
-  accepts. The Relation entry asks for the dialect's own rules. Class: a defect of the
-  code.
 - A `*` over a source whose columns a list renames, such as `with c (x) as (...)` or a
   derived table with column aliases, leaves a write's output columns unknown, a
   `wildcard` gap, where the Edge entry says that a column selected through `*` is a

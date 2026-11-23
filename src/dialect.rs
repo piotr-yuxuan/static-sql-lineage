@@ -2,6 +2,7 @@
 //! The dialects of this build.
 
 use polyglot_sql::DialectType;
+use polyglot_sql::optimizer::normalize_identifiers::{NormalizationStrategy, get_normalization_strategy};
 use serde::Serialize;
 
 /// A dialect of this build: the grammar, and the rules for quoting and case, under
@@ -40,6 +41,27 @@ impl Dialect {
             Dialect::Snowflake => DialectType::Snowflake,
             Dialect::Tsql => DialectType::TSQL,
             Dialect::Duckdb => DialectType::DuckDB,
+        }
+    }
+
+    /// The rule by which a name is normalised: polyglot-sql's for the dialect, but for
+    /// T-SQL, whose names ignore case whether delimited or not, as SQL Server's default
+    /// collation compares them.
+    pub fn strategy(self) -> NormalizationStrategy {
+        match self {
+            Dialect::Tsql => NormalizationStrategy::CaseInsensitive,
+            Dialect::Snowflake | Dialect::Duckdb => get_normalization_strategy(Some(self.polyglot())),
+        }
+    }
+
+    /// The text that the engine reads for `sql`: under T-SQL, `sql` lowered whole, since
+    /// the engine keeps a delimited name's case where the dialect ignores it, as it
+    /// ignores the case of keywords, and no edge depends on a literal's; under the
+    /// others, `sql` itself.
+    pub fn engine_text(self, sql: &str) -> String {
+        match self {
+            Dialect::Tsql => sql.to_lowercase(),
+            Dialect::Snowflake | Dialect::Duckdb => sql.to_string(),
         }
     }
 }
