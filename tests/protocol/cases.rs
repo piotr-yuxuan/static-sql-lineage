@@ -4,8 +4,9 @@
 //! which takes them from its `definition.md`, in protocol 1's terms: an edge spells its
 //! parent as the catalog does, and its child as the write's query, or a `*`, does; an
 //! "error" is a refusal, a "gap" a gap and no edge, and "outside" the refusal
-//! `not_a_query`. Five wait on polyglot, as plan 005's D10 says: their tests are ignored,
-//! and the pivot's `FOR` column is a `derive`, as the Edge entry calls `CASE`.
+//! `not_a_query`. Five wait on polyglot: their tests are ignored, each naming the issue
+//! that it waits on; and the pivot's `FOR` column is a `derive`, as the Edge entry calls
+//! `CASE`.
 
 use super::{outline, request, respond};
 
