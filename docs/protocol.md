@@ -289,12 +289,13 @@ declaration, edge or answer's output column names. A column that one names, with
 and nothing met, gives an empty line.
 
 The text, by default: one line per edge, in the walk's order, indented by two spaces for
-each depth after the first, the end that it reaches, its kind and the ids of its writes;
-then one line per gap, per refusal and per cycle met, after its kind and a colon:
+each depth after the first, `<parent> -> <child> <kind> <id>, ...`, each end as
+`<relation>.<column>`, with the ids of its writes; then one line per gap, per refusal and
+per cycle met, after its kind and a colon:
 
 ```
-[dbo].[Fact].[Amount] copy views.sql:3:1
-  dbo.Stage.Amount copy load.sql:1:1, load.sql:2:1
+[dbo].[Fact].[Amount] -> dbo.vBase.Total copy views.sql:3:1
+  dbo.Stage.Amount -> dbo.Fact.[Amount] copy load.sql:1:1, load.sql:2:1
 gap: views.sql:5:1 unknown_relation dbo.Missing -
 refused: load.sql:4:1 invalid
 cycle: dbo.Loop1.Id, dbo.Loop2.Id

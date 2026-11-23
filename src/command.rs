@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::edge::{Edge, End};
+use crate::edge::End;
 use crate::graph::Graph;
 use crate::lineage::Lineage;
 use crate::relation::{Defaults, Name, RelationName};
@@ -73,8 +73,8 @@ impl Command {
     /// line per write in migration order, `<id> <target> <- <relation>, ...`, one per finding,
     /// after its kind and a colon, then the number of statements skipped; for `trace` and
     /// `uses`, one line per edge of the walk from the argument's column, upstream or
-    /// downstream, `<relation>.<column> <kind> <id>, ...` of the end that it reaches, indented
-    /// by its depth, then the gaps, the refusals and the cycles that it meets; for `outline`,
+    /// downstream, `<parent> -> <child> <kind> <id>, ...`, indented by its depth, then the
+    /// gaps, the refusals and the cycles that it meets; for `outline`,
     /// the argument's write in brief, one field per line, its answer's edges, gaps and
     /// refusal, then the words and the place of each of its clauses.
     pub fn run(&self) -> Result<String, String> {
@@ -181,10 +181,9 @@ impl Command {
                 let lineage = Lineage::of(&graph.writes, catalog, self.dialect);
                 let upstream = self.name == "trace";
                 let walk = lineage.walk(&from, upstream).ok_or_else(|| format!("no script knows the column {from}"))?;
-                let reached = |edge: &Edge| if upstream { edge.parent.to_string() } else { edge.child.to_string() };
                 let edges = walk.edges.iter().map(|(edge, writes, depth)| {
                     let kind = named(json!(edge.kind));
-                    format!("{}{} {kind} {}", "  ".repeat(depth - 1), reached(edge), listed(writes))
+                    format!("{}{} -> {} {kind} {}", "  ".repeat(depth - 1), edge.parent, edge.child, listed(writes))
                 });
                 let gaps = walk.gaps.iter().map(|(write, gap)| {
                     let (relation, column) = (named(json!(gap.relation)), named(json!(gap.column)));

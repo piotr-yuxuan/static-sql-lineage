@@ -463,7 +463,8 @@ fn a_relation_declared_twice_is_reported() {
     let found = tsql(&[path]);
     assert_eq!(found[0], format!("{path}:9:1 dbo.vStage <- dbo.Stage"));
     assert_eq!(found[3..], [format!("declared_twice: {path}:7:1 [dbo].[Stage]"), "skipped: 0".to_string()]);
-    assert_eq!(walked("trace", "dbo.vStage.Note", &[path]), [format!("[dbo].[Stage].[Note] copy {path}:9:1")]);
+    let note = format!("[dbo].[Stage].[Note] -> dbo.vStage.[Note] copy {path}:9:1");
+    assert_eq!(walked("trace", "dbo.vStage.Note", &[path]), [note]);
 }
 
 /// The lines that `graph` prints for the script of T-SQL's tables.
@@ -533,8 +534,10 @@ fn view(line: usize) -> String {
 fn declarations_feed_the_catalog() {
     // The view's `*` reads the declared columns, the column `sparse` and `[Blob]` among them.
     let path = "tests/scripts/tsql/18-storage.sql";
-    assert_eq!(walked("trace", "dbo.vDoc.sparse", &[path]), [format!("[dbo].[Doc].sparse copy {path}:16:1")]);
-    assert_eq!(walked("trace", "dbo.vDoc.Blob", &[path]), [format!("[dbo].[Doc].[Blob] copy {path}:16:1")]);
+    let sparse = format!("[dbo].[Doc].sparse -> dbo.vDoc.sparse copy {path}:16:1");
+    assert_eq!(walked("trace", "dbo.vDoc.sparse", &[path]), [sparse]);
+    let blob = format!("[dbo].[Doc].[Blob] -> dbo.vDoc.[Blob] copy {path}:16:1");
+    assert_eq!(walked("trace", "dbo.vDoc.Blob", &[path]), [blob]);
 }
 
 #[test]
@@ -542,9 +545,9 @@ fn trace_follows_edges_to_base_relations() {
     // From the view to the table that the loads fill, then to the tables that they read, which
     // no write fills; the refused load of the table is met on the way.
     let expected = [
-        format!("[dbo].[Fact].[Amount] copy {}", view(3)),
-        format!("  dbo.Stage.Amount copy {}, {}", load(1), load(2)),
-        format!("  dbo.Stage2.Amount copy {}", load(3)),
+        format!("[dbo].[Fact].[Amount] -> dbo.vBase.Total copy {}", view(3)),
+        format!("  dbo.Stage.Amount -> dbo.Fact.[Amount] copy {}, {}", load(1), load(2)),
+        format!("  dbo.Stage2.Amount -> dbo.Fact.[Amount] copy {}", load(3)),
         format!("refused: {} invalid", load(4)),
     ];
     assert_eq!(walked("trace", "dbo.vBase.Total", &[LINEAGE]), expected);
@@ -586,7 +589,10 @@ fn trace_gives_gaps_and_refusals_on_the_way() {
 fn trace_stops_at_a_cycle() {
     // Each load reads the other's target: the walk comes back to its column, and stops.
     let path = "tests/scripts/tsql/19-cycle.sql";
-    let expected = [format!("dbo.Loop2.Id copy {path}:3:1"), format!("  dbo.Loop1.Id copy {path}:4:1")];
+    let expected = [
+        format!("dbo.Loop2.Id -> dbo.Loop1.Id copy {path}:3:1"),
+        format!("  dbo.Loop1.Id -> dbo.Loop2.Id copy {path}:4:1"),
+    ];
     let cycle = "cycle: dbo.Loop1.Id, dbo.Loop2.Id".to_string();
     assert_eq!(walked("trace", "dbo.Loop1.Id", &[path]), [expected.as_slice(), &[cycle]].concat());
 }
@@ -597,11 +603,11 @@ fn trace_lists_a_shared_column_once() {
     // and no cycle.
     let path = "tests/scripts/tsql/20-diamond.sql";
     let expected = [
-        format!("dbo.vLeft.Id copy {path}:9:1"),
-        format!("dbo.vRight.Id rows {path}:9:1"),
-        format!("  dbo.vShared.Id copy {path}:5:1"),
-        format!("  dbo.vShared.Id copy {path}:7:1"),
-        format!("    dbo.Base.Id copy {path}:3:1"),
+        format!("dbo.vLeft.Id -> dbo.vTop.Id copy {path}:9:1"),
+        format!("dbo.vRight.Id -> dbo.vTop.Id rows {path}:9:1"),
+        format!("  dbo.vShared.Id -> dbo.vLeft.Id copy {path}:5:1"),
+        format!("  dbo.vShared.Id -> dbo.vRight.Id copy {path}:7:1"),
+        format!("    dbo.Base.Id -> dbo.vShared.Id copy {path}:3:1"),
     ];
     assert_eq!(walked("trace", "dbo.vTop.Id", &[path]), expected);
 }
@@ -611,10 +617,8 @@ fn trace_follows_a_write_after_its_dependencies() {
     // `vTop` is read before `vBase`, which it reads; answered after it, it has its edge, and no
     // gap.
     let found = walked("trace", "dbo.vTop.Total", &[LINEAGE]);
-    assert_eq!(
-        found[..2],
-        [format!("dbo.vBase.Total copy {}", view(1)), format!("  [dbo].[Fact].[Amount] copy {}", view(3))]
-    );
+    let first = format!("dbo.vBase.Total -> dbo.vTop.Total copy {}", view(1));
+    assert_eq!(found[..2], [first, format!("  [dbo].[Fact].[Amount] -> dbo.vBase.Total copy {}", view(3))]);
     assert!(!found.iter().any(|line| line.starts_with("gap:")), "{found:?}");
 }
 
@@ -623,10 +627,10 @@ fn uses_follows_edges_downstream() {
     // From a table that a load reads to the table that it fills, then to the views over it;
     // the refused load reads the table too.
     let expected = [
-        format!("dbo.Fact.[Amount] copy {}, {}", load(1), load(2)),
-        format!("  dbo.vBase.Total copy {}", view(3)),
-        format!("    dbo.vTop.Total copy {}", view(1)),
-        format!("    dbo.vBoth.Total copy {}", view(7)),
+        format!("dbo.Stage.Amount -> dbo.Fact.[Amount] copy {}, {}", load(1), load(2)),
+        format!("  [dbo].[Fact].[Amount] -> dbo.vBase.Total copy {}", view(3)),
+        format!("    dbo.vBase.Total -> dbo.vTop.Total copy {}", view(1)),
+        format!("    dbo.vBase.Total -> dbo.vBoth.Total copy {}", view(7)),
         format!("refused: {} invalid", load(4)),
     ];
     assert_eq!(walked("uses", "dbo.Stage.Amount", &[LINEAGE]), expected);
@@ -637,10 +641,10 @@ fn uses_of_a_base_column_known_only_by_its_readers() {
     // No write fills `dbo.Stage2`: its column is no answer's output and no edge's child, only
     // the parent of its readers' edges.
     let expected = [
-        format!("dbo.Fact.[Amount] copy {}", load(3)),
-        format!("  dbo.vBase.Total copy {}", view(3)),
-        format!("    dbo.vTop.Total copy {}", view(1)),
-        format!("    dbo.vBoth.Total copy {}", view(7)),
+        format!("dbo.Stage2.Amount -> dbo.Fact.[Amount] copy {}", load(3)),
+        format!("  [dbo].[Fact].[Amount] -> dbo.vBase.Total copy {}", view(3)),
+        format!("    dbo.vBase.Total -> dbo.vTop.Total copy {}", view(1)),
+        format!("    dbo.vBase.Total -> dbo.vBoth.Total copy {}", view(7)),
     ];
     assert_eq!(walked("uses", "dbo.Stage2.Amount", &[LINEAGE]), expected);
 }
@@ -653,7 +657,7 @@ fn trace_reads_its_argument_under_the_dialect() {
     assert_eq!(walked("trace", "DBO.VBASE.total", &[LINEAGE]), expected);
     assert_eq!(lines(&["trace", "--dialect", "tsql", "--schema", "dbo", "vBase.Total", LINEAGE]), expected);
     let path = "tests/scripts/snowflake/04-declared.sql";
-    let quoted = [format!("s.\"B\" copy {path}:2:1")];
+    let quoted = [format!("s.\"B\" -> t.\"B\" copy {path}:2:1")];
     assert_eq!(lines(&["trace", "--dialect", "snowflake", "t.\"B\"", path]), quoted);
     assert_eq!(lines(&["trace", "--dialect", "snowflake", "T.b", path]), quoted);
     assert_refused(&command(&["trace", "--dialect", "snowflake", "t.\"b\"", path]), "t.\"b\"");
