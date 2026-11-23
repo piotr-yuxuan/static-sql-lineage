@@ -73,6 +73,8 @@ have. A reject scenario names an answer that must not be given.
   - `RelationName::of`: the name of a table reference parsed from a write's SQL.
   - `RelationName::reported_as`: whether the engine's text for a relation is this one's.
   - `Defaults::read`: reads the request's defaults into the names that complete a name.
+  - `Defaults::given`: the defaults that a command gives, a database without a schema taking the dialect's usual one.
+  - `Defaults::used`: the defaults after a `USE`.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -114,23 +116,25 @@ have. A reject scenario names an answer that must not be given.
   mapped onto the target's by an `INSERT` column list, by position, by `SET`, or by
   `MERGE`'s clauses. A `DELETE` is a contribute write that removes rows.
 - part, identity: the id that the caller gives it, unique in the request, which its
-  answer echoes. How a write read from a file is named is for the plan for the
-  commands.
-- part, location: where the write and each of its clauses start, as a line and a
-  column in the SQL text that holds them.
+  answer echoes. A write read from a script is named by its place,
+  `<path>:<line>:<column>`.
+- part, location: where the write and each of its clauses start, each a place: a line
+  and a column, both from 1, counted in characters, in the SQL text that holds them.
 - not: the relation, which may have several writes or none. Not a statement that reads
   no relation: `INSERT ... VALUES`, `TRUNCATE`, or `CREATE TABLE` with a column list.
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`.
+- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`, `Columns`, `Reading`, `Place`.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
+  - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
   - `Write::query`: the query that a piece's text holds, or its refusal.
   - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
+  - `Place::at`: the line and the column of an offset in a text of SQL.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
   `insert into t (a) select x from s` and `create view u as select a, b from t`: the
@@ -284,6 +288,7 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::polyglot`: the dialect as polyglot-sql names it.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
   - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
+  - `Dialect::default_schema`: the schema of a database given without one.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
@@ -299,10 +304,10 @@ have. A reject scenario names an answer that must not be given.
 |---|---|---|
 | base relation | a relation that no write of the request has as its target; its columns come from the catalog. Avoid: source | |
 | lineage | the edges of all the answers to one request; where several writes give one pair of columns, the first of `copy`, `derive`, `rows` (`decisions.md`, R12) | |
-| graph | the relations and the writes between them: a write links its target to each relation its query reads | |
+| graph | the relations and the writes between them: a write links its target to each relation its query reads | `Graph`, `Search` |
 | trace | a column's edges upstream, followed through earlier writes to base relations | |
 | uses | a column's edges downstream | |
-| migration order | an order of the writes in which each comes after the writes of the relations it reads; a cycle is reported | |
+| migration order | an order of the writes in which each comes after every write of each relation that it reads, other than its own target, and after the writes of its own target that precede it in reading order; among the strongly connected components of these dependencies whose dependencies are all ordered, the one with the earliest write in reading order comes next, its writes in reading order; a component of more than one write is a cycle, reported with its writes and the relations that they write, and a relation with more than one replace write is reported with those writes | |
 | outline | a short text form of one write's answer, with its locations | |
 
 ## Context
@@ -314,6 +319,8 @@ have. A reject scenario names an answer that must not be given.
 | response | one answer per write of the request, on standard output | `Response` |
 | protocol | the number of the request's and response's format; either side refuses another | `Protocol` |
 | describe | what the build is: its version, protocols, engine and dialects | `Description`, `Engine` |
+| script | a file of SQL statements read in order, as a person or a tool wrote it; what a reader finds in it: writes, statements skipped, statements refused, each with its place | `Script`, `Scripted`, `Finding` |
+| command | `graph`, `trace`, `uses` or `outline`, as the command line names it, with its dialect, its defaults and its paths | `Command` |
 
 ## Kept apart
 

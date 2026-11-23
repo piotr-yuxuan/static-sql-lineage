@@ -12,6 +12,8 @@ terms of `docs/concepts.md`.
 | `sql-lineage`, a request on standard input | 0 | the response, as JSON | nothing |
 | the same, a request refused as a whole | 2 | nothing | one line, naming the reason |
 | `sql-lineage --describe` | 0 | the description, as JSON | nothing |
+| `sql-lineage graph`, its options and paths | 0 | the graph of the scripts' writes, as text or JSON | nothing |
+| the same, refused | 2 | nothing | one line, naming the reason |
 | any other argument | 2 | nothing | one line, naming what was given |
 
 ## The request
@@ -142,6 +144,97 @@ refused as `not_a_query` or `other_target`, leave the catalog as it was.
 Within protocol 1, a response may gain a field, which a caller ignores, or a reason of
 a gap or a refusal, which a caller reads as one of no known reason; and a write once
 refused may come to be read. The request's fields and their meanings do not change.
+
+## `graph`
+
+The writes of files of SQL, as SQL Server's tools, Snowflake and DuckDB write them, in
+the order to migrate them in. Which relations a write reads needs no catalog.
+
+```
+sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] [--json] <path>...
+```
+
+- `--dialect`: required; one of this build's, as `--describe` spells them.
+- `--database`, `--schema`: the defaults that complete a name of fewer than three parts,
+  as a request's `defaults` do; a database given without a schema takes the dialect's
+  usual one, `dbo` in T-SQL, `PUBLIC` in Snowflake, `main` in DuckDB.
+- `--json`: JSON rather than text.
+- a path: a file, whatever its name, or a directory, whose files ending `.sql`, at any
+  depth, are read sorted by path; at least one, read in the order given.
+
+Refused, with status 2, nothing on standard output and one line on standard error: an
+option that `graph` does not know, or one without its value; no dialect, or one that the
+build lacks; a default that is not one identifier; no path; a path that does not read.
+
+Each file is a script, read in order:
+
+- A byte order mark chooses UTF-8, UTF-16 LE or UTF-16 BE; without one, UTF-8. A file
+  that does not decode is a finding, `not_read`, and the others are read.
+- In Snowflake and DuckDB, a statement ends at each `;` outside parentheses. In T-SQL, a
+  batch ends at a line that holds only `GO`, any case, with an optional count, and at a
+  SQLCMD line, whose first token is `:`; a batch that starts `CREATE`, `CREATE OR ALTER`
+  or `ALTER`, then `VIEW`, `PROC`, `PROCEDURE`, `FUNCTION` or `TRIGGER`, is one statement;
+  any other is split at each `;` outside parentheses, then before each line that starts,
+  outside parentheses, with a statement's first word; a piece whose parse fails at its
+  last token has run out of text, and grows over the next such line; one where
+  polyglot-sql stops after a complete statement at a statement's first word, even within
+  a line, as in `IF ... INSERT ...`, ends there.
+- A write is a statement that `docs/concepts.md` calls one, other than a bare query. Its
+  id is its place, `<path>:<line>:<column>`: the path as given, or as found under a
+  directory, then the line and the column of its first token, from 1, counted in
+  characters.
+- `USE` sets the defaults for the rest of its file: T-SQL's `USE <db>`, Snowflake's
+  `USE [DATABASE] <db>`, `USE <db>.<schema>` and `USE SCHEMA [<db>.]<schema>`, DuckDB's
+  `USE`; a database without a schema takes the usual one.
+- SSMS's existence check, `EXEC sp_executesql` or `EXEC dbo.sp_executesql` with
+  `@statement` a national string that parses as one statement, is read as that statement,
+  at its `EXEC`'s place; any other dynamic SQL is a finding, `not_read`.
+- A statement that does not parse is a finding, `refused`, with polyglot-sql's message,
+  when its first words make it a write; any other statement is skipped, and counted.
+
+A write depends on every write of each relation that it reads, other than its own
+target, and on the writes of its own target before it. Among the writes whose
+dependencies are all ordered, the earliest in reading order comes next; writes that
+depend on each other in a cycle come together, at the turn of the earliest, in reading
+order, and are a finding, `cycle`, with the relations that they write. A relation with
+more than one replace write is a finding, `replaced_twice`.
+
+The text, by default: one line per write, in migration order, its id, its target as its
+statement names it, then the relations that it reads, as it names them, without repeats;
+one line per finding, after its kind and a colon; then the number of statements skipped:
+
+```
+load.sql:1:1 dbo.Fact <- dbo.Stage
+load.sql:5:1 dbo.Loop1 <- dbo.Loop2
+load.sql:6:1 dbo.Loop2 <- dbo.Loop1
+views.sql:3:1 [dbo].[vA] <- dbo.Fact
+refused: load.sql:2:1 Expected Into, got Var ('dbo') near [INSERT dbo.Fact (], at 2:8
+not_read: legacy.sql not UTF-8, nor UTF-16 after a byte order mark
+cycle: load.sql:5:1, load.sql:6:1 (dbo.Loop1, dbo.Loop2)
+replaced_twice: [dbo].[vA] (views.sql:3:1, redefine.sql:1:1)
+skipped: 3
+```
+
+With `--json`, the same as one object:
+
+```json
+{
+  "writes": [{"id": "load.sql:1:1", "target": "dbo.Fact", "reads": ["dbo.Stage"]}],
+  "findings": [
+    {"kind": "refused", "place": "load.sql:2:1", "detail": "Expected Into, ..., at 2:8"},
+    {"kind": "not_read", "place": "legacy.sql", "detail": "not UTF-8, nor UTF-16 ..."},
+    {"kind": "cycle", "writes": ["load.sql:5:1", "load.sql:6:1"], "relations": ["dbo.Loop1", "dbo.Loop2"]},
+    {"kind": "replaced_twice", "relation": "[dbo].[vA]", "writes": ["views.sql:3:1", "redefine.sql:1:1"]}
+  ],
+  "skipped": 3
+}
+```
+
+- `place`: a place, or for a file that does not decode its path alone. `detail`: text for
+  a person, which this contract does not fix; for `refused`, polyglot-sql's message, then
+  the line and the column in the file of the token at which it stops.
+- The findings of the reading come first, in reading order; then the cycles, in
+  migration order; then the relations replaced twice, by their first replace write.
 
 ## `--describe`
 

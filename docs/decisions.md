@@ -84,6 +84,12 @@ Taken with plan 007 under the owner's standing word, for the owner to see:
   case, whether bare, bracketed or double-quoted: `[dbo].[Customer]` and
   `dbo.customer` name one relation. A database with another collation is not modelled.
 
+Taken with plan 008 under the owner's standing word, for the owner to see: a database
+given without a schema, by `--database` or by `USE`, takes the dialect's usual schema,
+`dbo` in T-SQL, `PUBLIC` in Snowflake, `main` in DuckDB (D1); SSMS's existence check,
+`sp_executesql` of a national string as `@statement` that parses as one statement, is
+read as that statement, and any other dynamic SQL is reported as not read (D3).
+
 ## Widening, in order
 
 Each step reuses what the steps before it built, so that the cheapest concepts come
@@ -98,8 +104,10 @@ drafted at a time, and the owner may reorder for value.
    closed (see "Provenance"). Reading a request without tracing it would need a stub
    answer or fields that nothing reads, so the two come together. Serves U1.
 3. Contribute writes; Q1 probed, and Q3 and Q4 ruled first. Serves U1 and U2.
-4. `graph`, `trace`, `uses` and `outline`, from answers alone: derived terms, no new
-   kernel concept; Q9 first. Serves U2.
+4. `graph`, `trace`, `uses` and `outline`: derived terms, no new kernel concept; the
+   graph and the migration order from the relations that each write reads, since
+   answers in reading order leave a relation unknown to its readers, then the rest from
+   answers in that order; Q9 first. Serves U2.
 5. Routines and functions: the facts that `concepts.md` lists as not yet modelled; Q2
    probed and Q6 ruled first. Serves U2.
 6. Duplicated logic: units of logic and their fingerprints, rooted through `copy`

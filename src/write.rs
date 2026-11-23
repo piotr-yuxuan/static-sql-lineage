@@ -3,6 +3,7 @@
 //! query of each, the relations it reads, and the names of its output columns.
 
 use std::collections::HashSet;
+use std::fmt;
 
 use polyglot_sql::expressions::{
     AlterViewAction, Cte, Expression, From, Identifier, Join, JoinKind, Literal, Merge, Null, Select, TableRef,
@@ -73,18 +74,56 @@ pub struct Piece {
     pub own: bool,
 }
 
+/// The columns of a piece as its statement names them: a replace write's column list,
+/// none where its query names them, or why the list is refused; or the identifiers of a
+/// contribute write's list, which name columns of the target, every column for none.
+pub enum Columns {
+    Named(Result<Option<Vec<Name>>, Refusal>),
+    Listed(Vec<Identifier>),
+}
+
+/// Where a token of SQL text starts: its line and its column, both from 1, counted in
+/// characters.
+#[derive(Clone, Copy)]
+pub struct Place {
+    line: usize,
+    column: usize,
+}
+
+impl Place {
+    /// The place of the character at `offset` in a text whose lines start at `starts`: 0,
+    /// then the offset after each `\n`.
+    pub fn at(starts: &[usize], offset: usize) -> Place {
+        let line = starts.partition_point(|start| *start <= offset);
+        Place { line, column: offset - starts[line - 1] + 1 }
+    }
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}:{}", self.line, self.column)
+    }
+}
+
+/// A write's statement read without the catalog: the table that it names as its target,
+/// none for a query's; whether it replaces its target; whether its pieces read its own
+/// row; and each piece, its tree or none for the statement's own text, with its columns.
+pub struct Reading<'a> {
+    pub table: Option<&'a TableRef>,
+    pub replaces: bool,
+    pub own: bool,
+    pub pieces: Vec<(Option<Expression>, Columns)>,
+}
+
 impl Write {
     /// The pieces that the write's statement is read into, its target as the statement
-    /// names it, and whether it replaces its target. A query is one piece, its own text,
-    /// and writes `target`, or the table of its `INTO`; a view, or a table made by
-    /// `CREATE TABLE ... AS`, is its query, onto its column list, if any. An `INSERT` is
-    /// its query; an `UPDATE`, the `SELECT` of its values over its sources, its target among
-    /// them; a `DELETE`, of a `NULL` for every column of the target; a `MERGE`, one for its
-    /// `ON` as a `DELETE`, then one for each `WHEN` clause. A contribute statement's pieces map onto the target's columns, as `catalog`
-    /// knows them, or, the target unknown, onto those that the statement names; a piece
-    /// that would need the target's columns is left out. Refused when the statement does not parse, is not a
-    /// write that the tool reads, names another target than `target`, which completes it as
-    /// it completes the request's names, or a column that the target lacks.
+    /// names it, and whether it replaces its target, as [`Write::read`] reads them. A
+    /// contribute statement's pieces map onto the target's columns, as `catalog` knows
+    /// them, or, the target unknown, onto those that the statement names; a piece that
+    /// would need the target's columns is left out. Refused when the statement does not
+    /// parse, is not a write that the tool reads, names another target than `target`,
+    /// which completes it as it completes the request's names, or a column that the
+    /// target lacks.
     pub fn pieces(
         &self,
         target: &RelationName,
@@ -97,16 +136,51 @@ impl Write {
             .map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
         let sql: Vec<char> = self.sql.chars().collect();
         let known = catalog.get(target).map(|(_, columns)| columns);
+        let reading = Write::read(&statement, &self.sql, dialect, known.map_or(0, <[Name]>::len))?;
+        let found = match reading.table {
+            None => target.clone(),
+            Some(table) => (RelationName::of(table, &sql, dialect, defaults).filter(|found| found == target))
+                .ok_or_else(|| refused(RefusalReason::OtherTarget, format!("the statement does not write {target}")))?,
+        };
+        let mut pieces = Vec::new();
+        for (tree, named) in reading.pieces {
+            let columns = match named {
+                Columns::Named(columns) => columns?,
+                Columns::Listed(identifiers) => columns(&identifiers, known, &sql, dialect)?,
+            };
+            if !reading.replaces && columns.is_none() {
+                continue;
+            }
+            let text = tree.map_or_else(|| Ok(self.sql.clone()), |tree| generate(&tree, dialect.polyglot()));
+            let text = text.map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
+            pieces.push(Piece { text, columns, own: reading.own });
+        }
+        Ok((found, reading.replaces, pieces))
+    }
+
+    /// The target, the mode and the pieces of `statement`, parsed from `sql`, before their
+    /// columns are mapped onto the target's: a query is one piece, its own text, and
+    /// writes the table of its `INTO`, if any; a view, or a table made by
+    /// `CREATE TABLE ... AS`, is its query, onto its column list, if any. An `INSERT` is
+    /// its query; an `UPDATE`, the `SELECT` of its values over its sources, its target among
+    /// them; a `DELETE`, of a `NULL` for each of the target's `width` columns; a `MERGE`,
+    /// one for its `ON` as a `DELETE`, then one for each `WHEN` clause. Refused when the
+    /// statement is not a write that the tool reads.
+    pub fn read<'a>(
+        statement: &'a Expression,
+        sql: &str,
+        dialect: Dialect,
+        width: usize,
+    ) -> Result<Reading<'a>, Refusal> {
+        let chars: Vec<char> = sql.chars().collect();
         // The values of a piece that decides the rows of every column of the target.
-        let nulls = vec![Expression::Null(Null); known.map_or(0, <[Name]>::len)];
-        let not_a_write = || refused(RefusalReason::NotAQuery, "not a write that the tool reads".to_string());
-        // The statement's target, none for a query's; whether it replaces it; whether its
-        // pieces read its own row; each piece, its tree or none for the statement's own
-        // text, with its columns.
-        let (table, replaces, own, specs) = match &statement {
+        let nulls = vec![Expression::Null(Null); width];
+        let not_a_write =
+            || Refusal { reason: RefusalReason::NotAQuery, detail: "not a write that the tool reads".to_string() };
+        let (table, replaces, own, pieces) = match statement {
             Expression::CreateView(view) => {
-                let columns = view_columns(&view.columns, &view.name, &self.sql, dialect);
-                (Some(&view.name), true, false, vec![(Some(view.query.clone()), columns)])
+                let columns = view_columns(&view.columns, &view.name, sql, dialect);
+                (Some(&view.name), true, false, vec![(Some(view.query.clone()), Columns::Named(columns))])
             }
             Expression::AlterView(view) => {
                 let query = (view.actions.iter())
@@ -115,24 +189,25 @@ impl Write {
                         _ => None,
                     })
                     .ok_or_else(not_a_write)?;
-                let columns = view_columns(&view.columns, &view.name, &self.sql, dialect);
-                (Some(&view.name), true, false, vec![(Some((**query).clone()), columns)])
+                let columns = view_columns(&view.columns, &view.name, sql, dialect);
+                (Some(&view.name), true, false, vec![(Some((**query).clone()), Columns::Named(columns))])
             }
             Expression::CreateTable(create) => {
                 let query = with(create.as_select.clone().ok_or_else(not_a_write)?, create.with_cte.clone());
-                let columns = create.columns.iter().map(|column| Name::of(&column.name, &sql, dialect));
+                let columns = create.columns.iter().map(|column| Name::of(&column.name, &chars, dialect));
                 let columns = columns.collect::<Option<Vec<Name>>>().filter(|columns| !columns.is_empty());
-                (Some(&create.name), true, false, vec![(Some(query), Ok(columns))])
+                (Some(&create.name), true, false, vec![(Some(query), Columns::Named(Ok(columns)))])
             }
             Expression::Insert(insert) => {
                 let query = insert.query.clone().filter(|_| !insert.by_name).ok_or_else(not_a_write)?;
-                let columns = columns(&insert.columns, known, &sql, dialect);
+                let columns = Columns::Listed(insert.columns.clone());
                 (Some(&insert.table), false, false, vec![(Some(with(query, insert.with.clone())), columns)])
             }
             Expression::Update(update) => {
                 // T-SQL's `UPDATE a ... FROM t AS a` names as its target the source that `a`
                 // names; any other target is added to the sources.
-                let known_as = |table: &TableRef| Name::of(table.alias.as_ref().unwrap_or(&table.name), &sql, dialect);
+                let known_as =
+                    |table: &TableRef| Name::of(table.alias.as_ref().unwrap_or(&table.name), &chars, dialect);
                 let froms = update.from_clause.iter().flat_map(|from| &from.expressions);
                 let named = froms.clone().find_map(|source| match source {
                     Expression::Table(table) if known_as(table) == known_as(&update.table) => Some(&**table),
@@ -149,7 +224,7 @@ impl Write {
                 let condition = update.where_clause.as_ref().map(|filter| filter.this.clone());
                 let sources = added.into_iter().chain(froms.cloned()).collect();
                 let piece = synthetic(values, sources, update.from_joins.clone(), condition, update.with.clone());
-                let columns = columns(set, known, &sql, dialect);
+                let columns = Columns::Listed(set.into_iter().cloned().collect());
                 (Some(named.unwrap_or(&update.table)), false, true, vec![(Some(piece), columns)])
             }
             Expression::Delete(delete) => {
@@ -159,20 +234,20 @@ impl Write {
                 let sources = sources.map(|source| Expression::Table(Box::new(source))).collect();
                 let condition = delete.where_clause.as_ref().map(|filter| filter.this.clone());
                 let piece = synthetic(nulls, sources, delete.joins.clone(), condition, delete.with.clone());
-                (Some(&delete.table), false, true, vec![(Some(piece), Ok(known.map(<[Name]>::to_vec)))])
+                (Some(&delete.table), false, true, vec![(Some(piece), Columns::Listed(Vec::new()))])
             }
             Expression::Merge(merge) => {
-                let Some(Expression::Table(table)) = get_merge_target(&statement) else { return Err(not_a_write()) };
+                let Some(Expression::Table(table)) = get_merge_target(statement) else { return Err(not_a_write()) };
                 let with = merge.with_.as_deref().and_then(|with| match with {
                     Expression::With(with) => Some((**with).clone()),
                     _ => None,
                 });
                 let sources = vec![(*merge.this).clone(), (*merge.using).clone()];
                 let whens = whens(merge, &sources, with.as_ref(), &nulls).ok_or_else(not_a_write)?.into_iter();
-                let whens = whens.map(|(piece, named)| (Some(piece), columns(&named, known, &sql, dialect)));
+                let whens = whens.map(|(piece, named)| (Some(piece), Columns::Listed(named)));
                 let on = synthetic(nulls, sources, Vec::new(), merge.on.as_deref().cloned(), with);
-                let specs = std::iter::once((Some(on), Ok(known.map(<[Name]>::to_vec)))).chain(whens);
-                (Some(&**table), false, true, specs.collect())
+                let pieces = std::iter::once((Some(on), Columns::Listed(Vec::new()))).chain(whens);
+                (Some(&**table), false, true, pieces.collect())
             }
             // `SELECT ... INTO` names its target in the `SELECT`, or in the left branch of a
             // set operation, and is traced as the query that it is.
@@ -189,26 +264,11 @@ impl Write {
                     Expression::Table(table) => Ok(&**table),
                     _ => Err(not_a_write()),
                 });
-                (into.transpose()?, true, false, vec![(None, Ok(None))])
+                (into.transpose()?, true, false, vec![(None, Columns::Named(Ok(None)))])
             }
             _ => return Err(not_a_write()),
         };
-        let found = match table {
-            None => target.clone(),
-            Some(table) => (RelationName::of(table, &sql, dialect, defaults).filter(|found| found == target))
-                .ok_or_else(|| refused(RefusalReason::OtherTarget, format!("the statement does not write {target}")))?,
-        };
-        let mut pieces = Vec::new();
-        for (tree, columns) in specs {
-            let columns = columns?;
-            if !replaces && columns.is_none() {
-                continue;
-            }
-            let text = tree.map_or_else(|| Ok(self.sql.clone()), |tree| generate(&tree, dialect.polyglot()));
-            let text = text.map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
-            pieces.push(Piece { text, columns, own });
-        }
-        Ok((found, replaces, pieces))
+        Ok(Reading { table, replaces, own, pieces })
     }
 
     /// The query that `sql` holds, the outermost one when it is parenthesised, as the

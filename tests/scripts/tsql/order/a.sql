@@ -1,0 +1,1 @@
+CREATE VIEW dbo.vA AS SELECT Id FROM dbo.Orders

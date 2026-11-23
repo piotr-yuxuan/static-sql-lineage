@@ -1,0 +1,6 @@
+CREATE VIEW dbo.vX AS SELECT Id FROM dbo.vZ
+GO
+CREATE VIEW dbo.vY AS SELECT Id FROM dbo.Orders
+GO
+CREATE VIEW dbo.vZ AS SELECT Id FROM dbo.Orders
+GO

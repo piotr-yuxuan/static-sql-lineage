@@ -1,0 +1,4 @@
+DELETE FROM dbo.Fact WHERE Id IN (SELECT Id FROM dbo.vGone)
+GO
+CREATE VIEW dbo.vGone AS SELECT Id FROM dbo.Stage
+GO
