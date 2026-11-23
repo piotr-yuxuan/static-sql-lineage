@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use polyglot_sql::expressions::{Expression, Identifier, JoinKind, Select};
+use polyglot_sql::expressions::{Expression, JoinKind, Select, TableRef};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::{
@@ -14,7 +14,7 @@ use serde::Serialize;
 use crate::answer::{Gap, GapReason, spelled};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::relation::{Name, RelationName};
+use crate::relation::{Name, RelationName, names_cte};
 use crate::write::{Holder, Key, scope_steps};
 
 /// How a parent column reaches a child column, in the order in which one is kept when
@@ -237,9 +237,9 @@ impl Reach {
             _ => (None, false),
         };
         let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
-        let named = |tree: &'q Expression| -> Vec<&'q Identifier> {
+        let named = |tree: &'q Expression| -> Vec<&'q TableRef> {
             let one_part = |node: &'q Expression| match node {
-                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&table.name),
+                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&**table),
                 _ => None,
             };
             tree.dfs().filter_map(one_part).collect()
@@ -248,13 +248,13 @@ impl Reach {
         // that it reads reads.
         let mut pending = named(query);
         for name in ctes.iter().flat_map(|cte| named(&cte.this)) {
-            if let Some(at) = pending.iter().position(|other| Name::same(other, name, &sql, dialect)) {
+            if let Some(at) = pending.iter().position(|other| Name::same(&other.name, &name.name, &sql, dialect)) {
                 pending.swap_remove(at);
             }
         }
         let mut read = Vec::new();
         while let Some(name) = pending.pop() {
-            let cte = ctes.iter().position(|cte| Name::same(&cte.alias, name, &sql, dialect));
+            let cte = ctes.iter().position(|cte| names_cte(name, &cte.alias, &sql, dialect));
             if let Some(at) = cte.filter(|at| !read.contains(at)) {
                 read.push(at);
                 pending.extend(named(&ctes[at].this));

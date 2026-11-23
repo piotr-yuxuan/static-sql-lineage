@@ -18,7 +18,7 @@ use serde::Deserialize;
 use crate::answer::{Refusal, RefusalReason};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::relation::{Name, RelationName, repeated};
+use crate::relation::{Name, RelationName, names_cte, repeated};
 
 /// The words that open a clause of a statement, but `WITH`, `GROUP BY`, `ORDER BY` and a join.
 const CLAUSES: &str =
@@ -302,10 +302,9 @@ impl Write {
         let root = build_scope(query);
         // The engine's scopes match a CTE's name ignoring ASCII case alone.
         let cte = |scope: &Scope, table: &TableRef| {
-            table.schema.is_none()
-                && scope.cte_sources.values().any(|source| {
-                    matches!(&source.expression, Expression::Cte(cte) if Name::same(&cte.alias, &table.name, &sql, dialect))
-                })
+            scope.cte_sources.values().any(|source| {
+                matches!(&source.expression, Expression::Cte(cte) if names_cte(table, &cte.alias, &sql, dialect))
+            })
         };
         let scoped = (scopes(&root, &sql, dialect).into_iter())
             .flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (scope, source)));
@@ -697,10 +696,7 @@ fn named<'a>(
             Expression::Except(set) => (&set.with, &set.left),
             Expression::Subquery(subquery) if subquery.column_aliases.is_empty() => (&None, &subquery.this),
             Expression::Table(table) if table.column_aliases.is_empty() => {
-                let cte = ctes
-                    .iter()
-                    .rposition(|cte| table.schema.is_none() && Name::same(&cte.alias, &table.name, sql, dialect));
-                let Some(at) = cte else {
+                let Some(at) = ctes.iter().rposition(|cte| names_cte(table, &cte.alias, sql, dialect)) else {
                     let relation = RelationName::of(table, sql, dialect, defaults).ok_or(None)?;
                     let (_, columns) = catalog.get(&relation).ok_or_else(|| Some(relation.to_string()))?;
                     return Ok(columns.iter().cloned().map(Some).collect());
