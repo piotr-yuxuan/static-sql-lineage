@@ -110,11 +110,13 @@ impl Edge {
     }
 
     /// The edges to `children`, the ends of a write's output columns in their order, and
-    /// the gaps, from the engine's `analysis` of its query: each projection's upstream
-    /// references by their kind, and each use's references as `rows` to the output
-    /// columns that `reach` places it at; one edge per pair of columns, of the first kind.
+    /// the gaps, from the engine's `analysis` of its query, whose projections `order`
+    /// gives for each: each projection's upstream references by their kind, as `reach`
+    /// says they reach, and each use's references as `rows` to the output columns that
+    /// `reach` places it at; one edge per pair of columns, of the first kind.
     pub fn of_analysis(
         analysis: &QueryAnalysis,
+        order: &[usize],
         reach: &Reach,
         children: &[End],
         relations: &[RelationName],
@@ -122,9 +124,9 @@ impl Edge {
     ) -> (Vec<Edge>, Vec<Gap>) {
         let mut gaps = Vec::new();
         // Each reference with its place and, for a projection's, its kind: a use's is rows.
-        let mut found: Vec<(usize, &ColumnReferenceFact, Option<Kind>)> = (analysis.projections.iter().enumerate())
-            .flat_map(|(place, projection)| {
-                let values = projection.upstream.iter();
+        let mut found: Vec<(usize, &ColumnReferenceFact, Option<Kind>)> = (order.iter().enumerate())
+            .flat_map(|(place, &at)| {
+                let values = analysis.projections[at].upstream.iter();
                 values.filter_map(move |reference| {
                     Some((place, reference, Some(Kind::of(reference.path_transform_kind?)?)))
                 })

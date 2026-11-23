@@ -216,14 +216,16 @@ impl Write {
             .collect()
     }
 
-    /// The engine's lineage of each output column of `query`, one for each of `keys`,
-    /// against `schema`, none for one that it does not give; for a write that holds an
-    /// `INTERSECT` or an `EXCEPT`, a key that `keys` says a join merges, or a subquery in a
-    /// CTE's or a derived table's select list, as `holders` says, and for no other.
+    /// The engine's lineage of each output column of `query`, the engine's projection
+    /// that `order` gives for it, against `schema`, none where the engine gives none; for a
+    /// write that holds an `INTERSECT` or an `EXCEPT`, a key that `keys` says a join
+    /// merges, or a subquery in a CTE's or a derived table's select list, as `holders`
+    /// says, and for no other.
     pub fn steps(
         query: &Expression,
         holders: &[(String, Option<Holder>)],
         keys: &[Vec<(JoinKind, Option<RelationName>)>],
+        order: &[usize],
         schema: &ValidationSchema,
         dialect: Dialect,
     ) -> Vec<Option<LineageNode>> {
@@ -234,7 +236,7 @@ impl Write {
         }
         let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
         let lineage = |place| lineage_at_with_schema(place, query, Some(&schema), Some(dialect.polyglot()), false);
-        (0..keys.len()).map(|place| lineage(place).ok()).collect()
+        order.iter().map(|&at| lineage(at).ok()).collect()
     }
 }
 
@@ -278,7 +280,9 @@ fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &
 
 /// The columns of the sources of `select`, as [`named`] gives them, each with the places
 /// of the joins that merge it: a key that a join's `USING` names, or that its `NATURAL`
-/// finds on both its sides, once, at its first place.
+/// finds on both its sides, once. Snowflake puts a join's keys first, in the order of its
+/// `USING` or, for `NATURAL`, of its left side, then its left side's other columns, then
+/// its right side's; DuckDB keeps each key at its first place, and T-SQL merges none.
 fn joined<'a>(
     select: &'a Select,
     ctes: &[&'a Cte],
@@ -312,6 +316,9 @@ fn joined<'a>(
             columns.iter().filter(|(_, joins)| joins.contains(&at)).map(|(column, _)| column).collect();
         let rest: Vec<Name> = right.iter().filter(|column| !merged.contains(column)).cloned().collect();
         columns.extend(rest.into_iter().map(|column| (column, Vec::new())));
+        if dialect == Dialect::Snowflake {
+            columns.sort_by_key(|(column, joins)| (!joins.contains(&at), using.iter().position(|key| key == column)));
+        }
     }
     Ok(columns)
 }
@@ -362,9 +369,10 @@ fn named<'a>(
 }
 
 /// The names of the columns of `select`'s list: an alias names its column, so does a
-/// column, and a `*` gives those of the one source that its qualifier names, or of the
-/// only source of `select`, as [`named`] gives them, less those that it excludes, as it
-/// renames them. Unknown when a `*` reads several sources, or reaches an unnamed column.
+/// column, and a `*` gives those of the one source that its qualifier names, as [`named`]
+/// gives them, or, unqualified, those of all its sources, as [`joined`] joins them, less
+/// those that it excludes, as it renames them. Unknown when a `*` reaches an unnamed
+/// column.
 fn listed<'a>(
     select: &'a Select,
     ctes: &[&'a Cte],
@@ -382,18 +390,25 @@ fn listed<'a>(
             names.push(name(expression, sql, dialect));
             continue;
         };
-        let called = |source: &&Expression| match (&star.table, source) {
-            (None, _) => sources.len() == 1,
-            (Some(qualifier), Expression::Table(table)) => {
-                table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
+        let mut columns = match &star.table {
+            None => joined(select, ctes, sql, catalog, dialect, defaults)?
+                .into_iter()
+                .map(|(column, _)| Some(column))
+                .collect(),
+            Some(qualifier) => {
+                let called = |source: &&Expression| match source {
+                    Expression::Table(table) => {
+                        table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
+                    }
+                    Expression::Subquery(subquery) => {
+                        subquery.alias.as_ref().is_some_and(|alias| alias.name.eq_ignore_ascii_case(&qualifier.name))
+                    }
+                    _ => false,
+                };
+                let source = sources.iter().copied().find(called).ok_or(None)?;
+                named(source, ctes, sql, catalog, dialect, defaults)?
             }
-            (Some(qualifier), Expression::Subquery(subquery)) => {
-                subquery.alias.as_ref().is_some_and(|alias| alias.name.eq_ignore_ascii_case(&qualifier.name))
-            }
-            _ => false,
         };
-        let source = sources.iter().copied().find(called).ok_or(None)?;
-        let mut columns = named(source, ctes, sql, catalog, dialect, defaults)?;
         if columns.iter().any(Option::is_none) {
             return Err(None);
         }
