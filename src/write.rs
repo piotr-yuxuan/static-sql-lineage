@@ -4,7 +4,7 @@
 
 use polyglot_sql::expressions::{Cte, Expression, Select};
 use polyglot_sql::parse_one;
-use polyglot_sql::scope::{SourceKind, build_scope};
+use polyglot_sql::scope::{Scope, SourceKind, build_scope};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
@@ -49,16 +49,13 @@ impl Write {
     pub fn relations(&self, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
-        let (mut scopes, mut relations) = (vec![&root], Vec::new());
-        while let Some(scope) = scopes.pop() {
-            relations.extend(scope.sources.values().filter_map(|source| match (&source.kind, &source.expression) {
+        let sources = scopes(&root).into_iter().flat_map(|(_, scope)| scope.sources.values());
+        let mut relations: Vec<RelationName> =
+            (sources.filter_map(|source| match (&source.kind, &source.expression) {
                 (SourceKind::Table, Expression::Table(table)) => RelationName::of(table, &sql, dialect, defaults),
                 _ => None,
-            }));
-            let children =
-                [&scope.subquery_scopes, &scope.derived_table_scopes, &scope.cte_scopes, &scope.union_scopes];
-            scopes.extend(children.into_iter().chain([&scope.udtf_scopes]).flatten());
-        }
+            }))
+            .collect();
         relations.sort_by_key(ToString::to_string);
         relations
     }
@@ -88,6 +85,26 @@ impl Write {
         }
         Ok(Outputs::Named(names))
     }
+}
+
+/// Every scope of `root`, the engine's scopes of a query, with its path as the engine
+/// writes it, such as `root.ctes[0].subqueries[1]`.
+fn scopes(root: &Scope) -> Vec<(String, &Scope)> {
+    let (mut pending, mut found) = (vec![("root".to_string(), root)], Vec::new());
+    while let Some((path, scope)) = pending.pop() {
+        let kinds = [
+            ("subqueries", &scope.subquery_scopes),
+            ("derived", &scope.derived_table_scopes),
+            ("ctes", &scope.cte_scopes),
+            ("branches", &scope.union_scopes),
+            ("udtfs", &scope.udtf_scopes),
+        ];
+        for (kind, children) in kinds {
+            pending.extend(children.iter().enumerate().map(|(at, child)| (format!("{path}.{kind}[{at}]"), child)));
+        }
+        found.push((path, scope));
+    }
+    found
 }
 
 /// The names of the columns that `query` gives, `None` for one that it leaves unnamed;
