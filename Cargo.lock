@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "static-sql-lineage"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "polyglot-sql",
  "serde",
