@@ -38,9 +38,7 @@ fn command(arguments: &[&str]) -> Output {
 /// The lines that the command line `arguments` prints, which the binary does not refuse.
 fn lines(arguments: &[&str]) -> Vec<String> {
     let output = command(arguments);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert!(stderr.is_empty(), "stderr: {stderr}");
+    assert_succeeded(&output);
     String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
 }
 
@@ -61,7 +59,7 @@ fn answers(input: &[u8]) -> Output {
 /// The answers to `request`, which the binary does not refuse.
 fn respond(request: &Value) -> Vec<Value> {
     let output = answers(request.to_string().as_bytes());
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_succeeded(&output);
     let response: Value = serde_json::from_slice(&output.stdout).expect("the response is JSON");
     response["answers"].as_array().expect("the response has answers").clone()
 }
@@ -117,8 +115,7 @@ fn read(path: &str) -> String {
 
 fn description() -> Value {
     let output = run(&["--describe"]);
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    assert!(output.stderr.is_empty(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_succeeded(&output);
     serde_json::from_slice(&output.stdout).expect("the description is JSON")
 }
 
@@ -131,6 +128,11 @@ fn keys(value: &Value, prefix: &str, into: &mut BTreeSet<String>) {
             into.insert(path);
         }
     }
+}
+
+/// A use that succeeds: status 0, and nothing on standard error.
+fn assert_succeeded(output: &Output) {
+    assert_eq!((output.status.code(), &*String::from_utf8_lossy(&output.stderr)), (Some(0), ""));
 }
 
 /// A refusal: status 2, nothing on standard output, one line on standard error that
