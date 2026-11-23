@@ -40,6 +40,14 @@ impl Gap {
     pub fn of(reason: GapReason, column: Option<String>, detail: impl Into<String>) -> Gap {
         Gap { reason, relation: None, column, detail: detail.into() }
     }
+
+    /// The gap of `relation`, which the catalog does not know.
+    fn unknown(relation: &RelationName) -> Gap {
+        Gap {
+            relation: Some(relation.to_string()),
+            ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
+        }
+    }
 }
 
 /// Why an edge may be missing; in the order of their names, by which gaps are ordered.
@@ -109,11 +117,7 @@ impl Answer {
         // target's order, or, the target unknown, a gap for it and those that the statement
         // names; its edges are ordered by them, one per pair of columns, of the first kind.
         let known = catalog.get(target).map(|(_, columns)| columns);
-        let unknown = Gap {
-            relation: Some(found.to_string()),
-            ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
-        };
-        gaps.extend(known.is_none().then_some(unknown));
+        gaps.extend(known.is_none().then(|| Gap::unknown(&found)));
         let mapped = pieces.iter().flat_map(|piece| piece.columns.iter().flatten());
         let columns: Vec<Name> = match known {
             Some(known) => {
@@ -149,12 +153,7 @@ impl Answer {
         };
         let relations = &Write::relations(sql, &query, dialect, defaults);
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
-        let mut gaps: Vec<Gap> = (unknown.into_iter())
-            .map(|relation| Gap {
-                relation: Some(relation.to_string()),
-                ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
-            })
-            .collect();
+        let mut gaps: Vec<Gap> = unknown.into_iter().map(Gap::unknown).collect();
         let schema = catalog.schema(relations);
         let checked = validate_with_schema(sql, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
         let errors: Vec<String> = (checked.errors.into_iter())
