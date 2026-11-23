@@ -77,6 +77,7 @@ have. A reject scenario names an answer that must not be given.
   - `Defaults::used`: the defaults after a `USE`.
   - `names_cte`: whether a table reference names a CTE, a step, rather than a relation.
   - `listing`: names, or ends of names, as text separated by `, `.
+  - `one_line`: a text, such as polyglot-sql's message in a refusal or a finding, on one line.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.

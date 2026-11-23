@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::edge::{Edge, End, Reach};
-use crate::relation::{Name, RelationName};
+use crate::relation::{Name, RelationName, one_line};
 use crate::write::{Outputs, Piece, Write};
 
 /// The answer to one write.
@@ -82,8 +82,7 @@ pub struct Refusal {
 impl fmt::Display for Refusal {
     /// Its reason, then its detail on one line.
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        let detail = self.detail.split_whitespace().collect::<Vec<_>>().join(" ");
-        write!(formatter, "{} {detail}", spelled(&self.reason))
+        write!(formatter, "{} {}", spelled(&self.reason), one_line(&self.detail))
     }
 }
 
