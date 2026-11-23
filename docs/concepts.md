@@ -338,7 +338,38 @@ Look-alike types or functions that stay apart, because they belong to different
 concepts or change for independent reasons, one line each: `<one>` and `<other>`:
 why. Only the owner adds a line, through a plan.
 
-None yet.
+- `Lineage::of` and `Edge::of_analysis`: both keep one edge per pair of ends, of the
+  first kind, but the lineage's rule (R12) spans writes and keeps each edge's write ids,
+  where a write's edges are ordered by their child's place.
+- `Write::holders` and `Reach::kind`: both know that the second branch of an `INTERSECT`
+  or `EXCEPT` decides rows, but read two structures of the engine, the scope path and
+  the lineage's `set_branch`.
+- `Walk::printed` and the serialisation of `Gap` and `Finding`: a walk lists a gap with
+  its write and without its detail, and a refusal or a finding not read by its place and
+  detail, as `docs/protocol.md` gives.
+- The `refused:` lines of `Walk::printed`, `Command::outline` and `Finding::fmt`: a met
+  write's refusal, one write's refusal with its detail, and a refused statement by its
+  place; three facts, one word.
+- The `cycle:` lines of `Walk::printed` and `Finding::fmt`: columns that reach each
+  other, and writes that depend on each other.
+- `CUTS` and `WRITES` in `src/script.rs`, and `CLAUSES` in `src/write.rs`: where a T-SQL
+  window may end, whether a refused statement was a write, where a clause starts.
+- The column lists of `Write::read` and of a declaration in `Script::parsed`: one field
+  of the engine, two facts, a write's renamed outputs and a relation's columns.
+- `Script::parsed`'s `dbo` and `Dialect::default_schema`'s: the schema under which SSMS
+  calls `sp_executesql`, and the schema of a database given without one.
+- `tests/protocol/main.rs`'s `outline` and the `Display` of `Edge` and `Gap`: the tests
+  take their expectations from the protocol, and cannot link the binary.
+- `tests/concepts.rs`'s `repository` and `Command::run`'s walk of a directory: a test's
+  reading of `src/`, and a command's reading of scripts with its rule for links.
+- `Write::steps` and `Reach::of`: Write gathers the engine's facts about a query, Edge
+  places the clauses' reach from them.
+- `Gap`'s column and `Lineage::walk`'s reading of it: the gap keeps the spelling, by
+  which protocol 1 orders and deduplicates gaps; the walk reads it back as a name.
+- The two `Catalog::get(...).map(...)` of `src/write.rs` and `src/answer.rs`: one call
+  each, shorter than a function.
+- `request_in` and `requests.rs`'s two refusals of a dialect: those tests write the
+  field they test.
 
 ## Not yet modelled
 
