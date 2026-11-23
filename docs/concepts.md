@@ -259,6 +259,11 @@ have. A reject scenario names an answer that must not be given.
   `unknown_relation` gap for `r`; no edge.
 - reject `catalog.columns-guessed`: for that query, the edge `r.a -> t.a`, as if the
   columns of `r` could be taken from its readers.
+- accept `catalog.refused-contribute-keeps-target`: catalog `t` with `a`, `s` with `x`;
+  writes `insert into t (nope) select x from s`, then `create view u as select a from t`:
+  the first refused, the second the edge `t.a -> u.a`, `copy`.
+- reject `catalog.refused-contribute-as-unknown`: an `unknown_relation` gap for `t` in
+  the second answer.
 
 ## Dialect
 

@@ -190,6 +190,25 @@ fn answer_stale_shape() {
     assert!(!found[1].contains(&"t.a -> u.a copy".to_string()), "{found:?}");
 }
 
+/// The second answer of `catalog.refused-contribute-keeps-target`.
+fn kept() -> Vec<String> {
+    let writes = [("t", "insert into t (nope) select x from s"), ("u", "create view u as select a from t")];
+    let answers = respond(&request(&[("t", &["a"]), ("s", &["x"])], &writes));
+    assert_eq!(outline(&answers[0]), ["refused invalid"]);
+    outline(&answers[1])
+}
+
+#[test]
+fn catalog_refused_contribute_keeps_target() {
+    assert_eq!(kept(), ["t.a -> u.a copy"]);
+}
+
+#[test]
+fn catalog_refused_contribute_as_unknown() {
+    let found = kept();
+    assert!(!found.contains(&"gap unknown_relation t -".to_string()), "{found:?}");
+}
+
 #[test]
 fn catalog_unknown_relation() {
     assert_eq!(trace(&[], "select a from r"), ["gap unknown_relation r -"]);

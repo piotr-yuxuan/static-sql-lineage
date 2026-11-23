@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, read, request};
+use super::{answers, assert_refused, outline, read, request, respond};
 
 /// A valid request: the catalog `s` of the column `a`, and the write `t`.
 fn valid() -> Value {
@@ -160,8 +160,17 @@ fn refuses_two_writes_with_one_id() {
 }
 
 #[test]
-fn refuses_two_writes_with_one_target() {
-    refused(&request(&[("s", &["a"])], &[("t", "select a from s"), ("T", "select a from s")]), "target T");
+fn two_writes_with_one_target_are_read_in_order() {
+    let writes = [("t", "create table t as select a from s"), ("T", "insert into t select b from u")];
+    let mut request = request(&[("s", &["a"]), ("u", &["b"])], &writes);
+    request["writes"][1]["id"] = json!("t.insert");
+    let answers = respond(&request);
+    assert_eq!(
+        answers.iter().map(|answer| answer["write"].clone()).collect::<Vec<_>>(),
+        [json!("t"), json!("t.insert")]
+    );
+    // The insert maps onto the columns that the table, read first, gave its target.
+    assert_eq!(answers.iter().map(outline).collect::<Vec<_>>(), [vec!["s.a -> t.a copy"], vec!["u.b -> T.a copy"]]);
 }
 
 #[test]

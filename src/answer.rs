@@ -106,9 +106,14 @@ impl Answer {
             gaps.extend(piece.gaps);
         }
         // A contribute write's columns are its target's that its pieces map onto, in the
-        // target's order, or, the target unknown, those that the statement names; its edges
-        // are ordered by them, one per pair of columns, of the first kind.
+        // target's order, or, the target unknown, a gap for it and those that the statement
+        // names; its edges are ordered by them, one per pair of columns, of the first kind.
         let known = catalog.get(target).map(|(_, columns)| columns);
+        let unknown = Gap {
+            relation: Some(found.to_string()),
+            ..Gap::of(GapReason::UnknownRelation, None, "unknown to the catalog")
+        };
+        gaps.extend(known.is_none().then_some(unknown));
         let mapped = pieces.iter().flat_map(|piece| piece.columns.iter().flatten());
         let columns: Vec<Name> = match known {
             Some(known) => {

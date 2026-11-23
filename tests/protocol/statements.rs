@@ -341,3 +341,25 @@ fn merge_into_an_alias_finds_its_target() {
     let sql = "merge into t as tt using s as ss on tt.k = ss.k when matched then update set tt.a = ss.x";
     assert_eq!(trace("snowflake", sql), ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
 }
+
+#[test]
+fn a_contribute_write_to_an_unknown_target_is_a_gap() {
+    let gap = "gap unknown_relation w -";
+    let answer = &respond(&writes("snowflake", &[("w", "insert into w (K, \"Aa\") select k, x from s")]))[0];
+    assert_eq!(answer["columns"], Value::Null);
+    // Spelled as the statement spells them, for the catalog does not.
+    assert_eq!(outline(answer), ["s.k -> w.K copy", "s.x -> w.\"Aa\" copy", gap]);
+    let statements: [(&str, &[&str]); 4] = [
+        ("insert into w select k, x from s", &[gap]),
+        ("update w set a = s.x from s where w.k = s.k", &["s.k -> w.a rows", "s.x -> w.a copy", gap]),
+        ("delete from w using s where w.k = s.k", &[gap]),
+        (
+            "merge into w using s on w.k = s.k when matched then update set a = s.x \
+                when not matched then insert values (s.k, s.x)",
+            &["s.x -> w.a copy", gap],
+        ),
+    ];
+    for (sql, expected) in statements {
+        assert_eq!(traced("snowflake", &[("w", sql)]).remove(0), expected, "{sql}");
+    }
+}
