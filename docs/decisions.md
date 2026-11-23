@@ -78,6 +78,12 @@ contribute write to a target that the catalog does not know gives an `unknown_re
 gap for it, and the edges of the columns that its statement names (D6); the catalog
 after a write follows its statement's kind (D7).
 
+Taken with plan 007 under the owner's standing word, for the owner to see:
+
+- R14. T-SQL's names compare as SQL Server's default collation compares them, ignoring
+  case, whether bare, bracketed or double-quoted: `[dbo].[Customer]` and
+  `dbo.customer` name one relation. A database with another collation is not modelled.
+
 ## Widening, in order
 
 Each step reuses what the steps before it built, so that the cheapest concepts come

@@ -229,3 +229,21 @@ fn dialect_not_built() {
 fn dialect_generic_fallback() {
     assert!(answers(bigquery().to_string().as_bytes()).stdout.is_empty());
 }
+
+/// The answer of `dialect.tsql-ignores-case`.
+fn ignoring_case() -> Vec<String> {
+    let mut request = request(&[("[dbo].[Orders]", &["[OrderId]"])], &[("t", "select orderid from dbo.orders")]);
+    request["dialect"] = json!("tsql");
+    outline(&respond(&request)[0])
+}
+
+#[test]
+fn dialect_tsql_ignores_case() {
+    assert_eq!(ignoring_case(), ["[dbo].[Orders].[OrderId] -> t.orderid copy"]);
+}
+
+#[test]
+fn dialect_tsql_delimited_as_exact() {
+    let found = ignoring_case();
+    assert!(!found.iter().any(|line| line.starts_with("refused")), "{found:?}");
+}

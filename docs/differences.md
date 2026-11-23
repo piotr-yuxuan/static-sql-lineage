@@ -3,11 +3,17 @@
 Where the code differs from a definition of `docs/concepts.md`, each difference classed
 as a defect of the code, a defect of the definition, an aspiration or an intended gap.
 
-- T-SQL's rule for quoting and case is polyglot-sql's `Lowercase`: a bare name folds to
-  lower case and a bracketed one keeps its case, so `[OrderId]` is refused against a
-  catalog's bare `OrderId`, which SQL Server's default collation, insensitive to case,
-  accepts. The Relation entry asks for the dialect's own rules. Class: a defect of the
-  code.
+- A T-SQL database whose collation is sensitive to case, or a column with such a
+  collation, is not modelled: under T-SQL every name compares as SQL Server's default
+  collation compares it, ignoring case. Class: an intended gap.
+- Under Snowflake and DuckDB, a table alias read in another case than it was given, as
+  `o.a` in `select o.a from s as O`, gives an `unresolved_reference` gap, where the
+  Edge entry gives the edge `s.a -> t.a`, `copy`, since the dialect's rules for case
+  make `o` and `O` one alias: polyglot-sql looks a qualifier up exactly. Class: a defect
+  of the code.
+- T-SQL's alias written before its expression, as in `select Total = a from s`, is read
+  as a comparison, and the write refused, where the Write entry names its output column
+  `Total`: polyglot-sql does not parse that form. Class: a defect of the code.
 - A `*` over a source whose columns a list renames, such as `with c (x) as (...)` or a
   derived table with column aliases, leaves a write's output columns unknown, a
   `wildcard` gap, where the Edge entry says that a column selected through `*` is a
@@ -71,3 +77,8 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - A subquery in `VALUES`, as in `insert into t values (1, (select max(x) from s))`, reads
   a relation, which the Write entry's *not*, "a statement that reads no relation",
   overlooks; it is refused `not_a_query`. Class: a defect of the definition.
+- Under Snowflake, a quoted name that differs from a CTE's only by case or quotes, as
+  `"c"` beside `with c as (...)`, names another relation, but polyglot-sql's lineage
+  matches CTE names ignoring ASCII case, so a write that reads `"c"` while the catalog
+  declares it may take the CTE's columns as its parents, with no gap. Class: a defect of
+  the code.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! Edges: how a column of a relation that a write reads reaches a column of its target.
 
-use polyglot_sql::expressions::{Expression, JoinKind, Select};
+use polyglot_sql::expressions::{Expression, Identifier, JoinKind, Select};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::{
@@ -11,7 +11,8 @@ use serde::Serialize;
 
 use crate::answer::{Gap, GapReason};
 use crate::catalog::Catalog;
-use crate::relation::RelationName;
+use crate::dialect::Dialect;
+use crate::relation::{Name, RelationName};
 use crate::write::{Holder, Key};
 
 /// How a parent column reaches a child column, in the order in which one is kept when
@@ -187,17 +188,20 @@ pub struct Reach {
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`, which has `outputs` output columns, its
-    /// subqueries held as `holders` says, the keys that its joins merge `keys`, and the
-    /// lineage of its output columns `steps`, or none. A CTE is matched by its name as the
-    /// engine matches it, ignoring case.
-    pub fn of(
-        query: &Expression,
+    /// The reach of the clauses of `query`, parsed from `sql`, which has `outputs` output
+    /// columns, its subqueries held as `holders` says, the keys that its joins merge
+    /// `keys`, and the lineage of its output columns `steps`, or none. A CTE is matched by
+    /// its name under the dialect.
+    pub fn of<'q>(
+        sql: &str,
+        query: &'q Expression,
         outputs: usize,
         holders: Vec<(String, Option<Holder>)>,
         keys: Option<Vec<Key>>,
         steps: Vec<Option<LineageNode>>,
+        dialect: Dialect,
     ) -> Reach {
+        let sql: Vec<char> = sql.chars().collect();
         let limited = |select: &Select| {
             select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
         };
@@ -209,11 +213,9 @@ impl Reach {
             _ => (None, false),
         };
         let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
-        let named = |tree: &Expression| -> Vec<String> {
-            let one_part = |node: &Expression| match node {
-                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => {
-                    Some(table.name.name.to_ascii_lowercase())
-                }
+        let named = |tree: &'q Expression| -> Vec<&'q Identifier> {
+            let one_part = |node: &'q Expression| match node {
+                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&table.name),
                 _ => None,
             };
             tree.dfs().filter_map(one_part).collect()
@@ -222,13 +224,13 @@ impl Reach {
         // that it reads reads.
         let mut pending = named(query);
         for name in ctes.iter().flat_map(|cte| named(&cte.this)) {
-            if let Some(at) = pending.iter().position(|other| *other == name) {
+            if let Some(at) = pending.iter().position(|other| Name::same(other, name, &sql, dialect)) {
                 pending.swap_remove(at);
             }
         }
         let mut read = Vec::new();
         while let Some(name) = pending.pop() {
-            let cte = ctes.iter().position(|cte| cte.alias.name.eq_ignore_ascii_case(&name));
+            let cte = ctes.iter().position(|cte| Name::same(&cte.alias, name, &sql, dialect));
             if let Some(at) = cte.filter(|at| !read.contains(at)) {
                 read.push(at);
                 pending.extend(named(&ctes[at].this));

@@ -54,7 +54,9 @@ One JSON object, of which every object refuses a field that it does not name:
 
 Every name is SQL text, read under the dialect and normalised by its rules for quoting
 and case: in Snowflake, `orders` and `"ORDERS"` name one relation, and `"Orders"`
-another.
+another; in T-SQL, which compares names as SQL Server's default collation does,
+ignoring case whether they are delimited or not, `orders`, `[Orders]` and `"ORDERS"`
+name one relation.
 
 A request is refused as a whole, in this order, for more than 512 MiB; bytes that are
 not UTF-8; text that is not JSON; a `protocol` missing, not an integer, or not one

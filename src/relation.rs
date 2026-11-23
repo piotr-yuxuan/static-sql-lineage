@@ -6,7 +6,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use polyglot_sql::expressions::{Expression, Identifier, TableRef};
-use polyglot_sql::optimizer::normalize_identifiers::{get_normalization_strategy, normalize_identifier};
+use polyglot_sql::optimizer::normalize_identifiers::normalize_identifier;
 use polyglot_sql::parse_one;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -35,11 +35,10 @@ impl Name {
     /// an identifier that the parser made rather than read.
     pub fn of(identifier: &Identifier, sql: &[char], dialect: Dialect) -> Option<Name> {
         let span = identifier.span?;
-        let strategy = get_normalization_strategy(Some(dialect.polyglot()));
         Some(Name {
             spelling: sql.get(span.start..span.end)?.iter().collect(),
             text: identifier.name.clone(),
-            normalised: normalize_identifier(identifier.clone(), strategy).name,
+            normalised: normalize_identifier(identifier.clone(), dialect.strategy()).name,
         })
     }
 
@@ -47,6 +46,17 @@ impl Name {
     /// rule that ignores case, for the engine's reports alone.
     pub fn reported_as(&self, text: &str) -> bool {
         self.text.to_lowercase() == text.to_lowercase()
+    }
+
+    /// Whether `one` and `other`, two identifiers parsed from `sql`, are one name under the
+    /// dialect; never when either is one that the parser made rather than read.
+    pub fn same(one: &Identifier, other: &Identifier, sql: &[char], dialect: Dialect) -> bool {
+        Name::of(one, sql, dialect).is_some_and(|one| Name::of(other, sql, dialect) == Some(one))
+    }
+
+    /// The normalised form, quoted, so that the engine keeps it as it is.
+    pub fn quoted(&self) -> String {
+        format!("\"{}\"", self.normalised.replace('"', "\"\""))
     }
 }
 
@@ -127,10 +137,9 @@ impl RelationName {
         self != other && self.reported_as(&other.text)
     }
 
-    /// The parts, completed and normalised, each quoted, so that the engine keeps them
-    /// as they are.
+    /// The parts, completed, each as [`Name::quoted`] gives it.
     pub fn quoted(&self) -> Vec<String> {
-        self.parts.iter().map(|part| format!("\"{}\"", part.normalised.replace('"', "\"\""))).collect()
+        self.parts.iter().map(Name::quoted).collect()
     }
 }
 

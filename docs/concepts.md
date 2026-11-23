@@ -125,9 +125,9 @@ have. A reject scenario names an answer that must not be given.
 - home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
-  - `Write::query`: the write's query, or its refusal.
-  - `Write::relations`: the relations that the write's query reads.
-  - `Write::outputs`: the names of the write's output columns, unknown, or its refusal.
+  - `Write::query`: the query that a piece's text holds, or its refusal.
+  - `Write::relations`: the relations that a piece's query reads, as its text names them.
+  - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
@@ -271,7 +271,9 @@ have. A reject scenario names an answer that must not be given.
 
 - tier: kernel
 - means: the grammar, and the rules for quoting and case, under which every name and
-  every write of one request is read. One per request, and one of the build's.
+  every write of one request is read. One per request, and one of the build's. T-SQL's
+  rule for case is that of SQL Server's default collation: a name ignores case, whether
+  it is delimited or not; a database with another collation is not modelled.
 - not: the engine that parses it, polyglot-sql, which can be replaced behind the
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
@@ -280,9 +282,16 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::built`: the dialects that the build includes.
   - `Dialect::named`: a dialect of the build by its name.
   - `Dialect::polyglot`: the dialect as polyglot-sql names it.
+  - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
+  - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
+- accept `dialect.tsql-ignores-case`: dialect `tsql`; catalog `[dbo].[Orders]` with the
+  column `[OrderId]`; query `select orderid from dbo.orders`: the edge
+  `[dbo].[Orders].[OrderId] -> t.orderid`, `copy`; no gap.
+- reject `dialect.tsql-delimited-as-exact`: for that request, a refusal, as if
+  `[OrderId]` named only `OrderId` exactly.
 
 ## Derived terms
 

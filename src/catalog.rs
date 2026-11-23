@@ -52,13 +52,13 @@ impl Catalog {
 
     /// What the engine is told of the known relations among `relations`: each under its
     /// parts, quoted, and under its full name, which a `*` in a CTE needs, with its
-    /// columns as SQL text.
+    /// columns, each quoted as its parts are.
     pub fn schema(&self, relations: &[RelationName]) -> ValidationSchema {
         let tables: Vec<_> = (relations.iter().filter_map(|relation| self.get(relation)))
             .map(|(known, columns)| {
                 let quoted = known.quoted();
                 let mut parts = quoted.iter().rev();
-                let columns: Vec<_> = columns.iter().map(|column| json!({"name": column.to_string()})).collect();
+                let columns: Vec<_> = columns.iter().map(|column| json!({"name": column.quoted()})).collect();
                 json!({"name": parts.next(), "schema": parts.next(), "aliases": [quoted.join(".")], "columns": columns})
             })
             .collect();
