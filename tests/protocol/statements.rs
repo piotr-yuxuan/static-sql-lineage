@@ -375,3 +375,17 @@ fn set_with_a_qualified_target_is_read() {
     // A target that names no column, such as a tuple, is not read.
     assert_eq!(trace("snowflake", "update t set (a, b) = (select x, y from s)"), ["refused not_a_query"]);
 }
+
+#[test]
+fn a_column_listed_twice_is_refused() {
+    let statements = [
+        "insert into t (a, a) select x, y from s",
+        "update t set a = 1, a = 2",
+        "merge into t using s on t.k = s.k when matched then update set a = s.x, A = s.y",
+    ];
+    for sql in statements {
+        assert_eq!(trace("snowflake", sql), ["refused invalid"], "{sql}");
+    }
+    // A replace write's list names its output columns, which may not be named alike.
+    assert_eq!(trace("snowflake", "create view t (kk, KK) as select k, x from s"), ["refused duplicate_column"]);
+}

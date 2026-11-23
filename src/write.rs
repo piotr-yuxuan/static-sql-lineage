@@ -263,8 +263,8 @@ impl Write {
     }
 
     /// The names of the output columns of `query`, parsed from `sql`, as [`named`] gives
-    /// them, or `columns` onto which they map by position; refused when one is unnamed, or
-    /// two are named alike, or when they are not as many as `columns`.
+    /// them, or `columns` onto which they map by position; refused when they are not as
+    /// many as `columns`, or when one is unnamed, or two are named alike.
     pub fn outputs(
         sql: &str,
         query: &Expression,
@@ -278,14 +278,14 @@ impl Write {
             Ok(names) => names,
             Err(relation) => return Ok(Outputs::Unknown(relation)),
         };
-        match columns {
-            Some(columns) if columns.len() == names.len() => return Ok(Outputs::Named(columns.to_vec())),
+        let names = match columns {
+            Some(columns) if columns.len() == names.len() => columns.iter().cloned().map(Some).collect(),
             Some(columns) => {
                 let detail = format!("{} output columns for {} columns", names.len(), columns.len());
                 return Err(Refusal { reason: RefusalReason::Invalid, detail });
             }
-            None => {}
-        }
+            None => names,
+        };
         if let Some(place) = names.iter().position(Option::is_none) {
             let detail = format!("output column {} has no name", place + 1);
             return Err(Refusal { reason: RefusalReason::UnnamedColumn, detail });
@@ -694,7 +694,7 @@ fn name(expression: &Expression, sql: &[char], dialect: Dialect) -> Option<Name>
 /// The target's columns that `identifiers`, parsed from `sql`, name, as `known`, the
 /// target's columns, spells them, or as `sql` does when the target is unknown; or, for no
 /// identifier, every column of the target, unknown with it. Refused when one does not
-/// read as a name, or the target lacks one.
+/// read as a name, is named twice, or the target lacks one.
 fn columns<'a>(
     identifiers: impl IntoIterator<Item = &'a Identifier>,
     known: Option<&[Name]>,
@@ -705,6 +705,9 @@ fn columns<'a>(
     let named = identifiers.into_iter().map(|identifier| Name::of(identifier, sql, dialect));
     let unread = || refused("a column of its list does not read as a name".to_string());
     let named = named.collect::<Option<Vec<Name>>>().ok_or_else(unread)?;
+    if let Some(name) = repeated(&named) {
+        return Err(refused(format!("the statement names {name} twice")));
+    }
     if named.is_empty() {
         return Ok(known.map(<[Name]>::to_vec));
     }
