@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: EUPL-1.2
+# The Python of the release and its tests, as dbt-lsp-plus lints its own.
+line-length = 104
+# The runner's own Python runs the script in CD.
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "B", "C901"]
+
+[lint.mccabe]
+max-complexity = 10

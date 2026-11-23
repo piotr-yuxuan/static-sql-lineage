@@ -13,7 +13,9 @@
       shell = pkgs: pkgs.mkShellNoCC {
         packages = [
           pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.git pkgs.gnumake
-          # For the workflows.
+          # For the release script and its tests, and for the workflows.
+          pkgs.python3
+          pkgs.ruff
           pkgs.actionlint
         ];
       };
