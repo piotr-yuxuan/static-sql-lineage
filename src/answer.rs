@@ -86,14 +86,14 @@ impl Answer {
     ) -> (Answer, bool) {
         let answer =
             Answer { write: write.id.clone(), columns: None, edges: Vec::new(), gaps: Vec::new(), refusal: None };
-        let (_, replaces, pieces) = match write.pieces(target, catalog, dialect, defaults) {
+        let (found, replaces, pieces) = match write.pieces(target, catalog, dialect, defaults) {
             Ok(read) => read,
             Err(refusal) => {
                 let replaces = matches!(refusal.reason, RefusalReason::Unparsed);
                 return (answer.refused(refusal), replaces);
             }
         };
-        let mut answers = pieces.iter().map(|piece| Answer::of_piece(write, piece, catalog, dialect, defaults));
+        let mut answers = pieces.iter().map(|piece| Answer::of_piece(write, &found, piece, catalog, dialect, defaults));
         if replaces {
             return (answers.next().expect("a replace write is one piece"), true);
         }
@@ -124,9 +124,17 @@ impl Answer {
         (Answer { columns: known.map(|_| columns), edges, ..answer }.ended(gaps), false)
     }
 
-    /// The answer to `piece`, one of `write`'s, against `catalog`: its output columns, or
-    /// its target's columns onto which they map, its edges and its gaps, or its refusal.
-    pub fn of_piece(write: &Write, piece: &Piece, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Answer {
+    /// The answer to `piece`, one of `write`'s, whose target the statement names `target`,
+    /// against `catalog`: its output columns, or its target's columns onto which they map,
+    /// its edges and its gaps, or its refusal.
+    pub fn of_piece(
+        write: &Write,
+        target: &RelationName,
+        piece: &Piece,
+        catalog: &Catalog,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Answer {
         let answer =
             Answer { write: write.id.clone(), columns: None, edges: Vec::new(), gaps: Vec::new(), refusal: None };
         let sql = &piece.text;
@@ -216,7 +224,8 @@ impl Answer {
         let keys = Write::keys(sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&query, &holders, keys.as_deref(), &order, &schema, dialect);
         let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
-        let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog);
+        let own = piece.own.then_some(target);
+        let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog, own);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)
     }

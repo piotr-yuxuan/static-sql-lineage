@@ -191,3 +191,67 @@ fn a_with_before_a_statement_is_read() {
     }
     assert_eq!(trace("snowflake", "insert into t (k, a) (select k, x from s)"), ["s.k -> t.k copy", "s.x -> t.a copy"]);
 }
+
+#[test]
+fn update_copies_the_columns_it_sets() {
+    let answer = &respond(&writes("snowflake", &[("t", "update t set b = s.x, a = s.y from s")]))[0];
+    assert_eq!(answer["columns"], json!(["a", "b"]));
+    assert_eq!(outline(answer), ["s.y -> t.a copy", "s.x -> t.b copy"]);
+}
+
+#[test]
+fn update_from_decides_rows_of_the_columns_it_sets() {
+    let found = trace("snowflake", "update t set a = s.x, b = s.y from s where t.k = s.k and s.flag = 1");
+    let expected = [
+        "s.flag -> t.a rows",
+        "s.k -> t.a rows",
+        "s.x -> t.a copy",
+        "s.flag -> t.b rows",
+        "s.k -> t.b rows",
+        "s.y -> t.b copy",
+    ];
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn a_scalar_subquery_in_set_derives() {
+    let found = trace("snowflake", "update t set a = (select max(x) from s where s.k = t.k)");
+    assert_eq!(found, ["s.k -> t.a rows", "s.x -> t.a derive"]);
+}
+
+#[test]
+fn a_condition_on_the_targets_own_row_gives_no_edge() {
+    assert_eq!(trace("snowflake", "update t set a = s.x from s where t.b > 0"), ["s.x -> t.a copy"]);
+}
+
+#[test]
+fn a_value_from_the_targets_own_row_is_an_edge() {
+    assert_eq!(trace("snowflake", "update t set a = a + 1 where b > 0"), ["t.a -> t.a derive"]);
+    assert_eq!(trace("snowflake", "update t set b = a"), ["t.a -> t.b copy"]);
+}
+
+#[test]
+fn set_of_a_column_the_target_lacks_is_refused() {
+    assert_eq!(trace("snowflake", "update t set nope = s.x from s"), ["refused invalid"]);
+}
+
+#[test]
+fn tsql_update_through_an_alias_finds_its_target() {
+    let expected = ["s.k -> t.a rows", "s.x -> t.a copy"];
+    assert_eq!(trace("tsql", "update tt set a = s.x from t as tt join s on tt.k = s.k"), expected);
+    assert_eq!(trace("snowflake", "update t as tt set a = s.x from s where tt.k = s.k"), expected);
+}
+
+#[test]
+fn tsql_update_from_its_target_joined() {
+    assert_eq!(
+        trace("tsql", "update t set a = s.x from t join s on t.k = s.k"),
+        ["s.k -> t.a rows", "s.x -> t.a copy"]
+    );
+}
+
+#[test]
+fn tsql_with_before_an_update_is_read() {
+    let sql = "with c as (select k, x from s where flag = 1) update t set a = c.x from c where t.k = c.k";
+    assert_eq!(trace("tsql", sql), ["s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy"]);
+}
