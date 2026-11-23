@@ -378,6 +378,21 @@ why. Only the owner adds a line, through a plan.
   each, shorter than a function.
 - `request_in` and `requests.rs`'s two refusals of a dialect: those tests write the
   field they test.
+- The edges of `Walk::printed`'s JSON and the serialisation of `Edge`: the walk names an
+  edge's three fields beside its writes and depth, a line shorter than the edge
+  serialised with two fields set.
+- The empty answers of `Answer::of` and `Answer::of_piece`: one literal each, shorter
+  than a function; a `Default` would let any module answer no write.
+- The matches of `named`, `with` and `Reach::of` on a query's kinds: polyglot-sql's
+  `Union`, `Intersect` and `Except` are three types, and each match reads another field
+  beside the `WITH`: the left branch, the limit, the `WITH` to set.
+- The patterns of a query in `Write::read` and `Write::query`: one pattern each, where a
+  shared test would add a guard to each; the statement's takes a parenthesised query
+  whole.
+- `Name::reported_as` and `RelationName::reported_as`: one rule over each type's text as
+  written, a line each, where a function that both call would add three.
+- The catalogs of `case` and `merge` in `tests/protocol/cases.rs`, each built from
+  `RELATIONS`: one line each, shorter than a function.
 
 ## Not yet modelled
 
