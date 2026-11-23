@@ -15,7 +15,7 @@ use crate::answer::{Gap, GapReason, spelled};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName};
-use crate::write::{Holder, Key};
+use crate::write::{Holder, Key, scope_steps};
 
 /// How a parent column reaches a child column, in the order in which one is kept when
 /// several apply.
@@ -267,25 +267,21 @@ impl Reach {
     /// reads. A use in a subquery reaches what the subquery's holder does.
     pub fn rows(&self, path: &str, context: ColumnUseContext) -> Option<Vec<usize>> {
         let tuple = |(subquery, holder): &(String, Option<Holder>)| {
-            subquery.rsplit_once('.').is_some_and(|(parent, _)| parent == path)
+            scope_steps(subquery).last().is_some_and(|(parent, ..)| parent == path)
                 && matches!(holder, Some(Holder::Tuple(tuple)) if *tuple == context)
         };
-        let steps = path.strip_prefix("root").and_then(|steps| {
-            match steps.strip_prefix(".ctes[").and_then(|rest| rest.split_once(']')) {
-                Some((at, rest)) => at.parse().ok().filter(|at| self.read.contains(at)).map(|_| rest),
-                None => Some(steps),
-            }
-        });
+        // A step of a CTE that the outermost query reads first, then of derived tables and branches.
         let placed = !self.holders.iter().any(tuple)
-            && steps.is_some_and(|steps| {
-                steps.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
+            && scope_steps(path).enumerate().all(|(at, step)| match step {
+                (_, "ctes", cte) => at == 0 && self.read.contains(&cte),
+                (_, kind, _) => ["derived", "branches"].contains(&kind),
             });
         // What a subquery at the path `subquery`, in the scope at `parent`, reaches: what a
         // use of its clause there does; the output column at its place in the select list
         // of the outermost query or a branch; the output columns whose lineage passes
         // through its column in the select list of a CTE or a derived table.
-        let held = |parent: &str, subquery: &str| -> Option<Vec<usize>> {
-            let (_, holder) = self.holders.iter().find(|(path, _)| path == subquery)?;
+        let held = |step @ (parent, ..): (&str, &str, usize)| -> Option<Vec<usize>> {
+            let (_, holder) = self.holders.iter().find(|(path, _)| scope_steps(path).last() == Some(step))?;
             match holder.as_ref()? {
                 Holder::Clause(context) => self.rows(parent, *context),
                 Holder::Tuple(_) => None,
@@ -308,8 +304,8 @@ impl Reach {
             | ColumnUseContext::AggregateOrder => Some(Vec::new()),
             ColumnUseContext::Order if !self.limited => Some(Vec::new()),
             ColumnUseContext::Order => (self.outermost && path == "root").then(|| self.every.clone()),
-            _ => match path.find(".subqueries[") {
-                Some(at) => held(&path[..at], &path[..at + path[at..].find(']')? + 1]),
+            _ => match scope_steps(path).find(|(_, kind, _)| *kind == "subqueries") {
+                Some(step) => held(step),
                 None => placed.then(|| self.every.clone()),
             },
         }

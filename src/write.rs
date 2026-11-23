@@ -392,13 +392,13 @@ impl Write {
         // rows by its select list.
         let filters = |path: &str| {
             let filtered = |scope: &Scope| matches!(query_of(scope), Expression::Intersect(_) | Expression::Except(_));
-            let set = |at: usize| all.iter().any(|(parent, scope, _)| *parent == path[..at] && filtered(scope));
-            path.match_indices(".branches[1]").any(|(at, _)| set(at))
+            let set = |prefix: &str| all.iter().any(|(parent, scope, _)| parent == prefix && filtered(scope));
+            scope_steps(path).filter(|&(_, kind, at)| (kind, at) == ("branches", 1)).any(|(prefix, ..)| set(prefix))
         };
         let mut found = Vec::new();
         for (path, scope, owner) in &all {
             let Expression::Select(select) = query_of(scope) else { continue };
-            if path.contains(".subqueries[") || path.contains(".udtfs[") {
+            if scope_steps(path).any(|(_, kind, _)| ["subqueries", "udtfs"].contains(&kind)) {
                 continue;
             }
             // In the select list, the output column at its place or, in a CTE or a
@@ -444,9 +444,10 @@ impl Write {
                     held.filter(move |(_, query)| seen.insert(*query as *const Expression))
                 })
                 .collect();
-            found.extend(scope.subquery_scopes.iter().enumerate().map(|(at, subquery)| {
-                let holder = held.get(at).filter(|(_, query)| **query == subquery.expression);
-                (format!("{path}.subqueries[{at}]"), holder.and_then(|(holder, _)| holder.clone()))
+            found.extend(all.iter().filter_map(|(subquery, Scope { expression, .. }, _)| {
+                let (parent, kind, at) = scope_steps(subquery).last()?;
+                let holder = held.get(at).and_then(|(holder, query)| holder.clone().filter(|_| *query == expression));
+                ((parent, kind) == (path.as_str(), "subqueries")).then(|| (subquery.clone(), holder))
             }));
         }
         found
@@ -485,7 +486,7 @@ impl Write {
             if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
                 continue;
             }
-            let placed = !["subqueries[", "udtfs[", "branches["].iter().any(|kind| path.contains(kind));
+            let placed = !scope_steps(&path).any(|(_, kind, _)| ["subqueries", "udtfs", "branches"].contains(&kind));
             let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
             // Each column of the list with each column of the sources that it reads bare, and
             // whether an expression around it computes the column.
@@ -618,6 +619,13 @@ fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &
         found.push((path, scope, owner));
     }
     found
+}
+
+/// The steps of `path`, a scope's path as [`scopes`] writes it, each its kind and its
+/// index, after the path up to it.
+pub fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
+    let steps = path.match_indices('.').map(move |(at, _)| (&path[..at], path[at + 1..].split(['[', ']'])));
+    steps.filter_map(|(prefix, mut step)| Some((prefix, step.next()?, step.next()?.parse().ok()?)))
 }
 
 /// The columns of the sources of `select`, as [`named`] gives them, each with the places
