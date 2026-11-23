@@ -77,3 +77,8 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - A subquery in `VALUES`, as in `insert into t values (1, (select max(x) from s))`, reads
   a relation, which the Write entry's *not*, "a statement that reads no relation",
   overlooks; it is refused `not_a_query`. Class: a defect of the definition.
+- Under Snowflake, a quoted name that differs from a CTE's only by case or quotes, as
+  `"c"` beside `with c as (...)`, names another relation, but polyglot-sql's lineage
+  matches CTE names ignoring ASCII case, so a write that reads `"c"` while the catalog
+  declares it may take the CTE's columns as its parents, with no gap. Class: a defect of
+  the code.
