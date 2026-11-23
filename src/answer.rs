@@ -77,11 +77,11 @@ impl Answer {
     pub fn of(write: &Write, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Answer {
         let answer =
             Answer { write: write.id.clone(), columns: None, edges: Vec::new(), gaps: Vec::new(), refusal: None };
-        let query = match write.query(dialect) {
+        let query = match Write::query(&write.sql, dialect) {
             Ok(query) => query,
             Err(refusal) => return answer.refused(refusal),
         };
-        let relations = &write.relations(&query, dialect, defaults);
+        let relations = &Write::relations(&write.sql, &query, dialect, defaults);
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
         let mut gaps: Vec<Gap> = (unknown.into_iter())
             .map(|relation| Gap {
@@ -99,7 +99,7 @@ impl Answer {
         if !errors.is_empty() {
             return answer.refused(Refusal { reason: RefusalReason::Invalid, detail: errors.join("; ") });
         }
-        let outputs = match write.outputs(&query, catalog, dialect, defaults) {
+        let outputs = match Write::outputs(&write.sql, &query, catalog, dialect, defaults) {
             Ok(Outputs::Named(outputs)) => outputs,
             Ok(Outputs::Unknown(relation)) => {
                 gaps.push(Gap { relation, ..Gap::of(GapReason::Wildcard, None, "the columns of a * are unknown") });
@@ -159,8 +159,8 @@ impl Answer {
         }
         let children: Vec<End> =
             outputs.iter().map(|output| End { relation: write.target.clone(), column: output.to_string() }).collect();
-        let holders = write.holders(&query, dialect);
-        let keys = write.keys(&query, catalog, dialect, defaults);
+        let holders = Write::holders(&write.sql, &query, dialect);
+        let keys = Write::keys(&write.sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&query, &holders, keys.as_deref(), &order, &schema, dialect);
         let reach = Reach::of(&query, outputs.len(), holders, keys, steps);
         let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog);

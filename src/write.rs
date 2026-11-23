@@ -62,10 +62,10 @@ pub struct Key {
 }
 
 impl Write {
-    /// The write's query, the outermost one when it is parenthesised, as the engine
-    /// reads it; refused when it is not one statement, or not a query.
-    pub fn query(&self, dialect: Dialect) -> Result<Expression, Refusal> {
-        let parsed = parse_one(&self.sql, dialect.polyglot())
+    /// The query that `sql` holds, the outermost one when it is parenthesised, as the
+    /// engine reads it; refused when it is not one statement, or not a query.
+    pub fn query(sql: &str, dialect: Dialect) -> Result<Expression, Refusal> {
+        let parsed = parse_one(sql, dialect.polyglot())
             .map_err(|error| Refusal { reason: RefusalReason::Unparsed, detail: error.to_string() })?;
         match parsed {
             Expression::Subquery(subquery) if subquery.alias.is_none() => Ok(subquery.this),
@@ -77,11 +77,12 @@ impl Write {
         }
     }
 
-    /// The relations that `query` reads: its table references that name no CTE in scope,
-    /// as the engine scopes them, and those that Snowflake's `IDENTIFIER` names by its one
-    /// string literal in a `FROM` or a join, ordered by their spelling.
-    pub fn relations(&self, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
-        let sql: Vec<char> = self.sql.chars().collect();
+    /// The relations that `query`, parsed from `sql`, reads: its table references that
+    /// name no CTE in scope, as the engine scopes them, and those that Snowflake's
+    /// `IDENTIFIER` names by its one string literal in a `FROM` or a join, ordered by their
+    /// spelling.
+    pub fn relations(sql: &str, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
+        let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let scoped = scopes(&root, &sql, dialect).into_iter().flat_map(|(_, scope, _)| scope.sources.values());
         let mut relations: Vec<RelationName> = (scoped.filter_map(|source| match (&source.kind, &source.expression) {
@@ -112,16 +113,16 @@ impl Write {
         relations
     }
 
-    /// The names of `query`'s output columns, as [`named`] gives them; refused when one
-    /// is unnamed, or two are named alike.
+    /// The names of the output columns of `query`, parsed from `sql`, as [`named`] gives
+    /// them; refused when one is unnamed, or two are named alike.
     pub fn outputs(
-        &self,
+        sql: &str,
         query: &Expression,
         catalog: &Catalog,
         dialect: Dialect,
         defaults: &[Name],
     ) -> Result<Outputs, Refusal> {
-        let sql: Vec<char> = self.sql.chars().collect();
+        let sql: Vec<char> = sql.chars().collect();
         let names = match named(query, &[], &sql, catalog, dialect, defaults) {
             Ok(names) => names,
             Err(relation) => return Ok(Outputs::Unknown(relation)),
@@ -138,15 +139,16 @@ impl Write {
         Ok(Outputs::Named(names))
     }
 
-    /// Each subquery of `query` that no subquery holds, by the scope path that the engine
-    /// gives it, with its holder; none for one that the engine numbers otherwise, or that
-    /// follows a `*` in its select list, where its place would count the `*` as one. The
-    /// engine numbers the subqueries of a `SELECT` by its `collect_subqueries`: the fields
-    /// that hold them, in the order of its struct, each walked by `walk_in_scope`, finding a
-    /// `Subquery` with no alias, the query of `EXISTS` and of `IN`, and that of `ANY` and
-    /// `ALL` twice, as a quantifier's and as a `Subquery`.
-    pub fn holders(&self, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
-        let sql: Vec<char> = self.sql.chars().collect();
+    /// Each subquery of `query`, parsed from `sql`, that no subquery holds, by the scope
+    /// path that the engine gives it, with its holder; none for one that the engine numbers
+    /// otherwise, or that follows a `*` in its select list, where its place would count the
+    /// `*` as one. The engine numbers the subqueries of a `SELECT` by its
+    /// `collect_subqueries`: the fields that hold them, in the order of its struct, each
+    /// walked by `walk_in_scope`, finding a `Subquery` with no alias, the query of `EXISTS`
+    /// and of `IN`, and that of `ANY` and `ALL` twice, as a quantifier's and as a
+    /// `Subquery`.
+    pub fn holders(sql: &str, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
+        let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let all = scopes(&root, &sql, dialect);
         // A branch that filters an `INTERSECT` or an `EXCEPT`, or a branch of one, decides
@@ -213,12 +215,18 @@ impl Write {
         found
     }
 
-    /// The keys that the joins of `query` merge in each of its `SELECT`s, selected bare,
-    /// aliased or not, through a `*`, or read bare by an expression of its select list;
-    /// none when a join merges a key among sources whose columns are unknown, where its
-    /// keys are not told.
-    pub fn keys(&self, query: &Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Option<Vec<Key>> {
-        let sql: Vec<char> = self.sql.chars().collect();
+    /// The keys that the joins of `query`, parsed from `sql`, merge in each of its
+    /// `SELECT`s, selected bare, aliased or not, through a `*`, or read bare by an
+    /// expression of its select list; none when a join merges a key among sources whose
+    /// columns are unknown, where its keys are not told.
+    pub fn keys(
+        sql: &str,
+        query: &Expression,
+        catalog: &Catalog,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Option<Vec<Key>> {
+        let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let ctes: Vec<&Cte> = (root.cte_scopes.iter())
             .filter_map(|cte| match &cte.expression {
