@@ -581,9 +581,7 @@ fn named<'a>(
             Expression::Except(set) => (&set.with, &set.left),
             Expression::Subquery(subquery) if subquery.column_aliases.is_empty() => (&None, &subquery.this),
             Expression::Table(table) if table.column_aliases.is_empty() => {
-                let cte = ctes
-                    .iter()
-                    .rposition(|cte| table.schema.is_none() && cte.alias.name.eq_ignore_ascii_case(&table.name.name));
+                let cte = ctes.iter().rposition(|cte| table.schema.is_none() && Name::same(&cte.alias, &table.name));
                 let Some(at) = cte else {
                     let relation = RelationName::of(table, sql, dialect, defaults).ok_or(None)?;
                     let (_, columns) = catalog.get(&relation).ok_or_else(|| Some(relation.to_string()))?;
@@ -626,11 +624,9 @@ fn listed<'a>(
                 .collect(),
             Some(qualifier) => {
                 let called = |(_, source): &(Option<usize>, &Expression)| match source {
-                    Expression::Table(table) => {
-                        table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
-                    }
+                    Expression::Table(table) => Name::same(table.alias.as_ref().unwrap_or(&table.name), qualifier),
                     Expression::Subquery(subquery) => {
-                        subquery.alias.as_ref().is_some_and(|alias| alias.name.eq_ignore_ascii_case(&qualifier.name))
+                        subquery.alias.as_ref().is_some_and(|alias| Name::same(alias, qualifier))
                     }
                     _ => false,
                 };

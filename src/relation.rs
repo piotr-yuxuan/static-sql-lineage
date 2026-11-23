@@ -48,6 +48,12 @@ impl Name {
         self.text.to_lowercase() == text.to_lowercase()
     }
 
+    /// Whether `one` and `other`, two identifiers parsed from a write's SQL, are one
+    /// name, as the engine's scopes match a CTE's: ignoring ASCII case.
+    pub fn same(one: &Identifier, other: &Identifier) -> bool {
+        one.name.eq_ignore_ascii_case(&other.name)
+    }
+
     /// The normalised form, quoted, so that the engine keeps it as it is.
     pub fn quoted(&self) -> String {
         format!("\"{}\"", self.normalised.replace('"', "\"\""))
