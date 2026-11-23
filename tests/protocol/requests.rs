@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, outline, read, request, respond};
+use super::{answers, assert_refused, outlines, read, request, respond};
 
 /// A valid request: the catalog `s` of the column `a`, and the write `t`.
 fn valid() -> Value {
@@ -170,7 +170,7 @@ fn two_writes_with_one_target_are_read_in_order() {
         [json!("t"), json!("t.insert")]
     );
     // The insert maps onto the columns that the table, read first, gave its target.
-    assert_eq!(answers.iter().map(outline).collect::<Vec<_>>(), [vec!["s.a -> t.a copy"], vec!["u.b -> T.a copy"]]);
+    assert_eq!(outlines(&request), [vec!["s.a -> t.a copy"], vec!["u.b -> T.a copy"]]);
 }
 
 #[test]

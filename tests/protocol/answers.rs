@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use super::{answers, assert_refused, outline, request, request_in, respond, trace, trace_in};
+use super::{answers, assert_refused, outline, outlines, request, request_in, respond, trace, trace_in};
 
 #[test]
 fn columns_name_a_write_with_no_edge() {
@@ -84,11 +84,7 @@ fn tsql_a_view_read_by_another_spelling_is_known() {
         ("[dbo].[vOrders]", "create view dbo.vorders as select [OrderId], amount as [Total] from dbo.orders"),
         ("u", "select orderid, TOTAL from DBO.VORDERS"),
     ];
-    let found: Vec<Vec<String>> =
-        respond(&request_in("tsql", &[("[dbo].[Orders]", &["[OrderId]", "[Amount]"])], &writes))
-            .iter()
-            .map(outline)
-            .collect();
+    let found = outlines(&request_in("tsql", &[("[dbo].[Orders]", &["[OrderId]", "[Amount]"])], &writes));
     let view = [
         "[dbo].[Orders].[OrderId] -> [dbo].[vOrders].[OrderId] copy",
         "[dbo].[Orders].[Amount] -> [dbo].[vOrders].[Total] copy",

@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 
-use super::{outline, request_in, respond, trace_in};
+use super::{outline, outlines, request_in, respond, trace_in};
 
 /// The probe's relations: `s` and `u` read, `t` the target of most writes.
 const CATALOG: &[(&str, &[&str])] = &[("s", &["k", "x", "y", "flag"]), ("u", &["k", "z"]), ("t", &["k", "a", "b"])];
@@ -19,7 +19,7 @@ fn writes(dialect: &str, writes: &[(&str, &str)]) -> Value {
 
 /// The outline of each answer to `writes` in `dialect`.
 fn traced(dialect: &str, writes: &[(&str, &str)]) -> Vec<Vec<String>> {
-    respond(&self::writes(dialect, writes)).iter().map(outline).collect()
+    outlines(&self::writes(dialect, writes))
 }
 
 /// The outline of the answer to `sql`, its target `t`, in `dialect` against `CATALOG`.

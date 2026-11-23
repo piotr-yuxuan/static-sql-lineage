@@ -96,6 +96,11 @@ fn outline(answer: &Value) -> Vec<String> {
     edges.chain(gaps).chain(refusal).collect()
 }
 
+/// The outline of each answer to `request`.
+fn outlines(request: &Value) -> Vec<Vec<String>> {
+    respond(request).iter().map(outline).collect()
+}
+
 /// The outline of the answer to `sql` against `catalog` in `dialect`, its target `t`.
 fn trace_in(dialect: &str, catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
     outline(&respond(&request_in(dialect, catalog, &[("t", sql)]))[0])

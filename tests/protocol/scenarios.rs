@@ -5,7 +5,9 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, lines, outline, printed_json, request, request_in, respond, trace, trace_in};
+use super::{
+    answers, assert_refused, lines, outline, outlines, printed_json, request, request_in, respond, trace, trace_in,
+};
 
 const CTE: &str = "with orders as (select id from raw.orders) select id from orders";
 
@@ -23,8 +25,7 @@ fn completed() -> Vec<String> {
 
 /// The two answers of `answer.refusal-spreads`.
 fn spread() -> Vec<Vec<String>> {
-    let request = request(&[("s", &["a"]), ("t", &["a"])], &[("t", "select nope from s"), ("u", "select a from t")]);
-    respond(&request).iter().map(outline).collect()
+    outlines(&request(&[("s", &["a"]), ("t", &["a"])], &[("t", "select nope from s"), ("u", "select a from t")]))
 }
 
 /// The request of `dialect.not-built`.
@@ -92,7 +93,7 @@ fn column_defined_through_star() {
 /// The two answers of `write.contribute-keeps-columns`.
 fn contributed() -> Vec<Vec<String>> {
     let writes = [("t", "insert into t (a) select x from s"), ("u", "create view u as select a, b from t")];
-    respond(&request(&[("t", &["a", "b"]), ("s", &["x"])], &writes)).iter().map(outline).collect()
+    outlines(&request(&[("t", &["a", "b"]), ("s", &["x"])], &writes))
 }
 
 #[test]
