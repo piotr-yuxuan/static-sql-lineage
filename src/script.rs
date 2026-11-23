@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Defaults, Name, RelationName};
-use crate::write::{Place, Write, nesting};
+use crate::write::{Place, Write, nesting, word};
 
 /// The first words of T-SQL's statements, before which a window may end; not `WITH`, which
 /// also starts a table hint.
@@ -173,11 +173,7 @@ impl Script {
         let tsql = dialect == Dialect::Tsql;
         // Whether `token` is one of T-SQL's first words of statements.
         let opens = |token: &Token| {
-            let word = !matches!(
-                token.token_type,
-                TokenType::QuotedIdentifier | TokenType::String | TokenType::NationalString
-            );
-            tsql && word && CUTS.split(' ').any(|cut| token.text.eq_ignore_ascii_case(cut))
+            tsql && word(token).is_some_and(|word| CUTS.split(' ').any(|cut| word.eq_ignore_ascii_case(cut)))
         };
         let breaks: Vec<usize> = (0..tokens.len()).filter(|&at| first(at)).chain([tokens.len()]).collect();
         let lines: Vec<Range<usize>> = breaks.windows(2).map(|pair| pair[0]..pair[1]).collect();
@@ -417,9 +413,7 @@ impl Script {
 /// every place are kept.
 fn parse(text: &str, dialect: Dialect) -> Result<Expression, polyglot_sql::Error> {
     let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(text).unwrap_or_default();
-    let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
-    let word =
-        |token: &Token| if quoted.contains(&token.token_type) { String::new() } else { token.text.to_uppercase() };
+    let word = |token: &Token| word(token).map_or_else(String::new, str::to_uppercase);
     // Each token's depth outside its own parentheses.
     let mut depth = 0;
     let depths: Vec<i32> = (tokens.iter())

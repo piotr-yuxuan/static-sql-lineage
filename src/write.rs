@@ -557,11 +557,7 @@ impl Write {
     /// each word of [`CLAUSES`]. Words in strings and quoted names are none.
     pub fn clauses(sql: &str, dialect: Dialect) -> Vec<(String, usize)> {
         let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(sql).unwrap_or_default();
-        let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
-        let word = |at: usize| {
-            let token = tokens.get(at).filter(|token| !quoted.contains(&token.token_type));
-            token.map_or_else(String::new, |token| token.text.to_uppercase())
-        };
+        let word = |at: usize| tokens.get(at).and_then(word).map_or_else(String::new, str::to_uppercase);
         let (mut depth, mut cases, mut found) = (0, 0, Vec::new());
         for (at, token) in tokens.iter().enumerate() {
             let (here, before) = (word(at), at.checked_sub(1).map(word).unwrap_or_default());
@@ -854,17 +850,15 @@ fn view_columns(
     let after = view.name.span.map_or(0, |span| span.end);
     let (mut depth, mut opens, mut names) = (0, false, Vec::new());
     for token in tokens.iter().filter(|token| token.span.start >= after) {
-        match token.token_type {
-            TokenType::LParen => depth += 1,
-            TokenType::RParen if depth == 1 => break,
-            TokenType::RParen => depth -= 1,
-            _ if opens => {
-                let quoted = token.token_type == TokenType::QuotedIdentifier;
-                let span = Some(token.span);
-                let identifier = Identifier { name: token.text.clone(), quoted, trailing_comments: Vec::new(), span };
-                names.push(Name::of(&identifier, &chars, dialect).ok_or_else(|| refused(token.text.clone()))?);
-            }
-            _ => {}
+        depth += nesting(token);
+        if depth == 0 && token.token_type == TokenType::RParen {
+            break;
+        }
+        if opens && nesting(token) == 0 {
+            let quoted = token.token_type == TokenType::QuotedIdentifier;
+            let span = Some(token.span);
+            let identifier = Identifier { name: token.text.clone(), quoted, trailing_comments: Vec::new(), span };
+            names.push(Name::of(&identifier, &chars, dialect).ok_or_else(|| refused(token.text.clone()))?);
         }
         opens = depth == 1 && matches!(token.token_type, TokenType::LParen | TokenType::Comma);
     }
@@ -957,4 +951,11 @@ fn with(mut query: Expression, with: Option<With>) -> Expression {
 /// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
 pub fn nesting(token: &Token) -> i32 {
     i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
+}
+
+/// The text of `token` as a word of SQL; none for a quoted name, a string or a national
+/// string, whose text is no word.
+pub fn word(token: &Token) -> Option<&str> {
+    let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
+    (!quoted.contains(&token.token_type)).then_some(token.text.as_str())
 }
