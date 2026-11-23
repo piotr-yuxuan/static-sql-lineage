@@ -8,8 +8,13 @@ use std::process::{Command, Output};
 
 use serde_json::{Value, json};
 
+/// The command that runs the built binary.
+fn binary() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_sql-lineage"))
+}
+
 fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_sql-lineage")).args(arguments).output().expect("the binary runs")
+    binary().args(arguments).output().expect("the binary runs")
 }
 
 fn read(path: &str) -> String {
