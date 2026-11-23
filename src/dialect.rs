@@ -30,9 +30,10 @@ impl Dialect {
         .collect()
     }
 
-    /// The dialect of this build that `--describe` spells `name`, if any.
-    pub fn named(name: &str) -> Option<Dialect> {
-        Dialect::built().into_iter().find(|dialect| serde_json::json!(dialect) == name)
+    /// The dialect of this build that `--describe` spells `name`, or why there is none.
+    pub fn named(name: &str) -> Result<Dialect, String> {
+        let named = Dialect::built().into_iter().find(|dialect| serde_json::json!(dialect) == name);
+        named.ok_or_else(|| format!("the dialect {name:?} is not one of this build's: {:?}", Dialect::built()))
     }
 
     /// The dialect as polyglot-sql names it.

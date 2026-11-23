@@ -4,9 +4,9 @@
 //! names of T-SQL, which compare as SQL Server's default collation compares them,
 //! ignoring case, bare or delimited.
 
-use serde_json::{Value, json};
+use serde_json::json;
 
-use super::{answers, assert_refused, outline, request, respond, trace};
+use super::{answers, assert_refused, outline, outlines, request, request_in, respond, trace, trace_in};
 
 #[test]
 fn columns_name_a_write_with_no_edge() {
@@ -51,18 +51,6 @@ fn a_quoted_relation_is_completed_by_defaults() {
     assert_eq!(outline(&respond(&request)[0]), ["db.s.\"Orders\".id -> t.id copy"]);
 }
 
-/// A request in T-SQL of `catalog` and `writes`, as [`request`] builds one.
-fn tsql(catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
-    let mut request = request(catalog, writes);
-    request["dialect"] = json!("tsql");
-    request
-}
-
-/// The outline of the answer to `sql` against `catalog` in T-SQL, its target `t`.
-fn traced(catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
-    outline(&respond(&tsql(catalog, &[("t", sql)]))[0])
-}
-
 #[test]
 fn tsql_names_ignore_case_delimited_or_not() {
     let cases = [
@@ -74,7 +62,7 @@ fn tsql_names_ignore_case_delimited_or_not() {
         ("\"orderid\"", "[OrderID]"),
     ];
     for (declared, read) in cases {
-        let found = traced(&[("s", &[declared])], &format!("select {read} as x from s"));
+        let found = trace_in("tsql", &[("s", &[declared])], &format!("select {read} as x from s"));
         assert_eq!(found, [format!("s.{declared} -> t.x copy")], "{declared} read as {read}");
     }
 }
@@ -82,10 +70,10 @@ fn tsql_names_ignore_case_delimited_or_not() {
 #[test]
 fn tsql_relations_ignore_case_delimited_or_not() {
     for relation in ["dbo.customer", "[DBO].[CUSTOMER]", "\"dbo\".\"customer\"", "Dbo.[customer]"] {
-        let found = traced(&[("[dbo].[Customer]", &["Id"])], &format!("select id from {relation}"));
+        let found = trace_in("tsql", &[("[dbo].[Customer]", &["Id"])], &format!("select id from {relation}"));
         assert_eq!(found, ["[dbo].[Customer].Id -> t.id copy"], "{relation}");
     }
-    let mut request = tsql(&[("[Sales].[dbo].[Customer]", &["Id"])], &[("t", "select id from CUSTOMER")]);
+    let mut request = request_in("tsql", &[("[Sales].[dbo].[Customer]", &["Id"])], &[("t", "select id from CUSTOMER")]);
     request["defaults"] = json!({"database": "sales", "schema": "[DBO]"});
     assert_eq!(outline(&respond(&request)[0]), ["[Sales].[dbo].[Customer].Id -> t.id copy"]);
 }
@@ -96,8 +84,7 @@ fn tsql_a_view_read_by_another_spelling_is_known() {
         ("[dbo].[vOrders]", "create view dbo.vorders as select [OrderId], amount as [Total] from dbo.orders"),
         ("u", "select orderid, TOTAL from DBO.VORDERS"),
     ];
-    let found: Vec<Vec<String>> =
-        respond(&tsql(&[("[dbo].[Orders]", &["[OrderId]", "[Amount]"])], &writes)).iter().map(outline).collect();
+    let found = outlines(&request_in("tsql", &[("[dbo].[Orders]", &["[OrderId]", "[Amount]"])], &writes));
     let view = [
         "[dbo].[Orders].[OrderId] -> [dbo].[vOrders].[OrderId] copy",
         "[dbo].[Orders].[Amount] -> [dbo].[vOrders].[Total] copy",
@@ -108,9 +95,9 @@ fn tsql_a_view_read_by_another_spelling_is_known() {
 
 #[test]
 fn tsql_declarations_alike_but_for_case_are_refused() {
-    let relations = tsql(&[("[dbo].[T]", &["a"]), ("dbo.t", &["b"])], &[("u", "select a from dbo.t")]);
+    let relations = request_in("tsql", &[("[dbo].[T]", &["a"]), ("dbo.t", &["b"])], &[("u", "select a from dbo.t")]);
     assert_refused(&answers(relations.to_string().as_bytes()), "dbo.t twice");
-    let columns = tsql(&[("[dbo].[T]", &["[A]", "a"])], &[("u", "select a from dbo.t")]);
+    let columns = request_in("tsql", &[("[dbo].[T]", &["[A]", "a"])], &[("u", "select a from dbo.t")]);
     assert_refused(&answers(columns.to_string().as_bytes()), "a twice");
 }
 
@@ -121,7 +108,7 @@ fn tsql_a_string_alias_is_a_name() {
         ("with c as (select a 'Total' from s) select TOTAL from c", "TOTAL"),
         ("select x.total from (select a as 'Total' from s) as x", "total"),
     ] {
-        assert_eq!(traced(&[("s", &["a"])], sql), [format!("s.a -> t.{child} copy")], "{sql}");
+        assert_eq!(trace_in("tsql", &[("s", &["a"])], sql), [format!("s.a -> t.{child} copy")], "{sql}");
     }
 }
 
@@ -132,20 +119,21 @@ fn tsql_a_table_alias_of_another_case_is_resolved() {
         "select [X].a, x.b from s as x",
         "select q.a, Q.b from (select a, b from s) as [Q]",
     ] {
-        assert_eq!(traced(&[("s", &["a", "b"])], sql), ["s.a -> t.a copy", "s.b -> t.b copy"], "{sql}");
+        assert_eq!(trace_in("tsql", &[("s", &["a", "b"])], sql), ["s.a -> t.a copy", "s.b -> t.b copy"], "{sql}");
     }
 }
 
 #[test]
 fn tsql_a_cte_named_in_another_case_is_read() {
     let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
-    let literal = &respond(&tsql(catalog, &[("t", "with [Été] as (select 1 as x) select x from été")]))[0];
+    let literal =
+        &respond(&request_in("tsql", catalog, &[("t", "with [Été] as (select 1 as x) select x from été")]))[0];
     assert_eq!(literal["columns"], json!(["x"]));
     assert!(outline(literal).is_empty(), "{literal}");
     let starred = "with [Été] as (select a from s) select [été].* from [Été]";
-    assert_eq!(traced(catalog, starred), ["s.a -> t.a copy"]);
+    assert_eq!(trace_in("tsql", catalog, starred), ["s.a -> t.a copy"]);
     let filtered = "with [Été] as (select a from s where b > 0) select a from été";
-    assert_eq!(traced(catalog, filtered), ["s.a -> t.a copy", "s.b -> t.a rows"]);
+    assert_eq!(trace_in("tsql", catalog, filtered), ["s.a -> t.a copy", "s.b -> t.a rows"]);
 }
 
 #[test]
@@ -154,7 +142,11 @@ fn tsql_a_filter_branch_in_a_cte_reads_bracketed_names() {
     // polyglot-sql's lineage of the piece's own text does not follow `x` to `[X]`.
     for reader in ["select amount from c", "select x.amount from c as [X]"] {
         let sql = format!("with c as (select [Amount] from s intersect select [Amount] from u) {reader}");
-        assert_eq!(traced(catalog, &sql), ["s.[Amount] -> t.amount copy", "u.[Amount] -> t.amount rows"], "{reader}");
+        assert_eq!(
+            trace_in("tsql", catalog, &sql),
+            ["s.[Amount] -> t.amount copy", "u.[Amount] -> t.amount rows"],
+            "{reader}"
+        );
     }
 }
 
@@ -162,7 +154,7 @@ fn tsql_a_filter_branch_in_a_cte_reads_bracketed_names() {
 fn tsql_edges_keep_their_spellings() {
     let catalog: &[(&str, &[&str])] = &[("[dbo].[Orders]", &["[OrderId]", "Amount"])];
     let writes = [("t", "select ORDERID as [Id], [amount] from DBO.ORDERS"), ("u", "select * from dbo.orders")];
-    let found = respond(&tsql(catalog, &writes));
+    let found = respond(&request_in("tsql", catalog, &writes));
     assert_eq!(found[0]["columns"], json!(["[Id]", "[amount]"]));
     assert_eq!(
         outline(&found[0]),

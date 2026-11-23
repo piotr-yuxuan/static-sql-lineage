@@ -11,7 +11,7 @@ use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::edge::{Edge, End};
 use crate::graph::{Graph, Search};
-use crate::relation::{Name, RelationName};
+use crate::relation::{Name, RelationName, listing};
 use crate::script::{Finding, Scripted};
 use crate::write::Write;
 
@@ -181,8 +181,7 @@ impl Walk<'_> {
         let refusals =
             self.refusals.iter().map(|(write, refusal)| format!("refused: {write} {}", spelled(&refusal.reason)));
         let refused = self.refused.iter().chain(&self.not_read).map(ToString::to_string);
-        let cycles = (self.cycles.iter())
-            .map(|cycle| format!("cycle: {}", cycle.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+        let cycles = self.cycles.iter().map(|cycle| format!("cycle: {}", listing(cycle)));
         edges.chain(gaps).chain(refusals).chain(refused).chain(cycles).collect::<Vec<_>>().join("\n")
     }
 }

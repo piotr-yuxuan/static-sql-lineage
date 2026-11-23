@@ -18,7 +18,7 @@ use serde::Deserialize;
 use crate::answer::{Refusal, RefusalReason};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::relation::{Name, RelationName, repeated};
+use crate::relation::{Name, RelationName, names_cte, repeated};
 
 /// The words that open a clause of a statement, but `WITH`, `GROUP BY`, `ORDER BY` and a join.
 const CLAUSES: &str =
@@ -158,9 +158,7 @@ impl Write {
             if !reading.replaces && columns.is_none() {
                 continue;
             }
-            let text = tree.map_or_else(|| Ok(self.sql.clone()), |tree| generate(&tree, dialect.polyglot()));
-            let text = text.map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
-            pieces.push(Piece { text, columns, own: reading.own });
+            pieces.push(Piece { text: Write::text(tree.as_ref(), &self.sql, dialect)?, columns, own: reading.own });
         }
         Ok((found, reading.replaces, pieces))
     }
@@ -213,8 +211,7 @@ impl Write {
             Expression::Update(update) => {
                 // T-SQL's `UPDATE a ... FROM t AS a` names as its target the source that `a`
                 // names; any other target is added to the sources.
-                let known_as =
-                    |table: &TableRef| Name::of(table.alias.as_ref().unwrap_or(&table.name), &chars, dialect);
+                let known_as = |table: &TableRef| Name::of(known_by(table), &chars, dialect);
                 let froms = update.from_clause.iter().flat_map(|from| &from.expressions);
                 let named = froms.clone().find_map(|source| match source {
                     Expression::Table(table) if known_as(table) == known_as(&update.table) => Some(&**table),
@@ -278,6 +275,14 @@ impl Write {
         Ok(Reading { table, replaces, own, pieces })
     }
 
+    /// The text of a piece of the statement `sql`, whose tree [`Write::read`] gives: the
+    /// statement's own text for none, else the tree generated under the dialect; refused
+    /// when it does not generate.
+    pub fn text(tree: Option<&Expression>, sql: &str, dialect: Dialect) -> Result<String, Refusal> {
+        let text = tree.map_or_else(|| Ok(sql.to_string()), |tree| generate(tree, dialect.polyglot()));
+        text.map_err(|error| Refusal { reason: RefusalReason::Unparsed, detail: error.to_string() })
+    }
+
     /// The query that `sql` holds, the outermost one when it is parenthesised, as the
     /// engine reads it; refused when it is not one statement, or not a query.
     pub fn query(sql: &str, dialect: Dialect) -> Result<Expression, Refusal> {
@@ -302,10 +307,9 @@ impl Write {
         let root = build_scope(query);
         // The engine's scopes match a CTE's name ignoring ASCII case alone.
         let cte = |scope: &Scope, table: &TableRef| {
-            table.schema.is_none()
-                && scope.cte_sources.values().any(|source| {
-                    matches!(&source.expression, Expression::Cte(cte) if Name::same(&cte.alias, &table.name, &sql, dialect))
-                })
+            scope.cte_sources.values().any(|source| {
+                matches!(&source.expression, Expression::Cte(cte) if names_cte(table, &cte.alias, &sql, dialect))
+            })
         };
         let scoped = (scopes(&root, &sql, dialect).into_iter())
             .flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (scope, source)));
@@ -392,13 +396,13 @@ impl Write {
         // rows by its select list.
         let filters = |path: &str| {
             let filtered = |scope: &Scope| matches!(query_of(scope), Expression::Intersect(_) | Expression::Except(_));
-            let set = |at: usize| all.iter().any(|(parent, scope, _)| *parent == path[..at] && filtered(scope));
-            path.match_indices(".branches[1]").any(|(at, _)| set(at))
+            let set = |prefix: &str| all.iter().any(|(parent, scope, _)| parent == prefix && filtered(scope));
+            scope_steps(path).filter(|&(_, kind, at)| (kind, at) == ("branches", 1)).any(|(prefix, ..)| set(prefix))
         };
         let mut found = Vec::new();
         for (path, scope, owner) in &all {
             let Expression::Select(select) = query_of(scope) else { continue };
-            if path.contains(".subqueries[") || path.contains(".udtfs[") {
+            if scope_steps(path).any(|(_, kind, _)| ["subqueries", "udtfs"].contains(&kind)) {
                 continue;
             }
             // In the select list, the output column at its place or, in a CTE or a
@@ -444,9 +448,10 @@ impl Write {
                     held.filter(move |(_, query)| seen.insert(*query as *const Expression))
                 })
                 .collect();
-            found.extend(scope.subquery_scopes.iter().enumerate().map(|(at, subquery)| {
-                let holder = held.get(at).filter(|(_, query)| **query == subquery.expression);
-                (format!("{path}.subqueries[{at}]"), holder.and_then(|(holder, _)| holder.clone()))
+            found.extend(all.iter().filter_map(|(subquery, Scope { expression, .. }, _)| {
+                let (parent, kind, at) = scope_steps(subquery).last()?;
+                let holder = held.get(at).and_then(|(holder, query)| holder.clone().filter(|_| *query == expression));
+                ((parent, kind) == (path.as_str(), "subqueries")).then(|| (subquery.clone(), holder))
             }));
         }
         found
@@ -485,7 +490,7 @@ impl Write {
             if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
                 continue;
             }
-            let placed = !["subqueries[", "udtfs[", "branches["].iter().any(|kind| path.contains(kind));
+            let placed = !scope_steps(&path).any(|(_, kind, _)| ["subqueries", "udtfs", "branches"].contains(&kind));
             let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
             // Each column of the list with each column of the sources that it reads bare, and
             // whether an expression around it computes the column.
@@ -557,11 +562,7 @@ impl Write {
     /// each word of [`CLAUSES`]. Words in strings and quoted names are none.
     pub fn clauses(sql: &str, dialect: Dialect) -> Vec<(String, usize)> {
         let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(sql).unwrap_or_default();
-        let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
-        let word = |at: usize| {
-            let token = tokens.get(at).filter(|token| !quoted.contains(&token.token_type));
-            token.map_or_else(String::new, |token| token.text.to_uppercase())
-        };
+        let word = |at: usize| tokens.get(at).and_then(word).map_or_else(String::new, str::to_uppercase);
         let (mut depth, mut cases, mut found) = (0, 0, Vec::new());
         for (at, token) in tokens.iter().enumerate() {
             let (here, before) = (word(at), at.checked_sub(1).map(word).unwrap_or_default());
@@ -622,6 +623,13 @@ fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &
         found.push((path, scope, owner));
     }
     found
+}
+
+/// The steps of `path`, a scope's path as [`scopes`] writes it, each its kind and its
+/// index, after the path up to it.
+pub fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
+    let steps = path.match_indices('.').map(move |(at, _)| (&path[..at], path[at + 1..].split(['[', ']'])));
+    steps.filter_map(|(prefix, mut step)| Some((prefix, step.next()?, step.next()?.parse().ok()?)))
 }
 
 /// The columns of the sources of `select`, as [`named`] gives them, each with the places
@@ -693,10 +701,7 @@ fn named<'a>(
             Expression::Except(set) => (&set.with, &set.left),
             Expression::Subquery(subquery) if subquery.column_aliases.is_empty() => (&None, &subquery.this),
             Expression::Table(table) if table.column_aliases.is_empty() => {
-                let cte = ctes
-                    .iter()
-                    .rposition(|cte| table.schema.is_none() && Name::same(&cte.alias, &table.name, sql, dialect));
-                let Some(at) = cte else {
+                let Some(at) = ctes.iter().rposition(|cte| names_cte(table, &cte.alias, sql, dialect)) else {
                     let relation = RelationName::of(table, sql, dialect, defaults).ok_or(None)?;
                     let (_, columns) = catalog.get(&relation).ok_or_else(|| Some(relation.to_string()))?;
                     return Ok(columns.iter().cloned().map(Some).collect());
@@ -738,9 +743,7 @@ fn listed<'a>(
                 .collect(),
             Some(qualifier) => {
                 let called = |(_, source): &(Option<usize>, &Expression)| match source {
-                    Expression::Table(table) => {
-                        Name::same(table.alias.as_ref().unwrap_or(&table.name), qualifier, sql, dialect)
-                    }
+                    Expression::Table(table) => Name::same(known_by(table), qualifier, sql, dialect),
                     Expression::Subquery(subquery) => {
                         subquery.alias.as_ref().is_some_and(|alias| Name::same(alias, qualifier, sql, dialect))
                     }
@@ -773,6 +776,11 @@ fn listed<'a>(
 fn sources(select: &Select) -> impl Iterator<Item = (Option<usize>, &Expression)> {
     let froms = select.from.iter().flat_map(|from| &from.expressions).map(|source| (None, source));
     froms.chain(select.joins.iter().enumerate().map(|(at, join)| (Some(at), &join.this)))
+}
+
+/// The identifier by which `table` is known in its query: its alias, else its name.
+fn known_by(table: &TableRef) -> &Identifier {
+    table.alias.as_ref().unwrap_or(&table.name)
 }
 
 /// The query of `scope`, that of its CTE for a CTE's.
@@ -854,17 +862,15 @@ fn view_columns(
     let after = view.name.span.map_or(0, |span| span.end);
     let (mut depth, mut opens, mut names) = (0, false, Vec::new());
     for token in tokens.iter().filter(|token| token.span.start >= after) {
-        match token.token_type {
-            TokenType::LParen => depth += 1,
-            TokenType::RParen if depth == 1 => break,
-            TokenType::RParen => depth -= 1,
-            _ if opens => {
-                let quoted = token.token_type == TokenType::QuotedIdentifier;
-                let span = Some(token.span);
-                let identifier = Identifier { name: token.text.clone(), quoted, trailing_comments: Vec::new(), span };
-                names.push(Name::of(&identifier, &chars, dialect).ok_or_else(|| refused(token.text.clone()))?);
-            }
-            _ => {}
+        depth += nesting(token);
+        if depth == 0 && token.token_type == TokenType::RParen {
+            break;
+        }
+        if opens && nesting(token) == 0 {
+            let quoted = token.token_type == TokenType::QuotedIdentifier;
+            let span = Some(token.span);
+            let identifier = Identifier { name: token.text.clone(), quoted, trailing_comments: Vec::new(), span };
+            names.push(Name::of(&identifier, &chars, dialect).ok_or_else(|| refused(token.text.clone()))?);
         }
         opens = depth == 1 && matches!(token.token_type, TokenType::LParen | TokenType::Comma);
     }
@@ -957,4 +963,11 @@ fn with(mut query: Expression, with: Option<With>) -> Expression {
 /// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
 pub fn nesting(token: &Token) -> i32 {
     i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
+}
+
+/// The text of `token` as a word of SQL; none for a quoted name, a string or a national
+/// string, whose text is no word.
+pub fn word(token: &Token) -> Option<&str> {
+    let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
+    (!quoted.contains(&token.token_type)).then_some(token.text.as_str())
 }

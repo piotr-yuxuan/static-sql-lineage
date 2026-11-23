@@ -7,13 +7,13 @@ use std::fmt;
 use std::ops::Range;
 
 use polyglot_sql::expressions::{ExecuteStatement, Expression, Literal, TableConstraint};
-use polyglot_sql::{Token, TokenType, generate, parse_one};
+use polyglot_sql::{Token, TokenType, parse_one};
 use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::relation::{Defaults, Name, RelationName};
-use crate::write::{Place, Write, nesting};
+use crate::relation::{Defaults, Name, RelationName, listing, one_line};
+use crate::write::{Place, Write, nesting, word};
 
 /// The first words of T-SQL's statements, before which a window may end; not `WITH`, which
 /// also starts a table hint.
@@ -100,14 +100,12 @@ impl fmt::Display for Finding {
     /// Its kind and a colon, then its place and its detail on one line, its place and its
     /// relation, its writes and their relations, or its relation and its writes.
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        let line = |detail: &str| detail.split_whitespace().collect::<Vec<_>>().join(" ");
-        let names = |relations: &[RelationName]| relations.iter().map(ToString::to_string).collect::<Vec<_>>();
         match self {
-            Finding::Refused { place, detail, .. } => write!(formatter, "refused: {place} {}", line(detail)),
-            Finding::NotRead { place, detail } => write!(formatter, "not_read: {place} {}", line(detail)),
+            Finding::Refused { place, detail, .. } => write!(formatter, "refused: {place} {}", one_line(detail)),
+            Finding::NotRead { place, detail } => write!(formatter, "not_read: {place} {}", one_line(detail)),
             Finding::DeclaredTwice { place, relation } => write!(formatter, "declared_twice: {place} {relation}"),
             Finding::Cycle { writes, relations } => {
-                write!(formatter, "cycle: {} ({})", writes.join(", "), names(relations).join(", "))
+                write!(formatter, "cycle: {} ({})", writes.join(", "), listing(relations))
             }
             Finding::ReplacedTwice { relation, writes } => {
                 write!(formatter, "replaced_twice: {relation} ({})", writes.join(", "))
@@ -173,11 +171,7 @@ impl Script {
         let tsql = dialect == Dialect::Tsql;
         // Whether `token` is one of T-SQL's first words of statements.
         let opens = |token: &Token| {
-            let word = !matches!(
-                token.token_type,
-                TokenType::QuotedIdentifier | TokenType::String | TokenType::NationalString
-            );
-            tsql && word && CUTS.split(' ').any(|cut| token.text.eq_ignore_ascii_case(cut))
+            tsql && word(token).is_some_and(|word| CUTS.split(' ').any(|cut| word.eq_ignore_ascii_case(cut)))
         };
         let breaks: Vec<usize> = (0..tokens.len()).filter(|&at| first(at)).chain([tokens.len()]).collect();
         let lines: Vec<Range<usize>> = breaks.windows(2).map(|pair| pair[0]..pair[1]).collect();
@@ -325,9 +319,7 @@ impl Script {
         if let (Some(read), Some(target)) = (read, target) {
             // Each piece's text, as answers read it: polyglot's scopes take no table from the
             // `Alias` that a `MERGE`'s tree holds for its target and its source.
-            let pieces = read.pieces.iter().map(|(piece, _)| {
-                piece.as_ref().map_or_else(|| Ok(text.to_string()), |piece| generate(piece, dialect.polyglot()))
-            });
+            let pieces = read.pieces.iter().map(|(piece, _)| Write::text(piece.as_ref(), text, dialect));
             let reads = pieces.flatten().flat_map(|piece| {
                 let query = Write::query(&piece, dialect).ok();
                 query.map(|query| Write::relations(&piece, &query, dialect, &defaults)).unwrap_or_default()
@@ -417,9 +409,7 @@ impl Script {
 /// every place are kept.
 fn parse(text: &str, dialect: Dialect) -> Result<Expression, polyglot_sql::Error> {
     let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(text).unwrap_or_default();
-    let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
-    let word =
-        |token: &Token| if quoted.contains(&token.token_type) { String::new() } else { token.text.to_uppercase() };
+    let word = |token: &Token| word(token).map_or_else(String::new, str::to_uppercase);
     // Each token's depth outside its own parentheses.
     let mut depth = 0;
     let depths: Vec<i32> = (tokens.iter())

@@ -2,9 +2,7 @@
 //! The kinds of edges and their reach, as the Edge entry of `docs/concepts.md` and the
 //! proof of concept's catalogue of clauses give them.
 
-use serde_json::json;
-
-use super::{outline, request, respond, trace};
+use super::{outline, request, respond, trace, trace_in};
 
 #[test]
 fn a_derived_table_is_a_step() {
@@ -138,8 +136,6 @@ fn edges_spell_names_as_given() {
 #[test]
 fn traces_in_each_built_dialect() {
     for dialect in ["snowflake", "tsql", "duckdb"] {
-        let mut request = request(&[("s", &["a"])], &[("t", "select a as b from s")]);
-        request["dialect"] = json!(dialect);
-        assert_eq!(outline(&respond(&request)[0]), ["s.a -> t.b copy"], "{dialect}");
+        assert_eq!(trace_in(dialect, &[("s", &["a"])], "select a as b from s"), ["s.a -> t.b copy"], "{dialect}");
     }
 }

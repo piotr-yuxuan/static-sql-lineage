@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use polyglot_sql::expressions::{Expression, Identifier, JoinKind, Select};
+use polyglot_sql::expressions::{Expression, JoinKind, Select, TableRef};
 use polyglot_sql::scope::SourceKind;
 use polyglot_sql::traversal::ExpressionWalk;
 use polyglot_sql::{
@@ -14,8 +14,8 @@ use serde::Serialize;
 use crate::answer::{Gap, GapReason, spelled};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::relation::{Name, RelationName};
-use crate::write::{Holder, Key};
+use crate::relation::{Name, RelationName, names_cte};
+use crate::write::{Holder, Key, scope_steps};
 
 /// How a parent column reaches a child column, in the order in which one is kept when
 /// several apply.
@@ -88,6 +88,11 @@ impl End {
             (Some(column), None) => Ok(Some(End { relation: known.clone(), column: column.clone() })),
             _ => Err(unresolved()),
         }
+    }
+
+    /// The ends of `columns`, columns of `relation`, in their order.
+    pub fn of_columns(relation: &RelationName, columns: &[Name]) -> Vec<End> {
+        columns.iter().map(|column| End { relation: relation.clone(), column: column.clone() }).collect()
     }
 }
 
@@ -173,19 +178,25 @@ impl Edge {
             let source = reference.source_name.as_deref().unwrap_or_default();
             match value.map_or(Some(Kind::Rows), |kind| reach.kind(place, &edge.parent, kind, relations, catalog)) {
                 Some(Kind::Rows) if own.is_some_and(|own| own.reported_as(source)) => {}
-                Some(kind) => edges.push((place, Edge { kind, ..edge })),
+                Some(kind) => edges.push((Some(place), Edge { kind, ..edge })),
                 None => {
                     let detail = "the engine's lineage does not say how its values reach it";
                     gaps.push(Gap::of(GapReason::UnattributedUse, Some(child.column.to_string()), detail));
                 }
             }
         }
-        // By the child's place, then by the parent's spelling, as protocol 1 orders edges.
-        edges.sort_by_cached_key(|(place, edge)| {
-            (*place, edge.parent.relation.to_string(), edge.parent.column.to_string(), edge.kind)
+        (Edge::ordered(edges), gaps)
+    }
+
+    /// A write's `edges`, each with its child's place among the write's output columns,
+    /// none first: ordered by that place, then by the parent's spelling and the child's,
+    /// as protocol 1 orders edges, then by their kind; the first of each pair of ends.
+    pub fn ordered(mut edges: Vec<(Option<usize>, Edge)>) -> Vec<Edge> {
+        edges.sort_by_cached_key(|(place, Edge { parent, child, kind })| {
+            (*place, parent.relation.to_string(), parent.column.to_string(), child.column.to_string(), *kind)
         });
-        edges.dedup_by(|one, other| one.0 == other.0 && one.1.parent == other.1.parent);
-        (edges.into_iter().map(|(_, edge)| edge).collect(), gaps)
+        edges.dedup_by(|(_, one), (_, other)| one.child == other.child && one.parent == other.parent);
+        edges.into_iter().map(|(_, edge)| edge).collect()
     }
 }
 
@@ -231,9 +242,9 @@ impl Reach {
             _ => (None, false),
         };
         let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
-        let named = |tree: &'q Expression| -> Vec<&'q Identifier> {
+        let named = |tree: &'q Expression| -> Vec<&'q TableRef> {
             let one_part = |node: &'q Expression| match node {
-                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&table.name),
+                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&**table),
                 _ => None,
             };
             tree.dfs().filter_map(one_part).collect()
@@ -242,13 +253,13 @@ impl Reach {
         // that it reads reads.
         let mut pending = named(query);
         for name in ctes.iter().flat_map(|cte| named(&cte.this)) {
-            if let Some(at) = pending.iter().position(|other| Name::same(other, name, &sql, dialect)) {
+            if let Some(at) = pending.iter().position(|other| Name::same(&other.name, &name.name, &sql, dialect)) {
                 pending.swap_remove(at);
             }
         }
         let mut read = Vec::new();
         while let Some(name) = pending.pop() {
-            let cte = ctes.iter().position(|cte| Name::same(&cte.alias, name, &sql, dialect));
+            let cte = ctes.iter().position(|cte| names_cte(name, &cte.alias, &sql, dialect));
             if let Some(at) = cte.filter(|at| !read.contains(at)) {
                 read.push(at);
                 pending.extend(named(&ctes[at].this));
@@ -267,25 +278,21 @@ impl Reach {
     /// reads. A use in a subquery reaches what the subquery's holder does.
     pub fn rows(&self, path: &str, context: ColumnUseContext) -> Option<Vec<usize>> {
         let tuple = |(subquery, holder): &(String, Option<Holder>)| {
-            subquery.rsplit_once('.').is_some_and(|(parent, _)| parent == path)
+            scope_steps(subquery).last().is_some_and(|(parent, ..)| parent == path)
                 && matches!(holder, Some(Holder::Tuple(tuple)) if *tuple == context)
         };
-        let steps = path.strip_prefix("root").and_then(|steps| {
-            match steps.strip_prefix(".ctes[").and_then(|rest| rest.split_once(']')) {
-                Some((at, rest)) => at.parse().ok().filter(|at| self.read.contains(at)).map(|_| rest),
-                None => Some(steps),
-            }
-        });
+        // A step of a CTE that the outermost query reads first, then of derived tables and branches.
         let placed = !self.holders.iter().any(tuple)
-            && steps.is_some_and(|steps| {
-                steps.split('.').skip(1).all(|step| step.starts_with("derived[") || step.starts_with("branches["))
+            && scope_steps(path).enumerate().all(|(at, step)| match step {
+                (_, "ctes", cte) => at == 0 && self.read.contains(&cte),
+                (_, kind, _) => ["derived", "branches"].contains(&kind),
             });
         // What a subquery at the path `subquery`, in the scope at `parent`, reaches: what a
         // use of its clause there does; the output column at its place in the select list
         // of the outermost query or a branch; the output columns whose lineage passes
         // through its column in the select list of a CTE or a derived table.
-        let held = |parent: &str, subquery: &str| -> Option<Vec<usize>> {
-            let (_, holder) = self.holders.iter().find(|(path, _)| path == subquery)?;
+        let held = |step @ (parent, ..): (&str, &str, usize)| -> Option<Vec<usize>> {
+            let (_, holder) = self.holders.iter().find(|(path, _)| scope_steps(path).last() == Some(step))?;
             match holder.as_ref()? {
                 Holder::Clause(context) => self.rows(parent, *context),
                 Holder::Tuple(_) => None,
@@ -308,8 +315,8 @@ impl Reach {
             | ColumnUseContext::AggregateOrder => Some(Vec::new()),
             ColumnUseContext::Order if !self.limited => Some(Vec::new()),
             ColumnUseContext::Order => (self.outermost && path == "root").then(|| self.every.clone()),
-            _ => match path.find(".subqueries[") {
-                Some(at) => held(&path[..at], &path[..at + path[at..].find(']')? + 1]),
+            _ => match scope_steps(path).find(|(_, kind, _)| *kind == "subqueries") {
+                Some(step) => held(step),
                 None => placed.then(|| self.every.clone()),
             },
         }

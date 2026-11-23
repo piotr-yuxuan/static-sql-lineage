@@ -5,7 +5,9 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, lines, outline, request, respond, trace};
+use super::{
+    answers, assert_refused, lines, outline, outlines, printed_json, request, request_in, respond, trace, trace_in,
+};
 
 const CTE: &str = "with orders as (select id from raw.orders) select id from orders";
 
@@ -23,15 +25,12 @@ fn completed() -> Vec<String> {
 
 /// The two answers of `answer.refusal-spreads`.
 fn spread() -> Vec<Vec<String>> {
-    let request = request(&[("s", &["a"]), ("t", &["a"])], &[("t", "select nope from s"), ("u", "select a from t")]);
-    respond(&request).iter().map(outline).collect()
+    outlines(&request(&[("s", &["a"]), ("t", &["a"])], &[("t", "select nope from s"), ("u", "select a from t")]))
 }
 
 /// The request of `dialect.not-built`.
 fn bigquery() -> Value {
-    let mut request = request(&[("s", &["a"])], &[("t", "select a from s")]);
-    request["dialect"] = json!("bigquery");
-    request
+    request_in("bigquery", &[("s", &["a"])], &[("t", "select a from s")])
 }
 
 #[test]
@@ -94,7 +93,7 @@ fn column_defined_through_star() {
 /// The two answers of `write.contribute-keeps-columns`.
 fn contributed() -> Vec<Vec<String>> {
     let writes = [("t", "insert into t (a) select x from s"), ("u", "create view u as select a, b from t")];
-    respond(&request(&[("t", &["a", "b"]), ("s", &["x"])], &writes)).iter().map(outline).collect()
+    outlines(&request(&[("t", &["a", "b"]), ("s", &["x"])], &writes))
 }
 
 #[test]
@@ -232,9 +231,7 @@ fn dialect_generic_fallback() {
 
 /// The answer of `dialect.tsql-ignores-case`.
 fn ignoring_case() -> Vec<String> {
-    let mut request = request(&[("[dbo].[Orders]", &["[OrderId]"])], &[("t", "select orderid from dbo.orders")]);
-    request["dialect"] = json!("tsql");
-    outline(&respond(&request)[0])
+    trace_in("tsql", &[("[dbo].[Orders]", &["[OrderId]"])], "select orderid from dbo.orders")
 }
 
 #[test]
@@ -253,8 +250,7 @@ const DECLARED: &str = "tests/scripts/snowflake/04-declared.sql";
 
 /// What `trace` gives for `column` in the script of `catalog.declared-by-create-table`.
 fn declared(column: &str) -> Value {
-    let found = lines(&["trace", "--dialect", "snowflake", "--json", column, DECLARED]);
-    serde_json::from_str(&found.join("\n")).expect("the output is JSON")
+    printed_json(&["trace", "--dialect", "snowflake", "--json", column, DECLARED])
 }
 
 #[test]

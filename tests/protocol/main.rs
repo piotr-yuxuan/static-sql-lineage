@@ -38,10 +38,13 @@ fn command(arguments: &[&str]) -> Output {
 /// The lines that the command line `arguments` prints, which the binary does not refuse.
 fn lines(arguments: &[&str]) -> Vec<String> {
     let output = command(arguments);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert!(stderr.is_empty(), "stderr: {stderr}");
+    assert_succeeded(&output);
     String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
+}
+
+/// The JSON that the command line `arguments` prints, as [`lines`] reads it.
+fn printed_json(arguments: &[&str]) -> Value {
+    serde_json::from_str(&lines(arguments).join("\n")).expect("the output is JSON")
 }
 
 /// The binary's output for `input` on its standard input.
@@ -56,19 +59,24 @@ fn answers(input: &[u8]) -> Output {
 /// The answers to `request`, which the binary does not refuse.
 fn respond(request: &Value) -> Vec<Value> {
     let output = answers(request.to_string().as_bytes());
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_succeeded(&output);
     let response: Value = serde_json::from_slice(&output.stdout).expect("the response is JSON");
     response["answers"].as_array().expect("the response has answers").clone()
 }
 
-/// A request in Snowflake of `catalog`, each relation with its columns, and of
+/// A request in `dialect` of `catalog`, each relation with its columns, and of
 /// `writes`, each a target, which is also its id, and its query.
-fn request(catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
+fn request_in(dialect: &str, catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
     let catalog: Vec<Value> =
         catalog.iter().map(|(relation, columns)| json!({"relation": relation, "columns": columns})).collect();
     let writes: Vec<Value> =
         writes.iter().map(|(target, sql)| json!({"id": target, "target": target, "sql": sql})).collect();
-    json!({"protocol": 1, "dialect": "snowflake", "catalog": catalog, "writes": writes})
+    json!({"protocol": 1, "dialect": dialect, "catalog": catalog, "writes": writes})
+}
+
+/// A request in Snowflake, as [`request_in`] builds one.
+fn request(catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
+    request_in("snowflake", catalog, writes)
 }
 
 /// An answer in short: each edge as `parent -> child kind`, each gap as
@@ -86,9 +94,19 @@ fn outline(answer: &Value) -> Vec<String> {
     edges.chain(gaps).chain(refusal).collect()
 }
 
-/// The outline of the answer to `sql` against `catalog`, its target `t`.
+/// The outline of each answer to `request`.
+fn outlines(request: &Value) -> Vec<Vec<String>> {
+    respond(request).iter().map(outline).collect()
+}
+
+/// The outline of the answer to `sql` against `catalog` in `dialect`, its target `t`.
+fn trace_in(dialect: &str, catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
+    outline(&respond(&request_in(dialect, catalog, &[("t", sql)]))[0])
+}
+
+/// The outline of the answer to `sql` against `catalog` in Snowflake, its target `t`.
 fn trace(catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
-    outline(&respond(&request(catalog, &[("t", sql)]))[0])
+    trace_in("snowflake", catalog, sql)
 }
 
 fn read(path: &str) -> String {
@@ -97,8 +115,7 @@ fn read(path: &str) -> String {
 
 fn description() -> Value {
     let output = run(&["--describe"]);
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    assert!(output.stderr.is_empty(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_succeeded(&output);
     serde_json::from_slice(&output.stdout).expect("the description is JSON")
 }
 
@@ -111,6 +128,11 @@ fn keys(value: &Value, prefix: &str, into: &mut BTreeSet<String>) {
             into.insert(path);
         }
     }
+}
+
+/// A use that succeeds: status 0, and nothing on standard error.
+fn assert_succeeded(output: &Output) {
+    assert_eq!((output.status.code(), &*String::from_utf8_lossy(&output.stderr)), (Some(0), ""));
 }
 
 /// A refusal: status 2, nothing on standard output, one line on standard error that

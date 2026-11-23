@@ -75,6 +75,9 @@ have. A reject scenario names an answer that must not be given.
   - `Defaults::read`: reads the request's defaults into the names that complete a name.
   - `Defaults::given`: the defaults that a command gives, a database without a schema taking the dialect's usual one.
   - `Defaults::used`: the defaults after a `USE`.
+  - `names_cte`: whether a table reference names a CTE, a step, rather than a relation.
+  - `listing`: names, or ends of names, as text separated by `, `.
+  - `one_line`: a text, such as polyglot-sql's message in a refusal or a finding, on one line.
 - accept `relation.cte-is-a-step`: query
   `with orders as (select id from raw.orders) select id from orders`: the edge
   `raw.orders.id -> t.id`, `copy`; no gap.
@@ -128,13 +131,16 @@ have. A reject scenario names an answer that must not be given.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
   - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
+  - `Write::text`: the text of a piece of a statement, its own or its tree generated under the dialect.
   - `Write::query`: the query that a piece's text holds, or its refusal.
   - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
+  - `scope_steps`: the steps of a scope's path, each its kind and index, after the path up to it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
   - `Write::clauses`: the words and the offset of each clause of a statement, its location part.
+  - `word`: the text of a token as a word of SQL, none for a quoted name or a string.
   - `Place::at`: the line and the column of an offset in a text of SQL.
 - accept `write.contribute-keeps-columns`: catalog `t` with the columns `a` and `b`,
   and `s` with the column `x`; two writes in this order,
@@ -192,8 +198,10 @@ have. A reject scenario names an answer that must not be given.
   - `Reach::rows`: the output columns whose rows a use of a column decides.
   - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
   - `End::of`: the end that the engine's names of a relation and of its column resolve to.
+  - `End::of_columns`: the ends of a relation's columns, as a write's target gives them.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
   - `Edge::of_analysis`: the edges and gaps of a write's projections and uses, from the engine's analysis.
+  - `Edge::ordered`: a write's edges in protocol 1's order, one per pair of ends.
 - accept `edge.alias-is-copy`: query `select id as order_id from s`: the edge
   `s.id -> t.order_id`, `copy`; no gap.
 - accept `edge.coalesce-is-derive`: query `select coalesce(a, 0) as a from s`: the
@@ -338,7 +346,53 @@ Look-alike types or functions that stay apart, because they belong to different
 concepts or change for independent reasons, one line each: `<one>` and `<other>`:
 why. Only the owner adds a line, through a plan.
 
-None yet.
+- `Lineage::of` and `Edge::of_analysis`: both keep one edge per pair of ends, of the
+  first kind, but the lineage's rule (R12) spans writes and keeps each edge's write ids,
+  where a write's edges are ordered by their child's place.
+- `Write::holders` and `Reach::kind`: both know that the second branch of an `INTERSECT`
+  or `EXCEPT` decides rows, but read two structures of the engine, the scope path and
+  the lineage's `set_branch`.
+- `Walk::printed` and the serialisation of `Gap` and `Finding`: a walk lists a gap with
+  its write and without its detail, and a refusal or a finding not read by its place and
+  detail, as `docs/protocol.md` gives.
+- The `refused:` lines of `Walk::printed`, `Command::outline` and `Finding::fmt`: a met
+  write's refusal, one write's refusal with its detail, and a refused statement by its
+  place; three facts, one word.
+- The `cycle:` lines of `Walk::printed` and `Finding::fmt`: columns that reach each
+  other, and writes that depend on each other.
+- `CUTS` and `WRITES` in `src/script.rs`, and `CLAUSES` in `src/write.rs`: where a T-SQL
+  window may end, whether a refused statement was a write, where a clause starts.
+- The column lists of `Write::read` and of a declaration in `Script::parsed`: one field
+  of the engine, two facts, a write's renamed outputs and a relation's columns.
+- `Script::parsed`'s `dbo` and `Dialect::default_schema`'s: the schema under which SSMS
+  calls `sp_executesql`, and the schema of a database given without one.
+- `tests/protocol/main.rs`'s `outline` and the `Display` of `Edge` and `Gap`: the tests
+  take their expectations from the protocol, and cannot link the binary.
+- `tests/concepts.rs`'s `repository` and `Command::run`'s walk of a directory: a test's
+  reading of `src/`, and a command's reading of scripts with its rule for links.
+- `Write::steps` and `Reach::of`: Write gathers the engine's facts about a query, Edge
+  places the clauses' reach from them.
+- `Gap`'s column and `Lineage::walk`'s reading of it: the gap keeps the spelling, by
+  which protocol 1 orders and deduplicates gaps; the walk reads it back as a name.
+- The two `Catalog::get(...).map(...)` of `src/write.rs` and `src/answer.rs`: one call
+  each, shorter than a function.
+- `request_in` and `requests.rs`'s two refusals of a dialect: those tests write the
+  field they test.
+- The edges of `Walk::printed`'s JSON and the serialisation of `Edge`: the walk names an
+  edge's three fields beside its writes and depth, a line shorter than the edge
+  serialised with two fields set.
+- The empty answers of `Answer::of` and `Answer::of_piece`: one literal each, shorter
+  than a function; a `Default` would let any module answer no write.
+- The matches of `named`, `with` and `Reach::of` on a query's kinds: polyglot-sql's
+  `Union`, `Intersect` and `Except` are three types, and each match reads another field
+  beside the `WITH`: the left branch, the limit, the `WITH` to set.
+- The patterns of a query in `Write::read` and `Write::query`: one pattern each, where a
+  shared test would add a guard to each; the statement's takes a parenthesised query
+  whole.
+- `Name::reported_as` and `RelationName::reported_as`: one rule over each type's text as
+  written, a line each, where a function that both call would add three.
+- The catalogs of `case` and `merge` in `tests/protocol/cases.rs`, each built from
+  `RELATIONS`: one line each, shorter than a function.
 
 ## Not yet modelled
 

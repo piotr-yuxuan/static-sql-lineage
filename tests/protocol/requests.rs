@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, outline, read, request, respond};
+use super::{answers, assert_refused, assert_succeeded, outlines, read, request, respond};
 
 /// A valid request: the catalog `s` of the column `a`, and the write `t`.
 fn valid() -> Value {
@@ -21,8 +21,7 @@ fn answers_a_request_on_standard_input() {
     let output = answers(
         request(&[("s", &["a"])], &[("t", "select a from s"), ("u", "select a from t")]).to_string().as_bytes(),
     );
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    assert!(output.stderr.is_empty());
+    assert_succeeded(&output);
     let response: Value = serde_json::from_slice(&output.stdout).expect("the response is JSON");
     assert_eq!(response["protocol"], 1);
     let fields = |answer: &Value| answer.as_object().map(|answer| answer.keys().cloned().collect::<Vec<_>>());
@@ -170,7 +169,7 @@ fn two_writes_with_one_target_are_read_in_order() {
         [json!("t"), json!("t.insert")]
     );
     // The insert maps onto the columns that the table, read first, gave its target.
-    assert_eq!(answers.iter().map(outline).collect::<Vec<_>>(), [vec!["s.a -> t.a copy"], vec!["u.b -> T.a copy"]]);
+    assert_eq!(outlines(&request), [vec!["s.a -> t.a copy"], vec!["u.b -> T.a copy"]]);
 }
 
 #[test]

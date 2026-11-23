@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::edge::{Edge, End, Reach};
-use crate::relation::{Name, RelationName};
+use crate::relation::{Name, RelationName, one_line};
 use crate::write::{Outputs, Piece, Write};
 
 /// The answer to one write.
@@ -82,8 +82,7 @@ pub struct Refusal {
 impl fmt::Display for Refusal {
     /// Its reason, then its detail on one line.
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        let detail = self.detail.split_whitespace().collect::<Vec<_>>().join(" ");
-        write!(formatter, "{} {detail}", spelled(&self.reason))
+        write!(formatter, "{} {}", spelled(&self.reason), one_line(&self.detail))
     }
 }
 
@@ -144,14 +143,9 @@ impl Answer {
             }
             None => mapped.cloned().collect(),
         };
-        let ends: Vec<End> =
-            columns.iter().map(|column| End { relation: target.clone(), column: column.clone() }).collect();
-        let place = |edge: &Edge| ends.iter().position(|end| *end == edge.child);
-        edges.sort_by_cached_key(|edge| {
-            let (parent, child) = (&edge.parent, &edge.child);
-            (place(edge), parent.relation.to_string(), parent.column.to_string(), child.column.to_string(), edge.kind)
-        });
-        edges.dedup_by(|one, other| one.child == other.child && one.parent == other.parent);
+        let ends = End::of_columns(target, &columns);
+        let placed = edges.into_iter().map(|edge| (ends.iter().position(|end| *end == edge.child), edge));
+        let edges = Edge::ordered(placed.collect());
         (Answer { columns: known.map(|_| columns), edges, ..answer }.ended(gaps), false)
     }
 
@@ -246,8 +240,7 @@ impl Answer {
         if query.dfs().any(starred) {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
-        let children: Vec<End> =
-            outputs.iter().map(|output| End { relation: target.clone(), column: output.clone() }).collect();
+        let children = End::of_columns(target, &outputs);
         let holders = Write::holders(sql, &query, dialect);
         let keys = Write::keys(sql, &query, catalog, dialect, defaults);
         let steps = Write::steps(&text, &query, &holders, keys.as_deref(), &order, &schema, dialect);

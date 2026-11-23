@@ -216,3 +216,19 @@ pub fn repeated<T: Eq + Hash + Copy>(items: impl IntoIterator<Item = T>) -> Opti
     let mut seen = HashSet::new();
     items.into_iter().find(|item| !seen.insert(*item))
 }
+
+/// The text of `items`, such as names, each as it displays, separated by `, `.
+pub fn listing(items: impl IntoIterator<Item = impl fmt::Display>) -> String {
+    items.into_iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+}
+
+/// `text`, such as polyglot-sql's message, on one line, each run of white space one space.
+pub fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether `table`, parsed from `sql`, names the CTE `alias` rather than a relation: a
+/// name of one part, the CTE's under the dialect.
+pub fn names_cte(table: &TableRef, alias: &Identifier, sql: &[char], dialect: Dialect) -> bool {
+    table.schema.is_none() && table.catalog.is_none() && Name::same(alias, &table.name, sql, dialect)
+}
