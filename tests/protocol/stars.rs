@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{outline, request, respond, trace};
+use super::{outline, request, request_in, respond, trace};
 
 /// The output columns of the answer to `sql` against `catalog`, its target `t`.
 fn columns(catalog: &[(&str, &[&str])], sql: &str) -> Value {
@@ -73,9 +73,7 @@ const COMMON: &[(&str, &[&str])] = &[("s", &["k", "a", "b"]), ("w", &["k", "a", 
 
 /// The output columns of the answer to `sql` against `COMMON` in `dialect`.
 fn columns_in(dialect: &str, sql: &str) -> Value {
-    let mut request = request(COMMON, &[("t", sql)]);
-    request["dialect"] = json!(dialect);
-    respond(&request)[0]["columns"].clone()
+    respond(&request_in(dialect, COMMON, &[("t", sql)]))[0]["columns"].clone()
 }
 
 #[test]

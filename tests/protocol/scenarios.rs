@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use super::{answers, assert_refused, lines, outline, request, respond, trace};
+use super::{answers, assert_refused, lines, outline, request, request_in, respond, trace, trace_in};
 
 const CTE: &str = "with orders as (select id from raw.orders) select id from orders";
 
@@ -29,9 +29,7 @@ fn spread() -> Vec<Vec<String>> {
 
 /// The request of `dialect.not-built`.
 fn bigquery() -> Value {
-    let mut request = request(&[("s", &["a"])], &[("t", "select a from s")]);
-    request["dialect"] = json!("bigquery");
-    request
+    request_in("bigquery", &[("s", &["a"])], &[("t", "select a from s")])
 }
 
 #[test]
@@ -232,9 +230,7 @@ fn dialect_generic_fallback() {
 
 /// The answer of `dialect.tsql-ignores-case`.
 fn ignoring_case() -> Vec<String> {
-    let mut request = request(&[("[dbo].[Orders]", &["[OrderId]"])], &[("t", "select orderid from dbo.orders")]);
-    request["dialect"] = json!("tsql");
-    outline(&respond(&request)[0])
+    trace_in("tsql", &[("[dbo].[Orders]", &["[OrderId]"])], "select orderid from dbo.orders")
 }
 
 #[test]

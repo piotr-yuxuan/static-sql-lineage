@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use super::{outline, request, respond, trace};
+use super::{outline, request, respond, trace, trace_in};
 
 /// The answer to `select k, a, c from s <join> join u using (k)`.
 fn using(join: &str) -> Vec<String> {
@@ -327,11 +327,9 @@ fn a_key_merged_across_three_sources_is_a_gap() {
 
 #[test]
 fn an_aggregate_order_derives() {
-    let mut request =
-        request(&[("s", &["k", "a", "b"])], &[("t", "select k, string_agg(a, ',' order by b) as l from s group by k")]);
-    request["dialect"] = json!("duckdb");
+    let sql = "select k, string_agg(a, ',' order by b) as l from s group by k";
     assert_eq!(
-        outline(&respond(&request)[0]),
+        trace_in("duckdb", &[("s", &["k", "a", "b"])], sql),
         ["s.k -> t.k copy", "s.a -> t.l derive", "s.b -> t.l derive", "s.k -> t.l rows"]
     );
 }

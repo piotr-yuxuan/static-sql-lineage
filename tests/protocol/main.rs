@@ -61,14 +61,19 @@ fn respond(request: &Value) -> Vec<Value> {
     response["answers"].as_array().expect("the response has answers").clone()
 }
 
-/// A request in Snowflake of `catalog`, each relation with its columns, and of
+/// A request in `dialect` of `catalog`, each relation with its columns, and of
 /// `writes`, each a target, which is also its id, and its query.
-fn request(catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
+fn request_in(dialect: &str, catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
     let catalog: Vec<Value> =
         catalog.iter().map(|(relation, columns)| json!({"relation": relation, "columns": columns})).collect();
     let writes: Vec<Value> =
         writes.iter().map(|(target, sql)| json!({"id": target, "target": target, "sql": sql})).collect();
-    json!({"protocol": 1, "dialect": "snowflake", "catalog": catalog, "writes": writes})
+    json!({"protocol": 1, "dialect": dialect, "catalog": catalog, "writes": writes})
+}
+
+/// A request in Snowflake, as [`request_in`] builds one.
+fn request(catalog: &[(&str, &[&str])], writes: &[(&str, &str)]) -> Value {
+    request_in("snowflake", catalog, writes)
 }
 
 /// An answer in short: each edge as `parent -> child kind`, each gap as
@@ -86,9 +91,14 @@ fn outline(answer: &Value) -> Vec<String> {
     edges.chain(gaps).chain(refusal).collect()
 }
 
-/// The outline of the answer to `sql` against `catalog`, its target `t`.
+/// The outline of the answer to `sql` against `catalog` in `dialect`, its target `t`.
+fn trace_in(dialect: &str, catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
+    outline(&respond(&request_in(dialect, catalog, &[("t", sql)]))[0])
+}
+
+/// The outline of the answer to `sql` against `catalog` in Snowflake, its target `t`.
 fn trace(catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
-    outline(&respond(&request(catalog, &[("t", sql)]))[0])
+    trace_in("snowflake", catalog, sql)
 }
 
 fn read(path: &str) -> String {
