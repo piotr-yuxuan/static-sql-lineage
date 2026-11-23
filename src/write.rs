@@ -77,22 +77,18 @@ impl Write {
     pub fn relations(&self, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
         let sql: Vec<char> = self.sql.chars().collect();
         let root = build_scope(query);
-        let sources = scopes(&root, &sql, dialect).into_iter().flat_map(|(_, scope, _)| scope.sources.values());
-        let mut relations: Vec<RelationName> =
-            (sources.filter_map(|source| match (&source.kind, &source.expression) {
-                (SourceKind::Table, Expression::Table(table)) => RelationName::of(table, &sql, dialect, defaults),
-                _ => None,
-            }))
-            .collect();
+        let scoped = scopes(&root, &sql, dialect).into_iter().flat_map(|(_, scope, _)| scope.sources.values());
+        let mut relations: Vec<RelationName> = (scoped.filter_map(|source| match (&source.kind, &source.expression) {
+            (SourceKind::Table, Expression::Table(table)) => RelationName::of(table, &sql, dialect, defaults),
+            _ => None,
+        }))
+        .collect();
         // The engine scopes `IDENTIFIER('<name>')` as a table that the SQL does not spell.
         let selects = query.dfs().filter_map(|node| match node {
             Expression::Select(select) => Some(select),
             _ => None,
         });
-        let sources = selects.flat_map(|select| {
-            (select.from.iter().flat_map(|from| &from.expressions)).chain(select.joins.iter().map(|join| &join.this))
-        });
-        relations.extend(sources.filter_map(|source| {
+        relations.extend(selects.flat_map(|select| sources(select)).filter_map(|(_, source)| {
             let Expression::Function(function) = (match source {
                 Expression::Alias(alias) => &alias.this,
                 source => source,
@@ -341,11 +337,13 @@ fn joined<'a>(
         columns.into_iter().collect::<Option<Vec<Name>>>().ok_or(None)
     };
     let mut columns = Vec::new();
-    for source in select.from.iter().flat_map(|from| &from.expressions) {
-        columns.extend(columns_of(source)?.into_iter().map(|column| (column, Vec::new())));
-    }
-    for (at, join) in select.joins.iter().enumerate() {
-        let right = columns_of(&join.this)?;
+    for (at, source) in sources(select) {
+        let right = columns_of(source)?;
+        let Some(at) = at else {
+            columns.extend(right.into_iter().map(|column| (column, Vec::new())));
+            continue;
+        };
+        let join = &select.joins[at];
         let using: Vec<Name> = join.using.iter().filter_map(|key| Name::of(key, sql, dialect)).collect();
         let merges = |column: &Name| using.contains(column) || natural(join) && right.contains(column);
         for (column, joins) in &mut columns {
@@ -422,9 +420,6 @@ fn listed<'a>(
     dialect: Dialect,
     defaults: &[Name],
 ) -> Result<Vec<Option<Name>>, Option<String>> {
-    let sources: Vec<&Expression> = (select.from.iter().flat_map(|from| &from.expressions))
-        .chain(select.joins.iter().map(|join| &join.this))
-        .collect();
     let mut names = Vec::new();
     for expression in select_list(select) {
         let Expression::Star(star) = expression else {
@@ -437,7 +432,7 @@ fn listed<'a>(
                 .map(|(column, _)| Some(column))
                 .collect(),
             Some(qualifier) => {
-                let called = |source: &&Expression| match source {
+                let called = |(_, source): &(Option<usize>, &Expression)| match source {
                     Expression::Table(table) => {
                         table.alias.as_ref().unwrap_or(&table.name).name.eq_ignore_ascii_case(&qualifier.name)
                     }
@@ -446,7 +441,7 @@ fn listed<'a>(
                     }
                     _ => false,
                 };
-                let source = sources.iter().copied().find(called).ok_or(None)?;
+                let (_, source) = sources(select).find(called).ok_or(None)?;
                 named(source, ctes, sql, catalog, dialect, defaults)?
             }
         };
@@ -466,6 +461,13 @@ fn listed<'a>(
         names.extend(columns);
     }
     Ok(names)
+}
+
+/// The sources of `select`: those of its `FROM`, then the table of each join, with the
+/// join's place.
+fn sources(select: &Select) -> impl Iterator<Item = (Option<usize>, &Expression)> {
+    let froms = select.from.iter().flat_map(|from| &from.expressions).map(|source| (None, source));
+    froms.chain(select.joins.iter().enumerate().map(|(at, join)| (Some(at), &join.this)))
 }
 
 /// The query of `scope`, that of its CTE for a CTE's.
