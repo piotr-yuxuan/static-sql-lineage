@@ -19,6 +19,7 @@ pub struct Declared {
 }
 
 /// The relations known, each with its columns, under the name that made it known.
+#[derive(Default)]
 pub struct Catalog {
     relations: HashMap<RelationName, Vec<Name>>,
 }

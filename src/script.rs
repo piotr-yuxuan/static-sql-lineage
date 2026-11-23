@@ -5,10 +5,11 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use polyglot_sql::expressions::{ExecuteStatement, Expression, Literal};
+use polyglot_sql::expressions::{ExecuteStatement, Expression, Literal, TableConstraint};
 use polyglot_sql::{Token, TokenType, generate, parse_one};
 use serde::Serialize;
 
+use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Defaults, Name, RelationName};
 use crate::write::{Place, Write};
@@ -27,11 +28,11 @@ const BOUNDARY: &str = "Invalid expression / Unexpected token";
 /// What a T-SQL batch creates or alters when it is one statement: a view or a routine.
 const ROUTINES: [TokenType; 4] = [TokenType::View, TokenType::Procedure, TokenType::Function, TokenType::Trigger];
 
-/// The first word of a statement that makes it a write, with the words that it needs at
-/// depth 0, before its first `AS` and anywhere.
+/// The first word of a statement that makes it a write or a declaration, with the words that
+/// it needs at depth 0, before its first `AS` and anywhere.
 const WRITES: [(TokenType, &[TokenType], &[TokenType]); 9] = [
     (TokenType::Create, &[TokenType::View], &[]),
-    (TokenType::Create, &[TokenType::Table], &[TokenType::As]),
+    (TokenType::Create, &[TokenType::Table], &[]),
     (TokenType::Alter, &[TokenType::View], &[]),
     (TokenType::Insert, &[], &[]),
     (TokenType::Update, &[], &[]),
@@ -54,40 +55,45 @@ pub struct Scripted {
 }
 
 /// What the reading of scripts finds besides their writes: a statement refused, with
-/// polyglot's message, or text not read, each with its place; once the writes are ordered,
-/// a cycle of writes, with the relations that they write, or a relation replaced twice.
+/// polyglot's message or the catalog's rule that it breaks, text not read, or a relation
+/// declared again, each with its place; once the writes are ordered, a cycle of writes,
+/// with the relations that they write, or a relation replaced twice.
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Finding {
     Refused { place: String, detail: String },
     NotRead { place: String, detail: String },
+    DeclaredTwice { place: String, relation: RelationName },
     Cycle { writes: Vec<String>, relations: Vec<RelationName> },
     ReplacedTwice { relation: RelationName, writes: Vec<String> },
 }
 
 /// A file read as a script: its writes, in reading order, its findings, and the number of
-/// statements skipped; its path, and the defaults as they stand.
+/// statements skipped; its path, the defaults as they stand, and the catalog as its
+/// declarations leave it.
 pub struct Script {
     pub writes: Vec<Scripted>,
     pub findings: Vec<Finding>,
     pub skipped: usize,
     path: String,
     defaults: Defaults,
+    pub catalog: Catalog,
 }
 
 impl Script {
     /// The script that `bytes`, the file at `path`, hold under `dialect`, its names
-    /// completed by `defaults` until a `USE` changes them. A byte order mark chooses UTF-8,
+    /// completed by `defaults` until a `USE` changes them, its declarations added to
+    /// `catalog`, as the scripts before it leave it. A byte order mark chooses UTF-8,
     /// UTF-16 LE or UTF-16 BE; none, UTF-8. The text, tokenized once, is split at each `;`
     /// at depth 0 and, in T-SQL, into batches at each line of `GO` and each SQLCMD line,
     /// a batch that creates or alters a view or a routine being one statement; the rest of
     /// T-SQL's into windows, each ending before the next cut and growing over it while its
     /// parse fails at its last token, or ending where polyglot-sql stops after a complete
-    /// statement at a statement's first word. A file that does not decode or tokenize is
-    /// not read.
-    pub fn read(path: &str, bytes: &[u8], dialect: Dialect, defaults: Defaults) -> Script {
-        let mut script =
-            Script { writes: Vec::new(), findings: Vec::new(), skipped: 0, path: path.to_string(), defaults };
+    /// statement at a statement's first word; each parsed as [`parse`] reads it. A file that
+    /// does not decode or tokenize is not read.
+    pub fn read(path: &str, bytes: &[u8], dialect: Dialect, defaults: Defaults, catalog: Catalog) -> Script {
+        let (writes, findings, path) = (Vec::new(), Vec::new(), path.to_string());
+        let mut script = Script { writes, findings, skipped: 0, path, defaults, catalog };
         // UTF-16 after its byte order mark, which gives its order; else UTF-8, after its own or none.
         let utf16 = |mark: [u8; 2], unit: fn([u8; 2]) -> u16| {
             let (pairs, rest) = bytes.strip_prefix(&mark)?.as_chunks::<2>();
@@ -170,7 +176,7 @@ impl Script {
                 }
                 let start = tokens[from].span.start;
                 let window: String = chars[start..tokens[to - 1].span.end].iter().collect();
-                let parsed = parse_one(&window, dialect.polyglot());
+                let parsed = parse(&window, dialect);
                 // polyglot raises its unexpected token after a complete statement: at a statement's
                 // first word, even within a line, the window ends there.
                 let stop = parsed.as_ref().err().and_then(|error| match error {
@@ -190,7 +196,7 @@ impl Script {
                 match (cut, parsed) {
                     (Some(cut), _) => {
                         let head: String = chars[start..tokens[cut - 1].span.end].iter().collect();
-                        let parsed = parse_one(&head, dialect.polyglot()).map_err(detail);
+                        let parsed = parse(&head, dialect).map_err(detail);
                         script.statement(parsed, &head, &tokens[from..cut], place, dialect);
                         (from, next) = (cut, next - 1);
                     }
@@ -208,10 +214,8 @@ impl Script {
     }
 
     /// Reads `parsed`, the parse of `text`, a statement of the script at `place` whose
-    /// tokens are `tokens`: a write; a `USE`, which sets the defaults; SSMS's existence
-    /// check, `sp_executesql` of a national string as `@statement` that parses, read as that
-    /// statement; any other dynamic SQL, not read; any other statement, skipped. One that
-    /// does not parse is refused, reported when its first words make it a write.
+    /// tokens are `tokens`, as [`Script::parsed`] reads its tree. One that does not parse is
+    /// refused, reported when its first words make it a write or a declaration.
     fn statement(
         &mut self,
         parsed: Result<Expression, String>,
@@ -220,31 +224,38 @@ impl Script {
         place: Place,
         dialect: Dialect,
     ) {
+        let error = match parsed {
+            Ok(tree) => return self.parsed(tree, text, tokens, place, dialect),
+            Err(error) => error,
+        };
+        let mut depth = 0;
+        let words = tokens.iter().filter(|token| {
+            depth += nesting(token);
+            depth == 0
+        });
+        let words: Vec<TokenType> = words.map(|token| token.token_type).collect();
+        let head: Vec<TokenType> = words.iter().copied().take_while(|word| *word != TokenType::As).collect();
+        let write = |(first, before, anywhere): &(TokenType, &[TokenType], &[TokenType])| {
+            let needs = |needed: &[TokenType], among: &[TokenType]| needed.iter().all(|word| among.contains(word));
+            words.first() == Some(first) && needs(before, &head) && needs(anywhere, &words)
+        };
+        if WRITES.iter().any(write) {
+            self.findings.push(Finding::Refused { place: format!("{}:{place}", self.path), detail: error });
+        } else {
+            self.skipped += 1;
+        }
+    }
+
+    /// Reads `tree`, the tree of `text`, a statement of the script at `place` whose tokens
+    /// are `tokens`: a write; a declaration, a `CREATE TABLE` with a column list and no
+    /// query, which goes to the catalog, refused when it breaks the catalog's rule, and
+    /// reported when it declares its relation again; a `USE`, which sets the defaults;
+    /// SSMS's existence check, `sp_executesql` of a national string as `@statement` that
+    /// parses, read as that statement; any other dynamic SQL, not read; any other statement,
+    /// skipped.
+    fn parsed(&mut self, tree: Expression, text: &str, tokens: &[Token], place: Place, dialect: Dialect) {
         let id = format!("{}:{place}", self.path);
         let sql: Vec<char> = text.chars().collect();
-        let tree = match parsed {
-            Ok(tree) => tree,
-            Err(error) => {
-                let mut depth = 0;
-                let words = tokens.iter().filter(|token| {
-                    depth += nesting(token);
-                    depth == 0
-                });
-                let words: Vec<TokenType> = words.map(|token| token.token_type).collect();
-                let head: Vec<TokenType> = words.iter().copied().take_while(|word| *word != TokenType::As).collect();
-                let write = |(first, before, anywhere): &(TokenType, &[TokenType], &[TokenType])| {
-                    let needs =
-                        |needed: &[TokenType], among: &[TokenType]| needed.iter().all(|word| among.contains(word));
-                    words.first() == Some(first) && needs(before, &head) && needs(anywhere, &words)
-                };
-                if WRITES.iter().any(write) {
-                    self.findings.push(Finding::Refused { place: id, detail: error });
-                } else {
-                    self.skipped += 1;
-                }
-                return;
-            }
-        };
         let defaults = self.defaults.read(dialect).expect("the defaults read, as they did when given");
         let read = Write::read(&tree, text, dialect, 0).ok();
         let target = read.as_ref().and_then(|read| RelationName::of(read.table?, &sql, dialect, &defaults));
@@ -277,8 +288,10 @@ impl Script {
                 execute.parameters.iter().find(|parameter| parameter.name.eq_ignore_ascii_case("@statement"))?;
             let Expression::Literal(literal) = &given.value else { return None };
             let Literal::NationalString(statement) = literal.as_ref() else { return None };
-            Some((parse_one(statement, dialect.polyglot()).ok()?, statement.clone()))
+            Some((parse(statement, dialect).ok()?, statement.clone()))
         };
+        // `LIKE` and `CLONE` give a table no list of columns.
+        let like = |constraint: &TableConstraint| matches!(constraint, TableConstraint::Like { .. });
         match &tree {
             Expression::Use(used) => {
                 let base = tokens.first().map_or(0, |token| token.span.start);
@@ -294,9 +307,24 @@ impl Script {
                 }
             }
             Expression::Execute(execute) if dynamic(execute) => match run(execute) {
-                Some((statement, text)) => self.statement(Ok(statement), &text, &[], place, dialect),
+                Some((statement, text)) => self.parsed(statement, &text, &[], place, dialect),
                 None => self.findings.push(Finding::NotRead { place: id, detail: "dynamic SQL".to_string() }),
             },
+            Expression::CreateTable(create)
+                if create.clone_source.is_none() && !create.constraints.iter().any(like) =>
+            {
+                let columns = create.columns.iter().map(|column| Name::of(&column.name, &sql, dialect)).collect();
+                let relation = RelationName::of(&create.name, &sql, dialect, &defaults);
+                let unread = || "a name that it declares does not read".to_string();
+                let declared = (relation.zip(columns).ok_or_else(unread))
+                    .and_then(|(relation, columns)| Ok(self.catalog.declare(&relation, columns)?.then_some(relation)));
+                match declared {
+                    Ok(again) => {
+                        self.findings.extend(again.map(|relation| Finding::DeclaredTwice { place: id, relation }))
+                    }
+                    Err(detail) => self.findings.push(Finding::Refused { place: id, detail }),
+                }
+            }
             _ => self.skipped += 1,
         }
     }
@@ -305,4 +333,52 @@ impl Script {
 /// How far `token` moves the depth of parentheses: in at `(`, out at `)`.
 fn nesting(token: &Token) -> i32 {
     i32::from(token.token_type == TokenType::LParen) - i32::from(token.token_type == TokenType::RParen)
+}
+
+/// The parse of `text`, a statement, under `dialect`. In T-SQL, a declaration, a
+/// `CREATE TABLE` with no `AS` outside parentheses, is read with its storage clauses, which
+/// never bear on lineage, replaced by spaces: in its column list, its first parentheses,
+/// `ROWGUIDCOL`, `SPARSE` and `FILESTREAM` after a column's first token; after it, outside
+/// parentheses, `TEXTIMAGE_ON` and `FILESTREAM_ON` with their filegroup, `ON` with its
+/// filegroup but not a partition scheme, whose name a `(` follows, and `WITH` with its
+/// options. Words in strings and quoted names are no clauses' words; comments, newlines and
+/// every place are kept.
+fn parse(text: &str, dialect: Dialect) -> Result<Expression, polyglot_sql::Error> {
+    let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(text).unwrap_or_default();
+    let quoted = [TokenType::QuotedIdentifier, TokenType::String, TokenType::NationalString];
+    let word =
+        |token: &Token| if quoted.contains(&token.token_type) { String::new() } else { token.text.to_uppercase() };
+    // Each token's depth outside its own parentheses.
+    let mut depth = 0;
+    let depths: Vec<i32> = (tokens.iter())
+        .map(|token| {
+            let before = depth;
+            depth += nesting(token);
+            before.min(depth)
+        })
+        .collect();
+    let first: Vec<TokenType> = tokens.iter().take(2).map(|token| token.token_type).collect();
+    let declaration = dialect == Dialect::Tsql
+        && first == [TokenType::Create, TokenType::Table]
+        && !tokens.iter().zip(&depths).any(|(token, depth)| *depth == 0 && word(token) == "AS");
+    let list =
+        tokens.iter().zip(&depths).position(|(token, depth)| *depth == 0 && token.token_type == TokenType::RParen);
+    let Some(list) = list.filter(|_| declaration) else { return parse_one(text, dialect.polyglot()) };
+    let mut chars: Vec<char> = text.chars().collect();
+    let opens = |token: &Token| [TokenType::LParen, TokenType::Comma].contains(&token.token_type);
+    let mut blanked = false;
+    for (at, token) in tokens.iter().enumerate() {
+        let word = word(token);
+        if at > list && depths[at] == 0 && ["ON", "TEXTIMAGE_ON", "FILESTREAM_ON", "WITH"].contains(&word.as_str()) {
+            blanked = word != "ON" || tokens.get(at + 2).is_none_or(|next| next.token_type != TokenType::LParen);
+        }
+        let attribute = depths[at] > 0 && ["ROWGUIDCOL", "SPARSE", "FILESTREAM"].contains(&word.as_str());
+        if (at < list && attribute && !opens(&tokens[at - 1])) || (at > list && blanked) {
+            chars[token.span.start..token.span.end]
+                .iter_mut()
+                .filter(|char| **char != '\n')
+                .for_each(|char| *char = ' ');
+        }
+    }
+    parse_one(&chars.into_iter().collect::<String>(), dialect.polyglot())
 }

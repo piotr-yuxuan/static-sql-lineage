@@ -4,6 +4,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::graph::Graph;
 use crate::relation::{Defaults, RelationName};
@@ -60,7 +61,7 @@ impl Command {
     /// the number of statements skipped.
     pub fn run(&self) -> Result<String, String> {
         let unread = |path: &PathBuf, error: std::io::Error| format!("{} does not read: {error}", path.display());
-        let mut scripts = Vec::new();
+        let (mut scripts, mut catalog) = (Vec::new(), Catalog::default());
         for given in &self.paths {
             // Each path to read, with whether it is a directory: a link to one found under a
             // directory is not, so that a cyclic link ends.
@@ -80,7 +81,10 @@ impl Command {
             files.sort();
             for file in files {
                 let bytes = std::fs::read(&file).map_err(|error| unread(&file, error))?;
-                scripts.push(Script::read(&file.display().to_string(), &bytes, self.dialect, self.defaults.clone()));
+                let path = file.display().to_string();
+                let mut script = Script::read(&path, &bytes, self.dialect, self.defaults.clone(), catalog);
+                catalog = std::mem::take(&mut script.catalog);
+                scripts.push(script);
             }
         }
         let graph = Graph::of(scripts);
@@ -95,6 +99,7 @@ impl Command {
         let findings = graph.findings.iter().map(|finding| match finding {
             Finding::Refused { place, detail } => format!("refused: {place} {}", line(detail)),
             Finding::NotRead { place, detail } => format!("not_read: {place} {}", line(detail)),
+            Finding::DeclaredTwice { place, relation } => format!("declared_twice: {place} {relation}"),
             Finding::Cycle { writes, relations } => format!("cycle: {} ({})", listed(writes), names(relations)),
             Finding::ReplacedTwice { relation, writes } => format!("replaced_twice: {relation} ({})", listed(writes)),
         });

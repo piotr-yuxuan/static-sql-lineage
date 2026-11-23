@@ -65,13 +65,15 @@ fn statements_split_at_semicolons() {
     let snowflake = printed(&["--dialect", "snowflake", "tests/scripts/snowflake/01-ported.sql"]);
     let path = "tests/scripts/snowflake/01-ported.sql";
     let writes = [format!("{path}:2:1 V_ORDERS <- RAW.ORDERS"), format!("{path}:11:1 FACT <- V_ORDERS")];
-    // The procedure, and a table that polyglot refuses, are skipped.
-    let rest = [format!("{path}:13:1 FACT <- FACT"), "skipped: 2".to_string()];
-    assert_eq!(snowflake, [writes, rest].concat());
+    // The procedure is skipped; a table that polyglot refuses is a refused declaration.
+    assert_eq!(snowflake[..3], [writes.as_slice(), &[format!("{path}:13:1 FACT <- FACT")]].concat());
+    assert!(snowflake[3].starts_with(&format!("refused: {path}:12:1 ")), "{snowflake:?}");
+    assert_eq!(snowflake[4..], ["skipped: 1"]);
+    // The declaration of `raw_orders` is not skipped; its `INSERT ... VALUES` is.
     let duckdb = printed(&["--dialect", "duckdb", "tests/scripts/duckdb/01-fixture.sql"]);
     let path = "tests/scripts/duckdb/01-fixture.sql";
     let writes = [format!("{path}:3:1 stg_orders <- raw_orders"), format!("{path}:4:1 orders <- stg_orders")];
-    assert_eq!(duckdb, [writes.as_slice(), &["skipped: 2".to_string()]].concat());
+    assert_eq!(duckdb, [writes.as_slice(), &["skipped: 1".to_string()]].concat());
 }
 
 #[test]
@@ -338,7 +340,7 @@ fn graph_orders_writes_after_what_they_read() {
         format!("{b}:3:1 [dbo].[vC] <- dbo.Fact, dbo.vB"),
         format!("cycle: {a}:5:1, {a}:6:1 (dbo.Loop1, dbo.Loop2)"),
         format!("replaced_twice: [dbo].[vA] ({c}:3:1, {d}:1:1)"),
-        "skipped: 1".to_string(),
+        "skipped: 0".to_string(),
     ];
     assert_eq!(tsql(&[&b, &a, &c, &d]), expected);
 }
@@ -403,18 +405,18 @@ fn graph_reports_a_target_replaced_twice() {
         format!("{b}:1:1 dbo.vB <- dbo.vA"),
         format!("{b}:3:1 [dbo].[vC] <- dbo.Fact, dbo.vB"),
         format!("replaced_twice: [dbo].[vA] ({c}:3:1, {d}:1:1)"),
-        "skipped: 1".to_string(),
+        "skipped: 0".to_string(),
     ];
     assert_eq!(tsql(&[&b, &c, &d]), expected);
 }
 
 #[test]
 fn graph_counts_skipped_statements() {
-    // SSMS's table script: two `SET`s, `CREATE TABLE`, `ALTER TABLE` and an extended
-    // property's `EXEC`; its `USE` sets the defaults. Counted across files.
+    // SSMS's table script: two `SET`s, `ALTER TABLE` and an extended property's `EXEC`; its
+    // `USE` sets the defaults, and its `CREATE TABLE` declares. Counted across files.
     let (tables, views) = ("tests/scripts/tsql/01-tables.sql", "tests/scripts/tsql/02-views.sql");
-    assert_eq!(tsql(&[tables]), ["skipped: 5"]);
-    let both = [format!("{views}:12:1 [dbo].[vCustomer] <- [dbo].[Customer]"), "skipped: 9".to_string()];
+    assert_eq!(tsql(&[tables]), ["skipped: 4"]);
+    let both = [format!("{views}:12:1 [dbo].[vCustomer] <- [dbo].[Customer]"), "skipped: 8".to_string()];
     assert_eq!(tsql(&[tables, views]), both);
 }
 
@@ -446,5 +448,61 @@ fn graph_json_lists_writes_and_findings() {
         json!({"kind": "cycle", "writes": [format!("{a}:5:1"), format!("{a}:6:1")], "relations": ["dbo.Loop1", "dbo.Loop2"]}),
         json!({"kind": "replaced_twice", "relation": "[dbo].[vA]", "writes": [format!("{c}:3:1"), format!("{d}:1:1")]}),
     ];
-    assert_eq!(graph, json!({"writes": writes, "findings": findings, "skipped": 5}));
+    assert_eq!(graph, json!({"writes": writes, "findings": findings, "skipped": 4}));
+}
+
+#[test]
+fn a_declaration_breaking_the_catalogs_rule_is_refused() {
+    // A list with no column, and one that holds `Id` twice, as T-SQL compares names.
+    let path = "tests/scripts/tsql/17-declarations.sql";
+    let found = tsql(&[path]);
+    assert!(found[1].starts_with(&format!("refused: {path}:1:1 ")) && found[1].contains("no column"), "{found:?}");
+    assert!(found[2].starts_with(&format!("refused: {path}:3:1 ")) && found[2].contains("twice"), "{found:?}");
+}
+
+#[test]
+fn a_relation_declared_twice_is_reported() {
+    // `dbo.Stage`, then `[dbo].[Stage]`: one relation, declared again.
+    let path = "tests/scripts/tsql/17-declarations.sql";
+    let found = tsql(&[path]);
+    assert_eq!(found[0], format!("{path}:9:1 dbo.vStage <- dbo.Stage"));
+    assert_eq!(found[3..], [format!("declared_twice: {path}:7:1 [dbo].[Stage]"), "skipped: 0".to_string()]);
+}
+
+/// The lines that `graph` prints for the script of T-SQL's tables.
+fn tables() -> Vec<String> {
+    tsql(&["tests/scripts/tsql/18-storage.sql"])
+}
+
+#[test]
+fn tsql_storage_clauses_are_ignored() {
+    // SSMS's table with `ROWGUIDCOL`, `FILESTREAM` and `SPARSE` in its columns, and `ON`,
+    // `TEXTIMAGE_ON`, `FILESTREAM_ON` and `WITH` after them: declared, not refused, not skipped.
+    let found = tables();
+    assert!(!found.iter().any(|line| line.starts_with("refused: tests/scripts/tsql/18-storage.sql:1:1 ")), "{found:?}");
+    assert_eq!(found.last().map(String::as_str), Some("skipped: 0"));
+}
+
+#[test]
+fn a_partition_scheme_is_kept() {
+    // `ON ps_Day([Day])` is read as polyglot reads it; blanked, its `([Day])` would not parse.
+    let found = tables();
+    assert!(
+        !found.iter().any(|line| line.starts_with("refused: tests/scripts/tsql/18-storage.sql:10:1 ")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_create_table_as_is_not_blanked() {
+    // Its join's `ON` stays, whether a column list or `WITH` follows its name.
+    let path = "tests/scripts/tsql/18-storage.sql";
+    let found = tables();
+    assert_eq!(
+        found[..2],
+        [
+            format!("{path}:12:1 dbo.Joined <- dbo.Other, dbo.Stage"),
+            format!("{path}:14:1 dbo.Spread <- dbo.Other, dbo.Stage")
+        ]
+    );
 }
