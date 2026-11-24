@@ -148,6 +148,7 @@ docs/diagrams/       views of the two documents above: the kernel, the use cases
 docs/protocol.md     how a caller runs the binary, and what it answers
 docs/release-pipeline.md
                      CI and CD: what each runs, and what a release writes and decides
+docs/performance.md  how the binary's time and memory are measured, and the limit on them
 docs/work/           plans and their notes, not tracked
 src/                 one module per home of `docs/concepts.md`: relation, write, edge,
                      answer, catalog, request, dialect, describe, script (files read
@@ -165,8 +166,10 @@ tests/scripts/       synthetic scripts as SQL Server's tools, Snowflake and Duck
                      expected/, what commands print from them, written from the protocol
 tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edges, and
                      the explanations of each difference
-tests/tools/         the tests of scripts/release.py; tests/bin/fake-gh stands in for gh
+tests/tools/         the tests of scripts/release.py and scripts/bench.py; tests/bin/fake-gh
+                     stands in for gh
 scripts/release.py   CD's release: the version commit, the release and its notes
+scripts/bench.py     the benchmarks: synthetic estates, the corpora, and their figures
 .github/workflows/   CI, `make check` on every push; CD, a release after each green push
-                     to main
+                     to main; bench.yml, the benchmarks, weekly and by hand
 ```
