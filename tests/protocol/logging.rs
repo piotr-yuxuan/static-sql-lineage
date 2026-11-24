@@ -51,14 +51,21 @@ fn precedence() {
 fn levels() {
     let info = said(&logged(&["-v"], &[]));
     assert!(info.contains("dialect=snowflake") && info.contains("writes=1") && !info.contains("answer{id="), "{info}");
-    let request = request(&[("s", &["a"])], &[("t", "select a from s"), ("u", "select from from")]).to_string();
+    // A replace write, one that does not parse, and one whose `INTERSECT` asks for the lineage.
+    let writes =
+        [("t", "select a from s"), ("u", "select from from"), ("v", "select a from s intersect select a from s")];
+    let request = request(&[("s", &["a"])], &writes).to_string();
     let debug = said(&fed(binary().arg("-vv"), request.as_bytes()));
+    assert!(debug.lines().any(|line| line.contains("answer{id=t") && line.contains("read pieces=1")), "{debug}");
     let answered: Vec<&str> = debug.lines().filter(|line| line.contains("answered")).collect();
-    let [t, u] = answered[..] else { panic!("{debug}") };
+    let [t, u, _] = answered[..] else { panic!("{debug}") };
     assert!(t.contains("answer{id=t") && t.contains("replaces=true") && t.contains("edges=1"), "{t}");
     assert!(u.contains("answer{id=u") && u.contains("refused=true") && !u.contains("replaces"), "{u}");
-    let trace = said(&logged(&["-vvv"], &[]));
+    let trace = said(&fed(binary().arg("-vvv"), request.as_bytes()));
     assert!(trace.lines().any(|line| line.contains("analyze_query") && line.contains("time.busy")), "{trace}");
+    for span in ["parse_one", "validate_with_schema", "lineage_at_with_schema"] {
+        assert!(trace.contains(&format!(":{span}: ")), "{span}: {trace}");
+    }
     let graph = said(&command(&["graph", "-v", "--dialect", "duckdb", "examples/tpch"]));
     assert!(graph.contains("files=") && graph.contains("writes="), "{graph}");
 }
