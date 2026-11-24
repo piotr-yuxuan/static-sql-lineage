@@ -135,7 +135,6 @@ have. A reject scenario names an answer that must not be given.
   - `Write::query`: the query that a piece's text holds, or its refusal.
   - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
-  - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
   - `Reach::of`: where the clauses of one write's query reach.
   - `Reach::rows`: the output columns whose rows a use of a column decides.
   - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.

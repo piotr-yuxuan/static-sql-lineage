@@ -243,8 +243,7 @@ impl Answer {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
         let children = End::of_columns(target, &outputs);
-        let keys = Write::keys(sql, &query, catalog, dialect, defaults);
-        let reach = Reach::of(sql, &query, keys, dialect).with_lineage(&text, &order, &schema, dialect);
+        let reach = Reach::of(sql, &query, catalog, dialect, defaults).with_lineage(&text, &order, &schema, dialect);
         let own = piece.own.then_some(found);
         let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, relations, catalog, own);
         gaps.extend(found);

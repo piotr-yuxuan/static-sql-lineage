@@ -65,14 +65,14 @@ enum Holder {
 /// column that its list names, the key that the column reads, and whether an expression
 /// around the key computes the column; the kind of the join; and the relation or CTE that
 /// the join joins, when it joins one.
-pub struct Key {
-    pub owner: Option<Name>,
-    pub placed: bool,
-    pub column: Name,
-    pub read: Name,
-    pub computed: bool,
-    pub join: JoinKind,
-    pub right: Option<RelationName>,
+struct Key {
+    owner: Option<Name>,
+    placed: bool,
+    column: Name,
+    read: Name,
+    computed: bool,
+    join: JoinKind,
+    right: Option<RelationName>,
 }
 
 /// One `SELECT` that a write is read into, as text; the target's columns onto which its
@@ -461,41 +461,35 @@ impl Write {
         found
     }
 
-    /// The keys that the joins of `query`, parsed from `sql`, merge in each of its
-    /// `SELECT`s, selected bare, aliased or not, through a `*`, or read bare by an
-    /// expression of its select list; none when a join merges a key among sources whose
-    /// columns are unknown, where its keys are not told.
-    pub fn keys(
-        sql: &str,
-        query: &Expression,
+    /// The keys that the joins of the query whose scopes `all` lists, parsed from `sql`,
+    /// under `ctes`, those of its outermost `WITH`, merge in each of its `SELECT`s,
+    /// selected bare, aliased or not, through a `*`, or read bare by an expression of its
+    /// select list; none when a join merges a key among sources whose columns are
+    /// unknown, where its keys are not told.
+    fn keys(
+        all: &[(String, &Scope, Option<Name>)],
+        ctes: &[&Cte],
+        sql: &[char],
         catalog: &Catalog,
         dialect: Dialect,
         defaults: &[Name],
     ) -> Option<Vec<Key>> {
-        let sql: Vec<char> = sql.chars().collect();
-        let root = build_scope(query);
-        let ctes: Vec<&Cte> = (root.cte_scopes.iter())
-            .filter_map(|cte| match &cte.expression {
-                Expression::Cte(cte) => Some(&**cte),
-                _ => None,
-            })
-            .collect();
         let bare = |expression: &Expression| match expression {
-            Expression::Column(column) if column.table.is_none() => Name::of(&column.name, &sql, dialect),
+            Expression::Column(column) if column.table.is_none() => Name::of(&column.name, sql, dialect),
             _ => None,
         };
         let right = |join: &Join| match &join.this {
-            Expression::Table(table) => RelationName::of(table, &sql, dialect, defaults),
+            Expression::Table(table) => RelationName::of(table, sql, dialect, defaults),
             _ => None,
         };
         let mut keys = Vec::new();
-        for (path, scope, owner) in scopes(&root, &sql, dialect) {
+        for (path, scope, owner) in all {
             let Expression::Select(select) = query_of(scope) else { continue };
             if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
                 continue;
             }
-            let placed = !scope_steps(&path).any(|(_, kind, _)| ["subqueries", "udtfs", "branches"].contains(&kind));
-            let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
+            let placed = !scope_steps(path).any(|(_, kind, _)| ["subqueries", "udtfs", "branches"].contains(&kind));
+            let columns = joined(select, ctes, sql, catalog, dialect, defaults).ok()?;
             // Each column of the list with each column of the sources that it reads bare, and
             // whether an expression around it computes the column.
             let listed = select_list(select).flat_map(|expression| match expression {
@@ -503,12 +497,12 @@ impl Write {
                     columns.iter().map(|(column, _)| (column.clone(), column.clone(), false)).collect()
                 }
                 Expression::Alias(alias) => {
-                    let named = name(expression, &sql, dialect);
+                    let named = name(expression, sql, dialect);
                     let computed = bare(&alias.this).is_none();
                     let read = walk_in_scope(&alias.this, false).filter_map(bare);
                     read.filter_map(|read| Some((named.clone()?, read, computed))).collect()
                 }
-                column => name(column, &sql, dialect)
+                column => name(column, sql, dialect)
                     .zip(bare(column))
                     .map(|(named, read)| (named, read, false))
                     .into_iter()
@@ -584,10 +578,10 @@ pub struct Reach {
 
 impl Reach {
     /// The reach of the clauses of `query`, parsed from `sql`, before its output columns
-    /// are known: the holders of its subqueries, as [`Write::holders`] finds them from its
-    /// scopes, and the keys that its joins merge `keys`. A CTE is matched by its name under
-    /// the dialect.
-    pub fn of<'q>(sql: &str, query: &'q Expression, keys: Option<Vec<Key>>, dialect: Dialect) -> Reach {
+    /// are known: the holders of its subqueries, as [`Write::holders`] finds them, and the
+    /// keys that its joins merge against `catalog`, as [`Write::keys`] finds them, both
+    /// from the one reading of its scopes. A CTE is matched by its name under the dialect.
+    pub fn of<'q>(sql: &str, query: &'q Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Reach {
         let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let all = scopes(&root, &sql, dialect);
@@ -601,8 +595,10 @@ impl Reach {
             Expression::Except(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
             _ => (None, false),
         };
-        let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
+        // The CTEs of the outermost `WITH`, in its order, which the engine's scopes number.
+        let ctes: Vec<&Cte> = with.iter().flat_map(|with| &with.ctes).collect();
         let holders = Write::holders(&all, &sql, dialect);
+        let keys = Write::keys(&all, &ctes, &sql, catalog, dialect, defaults);
         let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
         let named = |tree: &'q Expression| -> Vec<&'q TableRef> {
             let one_part = |node: &'q Expression| match node {
