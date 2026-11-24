@@ -83,3 +83,54 @@ class Estate(unittest.TestCase):
     def test_refuses_an_estate_too_small(self):
         with self.assertRaises(ValueError):
             bench.estate("mix", 7, 9)
+
+
+class Figures(unittest.TestCase):
+    def test_the_median_time_and_the_largest_peak_in_kib(self):
+        samples = [(3.0, 2048), (1.0, 4096), (2.0, 1024), (9.0, 1024), (0.5, 1024)]
+        self.assertEqual(bench.figures(samples, "linux"), (2.0, 4096))
+        self.assertEqual(bench.figures(samples, "darwin"), (2.0, 4))
+
+    def test_growth_compares_six_thousand_writes_with_one_thousand(self):
+        rows = [
+            {"shape": "chain", "way": "trace", "size": 100, "median_seconds": 0.1},
+            {"shape": "chain", "way": "trace", "size": 1000, "median_seconds": 0.5},
+            {"shape": "chain", "way": "trace", "size": 6000, "median_seconds": 4.5},
+            {"shape": "fan", "way": "trace", "size": 6000, "median_seconds": 1.0},
+        ]
+        self.assertEqual(bench.growth(rows), {("chain", "trace"): 9.0})
+
+
+class Counts(unittest.TestCase):
+    def test_a_response_of_protocol_1(self):
+        def answer(refusal, *reasons):
+            gaps = [{"reason": r, "relation": None, "column": None, "detail": ""} for r in reasons]
+            return {"write": "w", "columns": None, "edges": [], "gaps": gaps, "refusal": refusal}
+
+        response = {
+            "protocol": 1,
+            "answers": [
+                answer(None, "wildcard", "unknown_relation", "wildcard"),
+                answer({"reason": "unparsed", "detail": ""}),
+                answer(None),
+            ],
+        }
+        self.assertEqual(
+            bench.counts("protocol1", json.dumps(response).encode()),
+            {"writes": 3, "refusals": 1, "gaps": {"wildcard": 2, "unknown_relation": 1}},
+        )
+
+    def test_a_graph(self):
+        graph = {
+            "writes": [{"id": "a.sql:1:1", "target": "t", "reads": []}] * 2,
+            "findings": [{"kind": "refused", "place": "a.sql:3:1", "detail": ""}],
+            "skipped": 4,
+        }
+        self.assertEqual(
+            bench.counts("graph", json.dumps(graph).encode()),
+            {"writes": 2, "findings": {"refused": 1}, "skipped": 4},
+        )
+
+    def test_nothing_from_the_other_ways(self):
+        for way in ("trace", "uses", "outline"):
+            self.assertEqual(bench.counts(way, b"not json"), {})

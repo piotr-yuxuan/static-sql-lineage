@@ -12,7 +12,7 @@ BASE ?= main
 PYTHON := scripts/release.py scripts/bench.py tests/tools tests/bin/fake-gh
 export PYTHONDONTWRITEBYTECODE := 1
 
-.PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged size
+.PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged size bench
 
 check: fmt clippy licence python workflows test-python test
 
@@ -64,3 +64,10 @@ size:
 	@tokei src -t Rust -o json | $(TOKEI_CODE) src
 	@tokei tests -t Rust -o json | $(TOKEI_CODE) tests
 	@tokei scripts tests/tools -t Python -o json | $(TOKEI_CODE) python
+
+# The benchmarks of docs/performance.md, on the release build, outside `make check`:
+# `make bench SIZES="1000 6000"` compares a plan with its base.
+SIZES ?= 100 1000 6000
+bench:
+	@cargo build --release --locked -j $(CARGO_JOBS)
+	@python3 scripts/bench.py run --sizes $(SIZES)
