@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "static-sql-lineage"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "clap",
  "clap_complete",
