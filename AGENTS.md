@@ -63,8 +63,9 @@ Reuses: <operations and types at the base that the steps call or extend>
   to the same code at ruff's default width, 0.820 at plan 012 (972 lines against
   1,186), taken again at each check; the rule of 0.05 covers `src/` and `tests/` only.
 - `make size` gives the counts, so that no count is taken by hand.
-- The review's findings (step 5 of `workflow:plans`) are recorded with `coordinator:instrument` in
-  `docs/work/findings/NNN.json`, and its summary is quoted in the pre-merge summary.
+- The review's findings (step 5 of `workflow:plans`) are recorded with
+  `coordinator:instrument` in `docs/work/findings/NNN.json`, and its summary is quoted
+  in the pre-merge summary.
 - A new dependency is named in its plan's *Decisions*.
 
 ## Reuse before repetition

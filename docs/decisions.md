@@ -121,9 +121,9 @@ Ruled by the owner on 2026-11-24, before the chain of plans 012 to 021:
   `static-sql-lineage://<dialect>`.
 - R21. Steps: their kinds are CTE, derived table, subquery and branch. Protocol 1 gives
   `steps` on the answer and, on each edge, `paths`, each a list of hops
-  `{"step": <index into steps>, "column", "kind"}`. The edges inside a write have no list of their own:
-  the hops of the paths are those edges. Plan 017's kernel text is approved, and that
-  plan writes it into `concepts.md`.
+  `{"step": <index into steps>, "column", "kind"}`. The edges inside a write have no
+  list of their own: the hops of the paths are those edges. Plan 017's kernel text is
+  approved, and that plan writes it into `concepts.md`.
 - R22. Performance: measured, optional in CI. No plan worsens the time of 6,000
   writes, through protocol 1 or `trace`, by more than 10% without saying why, and that
   time grows by a factor below 8 from 1,000 to 6,000 writes.
