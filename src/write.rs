@@ -885,7 +885,8 @@ fn view_columns(
 /// where its condition holds, with the columns that its `UPDATE SET` or its `INSERT` names;
 /// none for an `INSERT` without a list, whose values follow the target's columns, or for a
 /// `DELETE`, whose values are `nulls`, one for each column of the target. None when a
-/// clause names a target that is not a column.
+/// clause names a target that is not a column, or gives its values as a `*`, as
+/// `UPDATE SET *` and `INSERT *` do.
 fn whens(
     merge: &Merge,
     sources: &[Expression],
@@ -915,6 +916,7 @@ fn whens(
                     (values.expressions.clone(), named.collect::<Option<_>>()?)
                 }
                 [_, Expression::Tuple(values)] => (values.expressions.clone(), Vec::new()),
+                [_, Expression::Star(_)] => return None,
                 _ => continue,
             },
             _ => (nulls.to_vec(), Vec::new()),

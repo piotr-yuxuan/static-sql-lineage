@@ -172,6 +172,13 @@ cases! {
         let insert = format!("{merge} not matched then insert (k, nope) values (s.k, s.x)");
         expect("snowflake", &insert, &["refused invalid"]);
     };
+    // Its columns would be the target's, which the clause does not name: refused, not read as
+    // no copy, in every dialect, as polyglot-sql parses it in every one.
+    merge_of_a_star_is_refused: for dialect in ["databricks", "snowflake"] {
+        let merge = "merge into t using s on t.k = s.k when";
+        expect(dialect, &format!("{merge} matched then update set *"), &["refused not_a_query"]);
+        expect(dialect, &format!("{merge} not matched then insert *"), &["refused not_a_query"]);
+    };
     merge_into_an_alias_finds_its_target:
         expect("snowflake", "merge into t as tt using s as ss on tt.k = ss.k when matched then update set tt.a = ss.x",
         &["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
