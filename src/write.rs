@@ -532,36 +532,6 @@ impl Write {
         Some(keys)
     }
 
-    /// The engine's lineage of each output column of `query`, the engine's projection
-    /// that `order` gives for it, against `schema`, read from `text`, the text that the
-    /// engine reads for `query`; none where the engine gives none; for a write that holds
-    /// an `INTERSECT` or an `EXCEPT`, a key that a join merges, as `keys` says, or a
-    /// subquery in a CTE's or a derived table's select list, as `holders` says, and for no
-    /// other.
-    pub fn steps(
-        text: &str,
-        query: &Expression,
-        holders: &[(String, Option<Holder>)],
-        keys: Option<&[Key]>,
-        order: &[usize],
-        schema: &ValidationSchema,
-        dialect: Dialect,
-    ) -> Vec<Option<LineageNode>> {
-        let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
-        let held = holders.iter().any(|(_, holder)| matches!(holder, Some(Holder::Column(..))));
-        if !(filtering || held || keys.is_some_and(|keys| !keys.is_empty())) {
-            return Vec::new();
-        }
-        let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
-        let read = Write::query(text, dialect).ok();
-        let lineage = |place| {
-            tracing::trace_span!("lineage_at_with_schema").in_scope(|| {
-                lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok()
-            })
-        };
-        order.iter().map(|&at| lineage(at)).collect()
-    }
-
     /// The clauses of the statement that `sql` holds, each its words and the offset of its
     /// first: outside parentheses and `CASE`, `WITH` as the statement's first word or after
     /// `AS`, `GROUP BY`, `ORDER BY`, a join from its first word to its `JOIN` or `APPLY`, and
@@ -594,33 +564,32 @@ impl Write {
 }
 
 /// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
-/// keeps rows by their order, whether its outermost query does, which CTEs of its
-/// outermost `WITH` that query reads, directly or through others of that `WITH`, the
-/// places of its output columns, the holders of its subqueries, the keys that its joins
-/// merge, if their sides are told, and the engine's lineage of each output column, where
-/// the write needs it.
+/// keeps rows by their order, whether its outermost query does, and whether it holds an
+/// `INTERSECT` or an `EXCEPT`; which CTEs of its outermost `WITH` that query reads,
+/// directly or through others of that `WITH`; the holders of its subqueries; the keys that
+/// its joins merge, if their sides are told; and, once [`Reach::with_lineage`] gives them,
+/// the places of its output columns and the engine's lineage of each, where the write
+/// needs it.
 pub struct Reach {
     limited: bool,
     outermost: bool,
+    filtering: bool,
     read: Vec<usize>,
-    every: Vec<usize>,
+    pub order: Vec<usize>,
     holders: Vec<(String, Option<Holder>)>,
     keys: Option<Vec<Key>>,
     lineage: Vec<Option<LineageNode>>,
 }
 
 impl Reach {
-    /// The reach of the clauses of `query`, parsed from `sql`, which has `outputs` output
-    /// columns, its subqueries held as `holders` says, the keys that its joins merge
-    /// `keys`, and the lineage of its output columns `lineage`, or none. A CTE is matched
-    /// by its name under the dialect.
+    /// The reach of the clauses of `query`, parsed from `sql`, before its output columns
+    /// are known: its subqueries held as `holders` says, and the keys that its joins merge
+    /// `keys`. A CTE is matched by its name under the dialect.
     pub fn of<'q>(
         sql: &str,
         query: &'q Expression,
-        outputs: usize,
         holders: Vec<(String, Option<Holder>)>,
         keys: Option<Vec<Key>>,
-        lineage: Vec<Option<LineageNode>>,
         dialect: Dialect,
     ) -> Reach {
         let sql: Vec<char> = sql.chars().collect();
@@ -635,6 +604,7 @@ impl Reach {
             _ => (None, false),
         };
         let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
+        let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
         let named = |tree: &'q Expression| -> Vec<&'q TableRef> {
             let one_part = |node: &'q Expression| match node {
                 Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&**table),
@@ -659,8 +629,31 @@ impl Reach {
             }
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
-        let every = (0..outputs).collect();
-        Reach { limited: limited || outermost, outermost, read, every, holders, keys, lineage }
+        let (order, lineage) = (Vec::new(), Vec::new());
+        Reach { limited: limited || outermost, outermost, filtering, read, order, holders, keys, lineage }
+    }
+
+    /// This reach with the places of the output columns, whose projections `order`
+    /// gives, and the engine's lineage of each against `schema`, read from `text`, the
+    /// text that the engine reads for the piece; none where the engine gives none; for a
+    /// query that holds an `INTERSECT` or an `EXCEPT`, a key that a join merges, or a
+    /// subquery in a CTE's or a derived table's select list, as its holders say, and for
+    /// no other.
+    pub fn with_lineage(mut self, text: &str, order: &[usize], schema: &ValidationSchema, dialect: Dialect) -> Reach {
+        self.order = order.to_vec();
+        let held = self.holders.iter().any(|(_, holder)| matches!(holder, Some(Holder::Column(..))));
+        if !(self.filtering || held || self.keys.as_ref().is_some_and(|keys| !keys.is_empty())) {
+            return self;
+        }
+        let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
+        let read = Write::query(text, dialect).ok();
+        let lineage = |place| {
+            tracing::trace_span!("lineage_at_with_schema").in_scope(|| {
+                lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok()
+            })
+        };
+        self.lineage = order.iter().map(|&at| lineage(at)).collect();
+        self
     }
 
     /// The places of the output columns whose rows a use of `context` in the scope at
@@ -690,8 +683,8 @@ impl Reach {
                 Holder::Clause(context) => self.rows(parent, *context),
                 Holder::Tuple(_) => None,
                 Holder::Output(place) => Some(vec![*place]),
-                Holder::Column(source, column) => (self.every.iter())
-                    .map(|&place| {
+                Holder::Column(source, column) => (0..self.order.len())
+                    .map(|place| {
                         let mut nodes = self.lineage.get(place)?.as_ref()?.walk();
                         Some(nodes.any(|node| source.reported_as(&node.source_name) && column.reported_as(&node.name)))
                             .map(|passes| passes.then_some(place))
@@ -707,10 +700,10 @@ impl Reach {
             | ColumnUseContext::WindowFrame
             | ColumnUseContext::AggregateOrder => Some(Vec::new()),
             ColumnUseContext::Order if !self.limited => Some(Vec::new()),
-            ColumnUseContext::Order => (self.outermost && path == "root").then(|| self.every.clone()),
+            ColumnUseContext::Order => (self.outermost && path == "root").then(|| (0..self.order.len()).collect()),
             _ => match scope_steps(path).find(|(_, kind, _)| *kind == "subqueries") {
                 Some(step) => held(step),
-                None => placed.then(|| self.every.clone()),
+                None => placed.then(|| (0..self.order.len()).collect()),
             },
         }
     }

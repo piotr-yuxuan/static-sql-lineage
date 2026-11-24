@@ -136,7 +136,6 @@ have. A reject scenario names an answer that must not be given.
   - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
-  - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
   - `Reach::of`: where the clauses of one write's query reach.
   - `Reach::rows`: the output columns whose rows a use of a column decides.
@@ -390,8 +389,6 @@ why. Only the owner adds a line, through a plan.
   take their expectations from the protocol, and cannot link the binary.
 - `tests/concepts.rs`'s `repository` and `Command::run`'s walk of a directory: a test's
   reading of `src/`, and a command's reading of scripts with its rule for links.
-- `Write::steps` and `Reach::of`: Write gathers the engine's facts about a query, Edge
-  places the clauses' reach from them.
 - `Gap`'s column and `Lineage::walk`'s reading of it: the gap keeps the spelling, by
   which protocol 1 orders and deduplicates gaps; the walk reads it back as a name.
 - The two `Catalog::get(...).map(...)` of `src/write.rs` and `src/answer.rs`: one call
