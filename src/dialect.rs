@@ -13,6 +13,7 @@ pub enum Dialect {
     Snowflake,
     Tsql,
     Duckdb,
+    Postgresql,
 }
 
 /// What sets a dialect apart: its name, as `--describe` spells it; polyglot-sql's name for
@@ -36,6 +37,7 @@ impl Dialect {
             (cfg!(feature = "snowflake"), Dialect::Snowflake),
             (cfg!(feature = "tsql"), Dialect::Tsql),
             (cfg!(feature = "duckdb"), Dialect::Duckdb),
+            (cfg!(feature = "postgresql"), Dialect::Postgresql),
         ]
         .into_iter()
         .filter_map(|(built, dialect)| built.then_some(dialect))
@@ -51,6 +53,7 @@ impl Dialect {
             // SQL Server's default collation compares names ignoring case, delimited or not.
             Dialect::Tsql => rules("tsql", DialectType::TSQL, "dbo", true, false),
             Dialect::Duckdb => rules("duckdb", DialectType::DuckDB, "main", false, false),
+            Dialect::Postgresql => rules("postgresql", DialectType::PostgreSQL, "public", false, true),
         }
     }
 

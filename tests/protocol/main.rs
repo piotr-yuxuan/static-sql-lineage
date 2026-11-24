@@ -223,7 +223,7 @@ fn describe_names_the_build() {
     let entry = entry.expect("Cargo.lock has an entry for polyglot-sql");
     assert!(entry.contains(&format!("version = {}\n", description["engine"]["version"])), "{entry}");
     assert!(entry.contains(&format!("source = {}\n", description["engine"]["source"])), "{entry}");
-    assert_eq!(description["dialects"], json!(["snowflake", "tsql", "duckdb"]));
+    assert_eq!(description["dialects"], json!(["snowflake", "tsql", "duckdb", "postgresql"]));
 }
 
 #[test]
@@ -258,7 +258,7 @@ cases! {
         let output = run(&["completions", shell]);
         assert_succeeded(&output);
         let script = String::from_utf8_lossy(&output.stdout);
-        for word in ["graph", "trace", "uses", "outline", "completions", "dialect", "database", "schema", "json", "snowflake", "tsql", "duckdb"] {
+        for word in ["graph", "trace", "uses", "outline", "completions", "dialect", "database", "schema", "json", "snowflake", "tsql", "duckdb", "postgresql"] {
             assert!(script.contains(word), "{shell} lacks {word}");
         }
     };

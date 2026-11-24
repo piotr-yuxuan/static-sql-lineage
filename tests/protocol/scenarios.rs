@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::{
     answers, assert_refused, lacks, lines, outline, outlines, printed_json, request, request_in, respond, trace,
-    trace_in, traces,
+    trace_in, traces, traces_in,
 };
 
 const CTE: &str = "with orders as (select id from raw.orders) select id from orders";
@@ -106,6 +106,11 @@ cases! {
     dialect_generic_fallback: assert!(answers(bigquery().to_string().as_bytes()).stdout.is_empty());
     dialect_tsql_ignores_case: assert_eq!(ignoring_case(), ["[dbo].[Orders].[OrderId] -> t.orderid copy"]);
     dialect_tsql_delimited_as_exact: lacks(&ignoring_case(), |line| line.starts_with("refused"));
+    dialect_postgresql_lowers_unquoted: traces_in("postgresql", &[("\"orders\"", &["\"orderid\""])],
+        "select OrderId from Orders", &["\"orders\".\"orderid\" -> t.OrderId copy"]);
+    dialect_postgresql_unquoted_as_exact: lacks(
+        &trace_in("postgresql", &[("\"orders\"", &["\"orderid\""])], "select OrderId from Orders"),
+        |line| line.starts_with("refused") || line.starts_with("gap unknown_relation"));
 }
 
 #[test]

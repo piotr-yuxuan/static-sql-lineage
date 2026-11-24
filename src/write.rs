@@ -637,9 +637,10 @@ pub fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
 
 /// The columns of the sources of `select`, as [`named`] gives them, each with the places
 /// of the joins that merge it: a key that a join's `USING` names, or that its `NATURAL`
-/// finds on both its sides, once. Snowflake puts a join's keys first, in the order of its
-/// `USING` or, for `NATURAL`, of its left side, then its left side's other columns, then
-/// its right side's; DuckDB keeps each key at its first place, and T-SQL merges none.
+/// finds on both its sides, once. A dialect whose `*` lists the merged keys first, as
+/// Snowflake's, puts a join's keys first, in the order of its `USING` or, for `NATURAL`, of
+/// its left side, then its left side's other columns, then its right side's; DuckDB keeps
+/// each key at its first place, and T-SQL merges none.
 fn joined<'a>(
     select: &'a Select,
     ctes: &[&'a Cte],

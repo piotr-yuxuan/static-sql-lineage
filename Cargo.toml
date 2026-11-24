@@ -9,10 +9,11 @@ license = "EUPL-1.2"
 publish = false
 
 [features]
-default = ["snowflake", "tsql", "duckdb"]
+default = ["snowflake", "tsql", "duckdb", "postgresql"]
 snowflake = ["polyglot-sql/dialect-snowflake"]
 tsql = ["polyglot-sql/dialect-tsql"]
 duckdb = ["polyglot-sql/dialect-duckdb"]
+postgresql = ["polyglot-sql/dialect-postgresql"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

@@ -318,6 +318,11 @@ have. A reject scenario names an answer that must not be given.
   `[dbo].[Orders].[OrderId] -> t.orderid`, `copy`; no gap.
 - reject `dialect.tsql-delimited-as-exact`: for that request, a refusal, as if
   `[OrderId]` named only `OrderId` exactly.
+- accept `dialect.postgresql-lowers-unquoted`: dialect `postgresql`; catalog `"orders"`
+  with the column `"orderid"`; query `select OrderId from Orders`: the edge
+  `"orders"."orderid" -> t.OrderId`, `copy`; no gap.
+- reject `dialect.postgresql-unquoted-as-exact`: for that request, a refusal or an
+  `unknown_relation` gap, as if `Orders` named `"Orders"` or `"ORDERS"`.
 
 ## Derived terms
 
