@@ -7,8 +7,9 @@
 CARGO_JOBS ?= 4
 TEST_THREADS ?= 4
 BASE ?= main
-# The Python of the release and of its tests, fake-gh without an extension.
-PYTHON := scripts/release.py tests/tools tests/bin/fake-gh
+# The Python of the release, of the benchmarks and of their tests, fake-gh without
+# an extension.
+PYTHON := scripts/release.py scripts/bench.py tests/tools tests/bin/fake-gh
 export PYTHONDONTWRITEBYTECODE := 1
 
 .PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged size
