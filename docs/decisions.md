@@ -17,7 +17,7 @@ are those of `concepts.md`.
 | Use case | Caller | Interface | Relies on |
 |---|---|---|---|
 | U1. Column lineage of a dbt project's compiled models: for dbt-oss users, who have no other, and compared with dbt's own where the proprietary build writes it | dbt-lsp-plus, and dbt-mode through it | one JSON request on standard input, one response on standard output; `--describe` | replace writes, the catalog, answers |
-| U2. Porting a legacy SQL Server estate to Snowflake: which relations each write reads, the order to migrate them in, a column's sources and readers, one write in brief | an agent, or a person | `graph`, `trace`, `uses`, `outline`: short text by default, JSON on request | every kind of write, routines, the derived terms; later, the linter's own concepts |
+| U2. Porting a legacy SQL Server estate to Snowflake: which relations each write reads, the order to migrate them in, a column's sources and readers, one write in brief | an agent, or a person | `graph`, `trace`, `uses`, `outline`: short text by default, JSON on request | every kind of write, routines (deferred), the derived terms; later, the linter's own concepts |
 | U3. Refactoring a dbt project: duplicated logic and conflicting rules, found by fingerprints of units of logic rooted through `copy` edges | the owner, or an agent | none before its own plan | edges, and concepts that its plan declares |
 
 ## Rulings
@@ -121,7 +121,7 @@ Ruled by the owner on 2026-11-24, before the chain of plans 012 to 021:
   `static-sql-lineage://<dialect>`.
 - R21. Steps: their kinds are CTE, derived table, subquery and branch. Protocol 1 gives
   `steps` on the answer and, on each edge, `paths`, each a list of hops
-  `{"step", "column", "kind"}`. The edges inside a write have no list of their own:
+  `{"step": <index into steps>, "column", "kind"}`. The edges inside a write have no list of their own:
   the hops of the paths are those edges. Plan 017's kernel text is approved, and that
   plan writes it into `concepts.md`.
 - R22. Performance: measured, optional in CI. No plan worsens the time of 6,000

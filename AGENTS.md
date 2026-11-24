@@ -59,9 +59,11 @@ Reuses: <operations and types at the base that the steps call or extend>
   by no more than 0.05 from one check to the next, the noise between rounds (0.746 and
   0.814 at plan 012; later ratios in the chain's index of their check). A ratio that
   rises more makes the next plan a consolidation that brings it back down. The ratios
-  found are the next budgets' scale.
+  found are the next budgets' scale. A budget in Python is scaled by our Python's ratio
+  to the same code at ruff's default width, 0.820 at plan 012 (972 lines against
+  1,186), taken again at each check; the rule of 0.05 covers `src/` and `tests/` only.
 - `make size` gives the counts, so that no count is taken by hand.
-- Step 5's findings are recorded with `coordinator:instrument` in
+- The review's findings (step 5 of `workflow:plans`) are recorded with `coordinator:instrument` in
   `docs/work/findings/NNN.json`, and its summary is quoted in the pre-merge summary.
 - A new dependency is named in its plan's *Decisions*.
 
