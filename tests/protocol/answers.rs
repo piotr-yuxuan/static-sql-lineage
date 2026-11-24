@@ -6,49 +6,60 @@
 
 use serde_json::json;
 
-use super::{answers, assert_refused, outline, outlines, request, request_in, respond, trace, trace_in};
+use super::{
+    answered, answers, assert_refused, outline, outlines, request, request_in, respond, trace_in, traces, traces_in,
+};
 
-#[test]
-fn columns_name_a_write_with_no_edge() {
-    let answer = &respond(&request(&[("s", &["a"])], &[("t", "select count(*) as n from s")]))[0];
-    assert_eq!(answer["columns"], json!(["n"]));
-    assert!(outline(answer).is_empty(), "{answer}");
-}
-
-#[test]
-fn sql_that_does_not_parse_is_refused() {
-    for sql in ["select from where", "select a from s; select a from s"] {
-        assert_eq!(trace(&[("s", &["a"])], sql), ["refused unparsed"], "{sql}");
-    }
-}
-
-#[test]
-fn relations_alike_but_for_case_are_ambiguous() {
-    let sql = "select o.x as p, p.y as q from \"Orders\" o join orders p on o.x = p.y";
-    assert_eq!(trace(&[("\"Orders\"", &["x"]), ("orders", &["y"])], sql), ["gap ambiguous_relation - -"]);
-}
-
-#[test]
-fn a_column_reported_as_two_declared_is_unresolved() {
-    assert_eq!(trace(&[("w", &["\"a\"", "A"])], "select \"a\" as x from w"), ["gap unresolved_reference - x"]);
-}
-
-#[test]
-fn an_unsure_reference_is_unresolved() {
-    assert_eq!(trace(&[("s", &["a"]), ("u", &["a"])], "select a from s, u"), ["gap unresolved_reference - a"]);
-}
-
-#[test]
-fn an_unknown_star_makes_its_target_unknown() {
-    let answers = respond(&request(&[], &[("u", "select * from r"), ("v", "select a from u")]));
-    assert_eq!(outline(&answers[1]), ["gap unknown_relation u -"]);
-}
-
-#[test]
-fn a_quoted_relation_is_completed_by_defaults() {
-    let mut request = request(&[("db.s.\"Orders\"", &["id"])], &[("t", "select id from \"Orders\"")]);
-    request["defaults"] = json!({"database": "db", "schema": "s"});
-    assert_eq!(outline(&respond(&request)[0]), ["db.s.\"Orders\".id -> t.id copy"]);
+cases! {
+    columns_name_a_write_with_no_edge: answered(&[("s", &["a"])], "select count(*) as n from s", json!(["n"]), &[]);
+    sql_that_does_not_parse_is_refused: {
+        traces(&[("s", &["a"])], "select from where", &["refused unparsed"]);
+        traces(&[("s", &["a"])], "select a from s; select a from s", &["refused unparsed"]);
+    };
+    relations_alike_but_for_case_are_ambiguous: traces(&[("\"Orders\"", &["x"]), ("orders", &["y"])],
+        "select o.x as p, p.y as q from \"Orders\" o join orders p on o.x = p.y", &["gap ambiguous_relation - -"]);
+    a_column_reported_as_two_declared_is_unresolved:
+        traces(&[("w", &["\"a\"", "A"])], "select \"a\" as x from w", &["gap unresolved_reference - x"]);
+    an_unsure_reference_is_unresolved:
+        traces(&[("s", &["a"]), ("u", &["a"])], "select a from s, u", &["gap unresolved_reference - a"]);
+    an_unknown_star_makes_its_target_unknown: assert_eq!(
+        outlines(&request(&[], &[("u", "select * from r"), ("v", "select a from u")]))[1],
+        ["gap unknown_relation u -"]
+    );
+    a_quoted_relation_is_completed_by_defaults: {
+        let mut request = request(&[("db.s.\"Orders\"", &["id"])], &[("t", "select id from \"Orders\"")]);
+        request["defaults"] = json!({"database": "db", "schema": "s"});
+        assert_eq!(outline(&respond(&request)[0]), ["db.s.\"Orders\".id -> t.id copy"]);
+    };
+    tsql_declarations_alike_but_for_case_are_refused: {
+        let catalog: &[(&str, &[&str])] = &[("[dbo].[T]", &["a"]), ("dbo.t", &["b"])];
+        let relations = request_in("tsql", catalog, &[("u", "select a from dbo.t")]);
+        assert_refused(&answers(relations.to_string().as_bytes()), "dbo.t twice");
+        let columns = request_in("tsql", &[("[dbo].[T]", &["[A]", "a"])], &[("u", "select a from dbo.t")]);
+        assert_refused(&answers(columns.to_string().as_bytes()), "a twice");
+    };
+    tsql_a_string_alias_is_a_name: {
+        let catalog: &[(&str, &[&str])] = &[("s", &["a"])];
+        let (total, capitals) = (["s.a -> t.total copy"], ["s.a -> t.TOTAL copy"]);
+        traces_in("tsql", catalog, "with c as (select a as 'Total' from s) select total from c", &total);
+        traces_in("tsql", catalog, "with c as (select a 'Total' from s) select TOTAL from c", &capitals);
+        traces_in("tsql", catalog, "select x.total from (select a as 'Total' from s) as x", &total);
+    };
+    tsql_a_table_alias_of_another_case_is_resolved: {
+        let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
+        let expected = ["s.a -> t.a copy", "s.b -> t.b copy"];
+        traces_in("tsql", catalog, "select o.a, O.b from s as O", &expected);
+        traces_in("tsql", catalog, "select [X].a, x.b from s as x", &expected);
+        traces_in("tsql", catalog, "select q.a, Q.b from (select a, b from s) as [Q]", &expected);
+    };
+    tsql_a_filter_branch_in_a_cte_reads_bracketed_names: {
+        // polyglot-sql's lineage of the piece's own text does not follow `x` to `[X]`.
+        let catalog: &[(&str, &[&str])] = &[("s", &["[Amount]"]), ("u", &["[Amount]"])];
+        let cte = "with c as (select [Amount] from s intersect select [Amount] from u)";
+        let expected = ["s.[Amount] -> t.amount copy", "u.[Amount] -> t.amount rows"];
+        traces_in("tsql", catalog, &format!("{cte} select amount from c"), &expected);
+        traces_in("tsql", catalog, &format!("{cte} select x.amount from c as [X]"), &expected);
+    };
 }
 
 #[test]
@@ -94,36 +105,6 @@ fn tsql_a_view_read_by_another_spelling_is_known() {
 }
 
 #[test]
-fn tsql_declarations_alike_but_for_case_are_refused() {
-    let relations = request_in("tsql", &[("[dbo].[T]", &["a"]), ("dbo.t", &["b"])], &[("u", "select a from dbo.t")]);
-    assert_refused(&answers(relations.to_string().as_bytes()), "dbo.t twice");
-    let columns = request_in("tsql", &[("[dbo].[T]", &["[A]", "a"])], &[("u", "select a from dbo.t")]);
-    assert_refused(&answers(columns.to_string().as_bytes()), "a twice");
-}
-
-#[test]
-fn tsql_a_string_alias_is_a_name() {
-    for (sql, child) in [
-        ("with c as (select a as 'Total' from s) select total from c", "total"),
-        ("with c as (select a 'Total' from s) select TOTAL from c", "TOTAL"),
-        ("select x.total from (select a as 'Total' from s) as x", "total"),
-    ] {
-        assert_eq!(trace_in("tsql", &[("s", &["a"])], sql), [format!("s.a -> t.{child} copy")], "{sql}");
-    }
-}
-
-#[test]
-fn tsql_a_table_alias_of_another_case_is_resolved() {
-    for sql in [
-        "select o.a, O.b from s as O",
-        "select [X].a, x.b from s as x",
-        "select q.a, Q.b from (select a, b from s) as [Q]",
-    ] {
-        assert_eq!(trace_in("tsql", &[("s", &["a", "b"])], sql), ["s.a -> t.a copy", "s.b -> t.b copy"], "{sql}");
-    }
-}
-
-#[test]
 fn tsql_a_cte_named_in_another_case_is_read() {
     let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
     let literal =
@@ -134,20 +115,6 @@ fn tsql_a_cte_named_in_another_case_is_read() {
     assert_eq!(trace_in("tsql", catalog, starred), ["s.a -> t.a copy"]);
     let filtered = "with [Été] as (select a from s where b > 0) select a from été";
     assert_eq!(trace_in("tsql", catalog, filtered), ["s.a -> t.a copy", "s.b -> t.a rows"]);
-}
-
-#[test]
-fn tsql_a_filter_branch_in_a_cte_reads_bracketed_names() {
-    let catalog: &[(&str, &[&str])] = &[("s", &["[Amount]"]), ("u", &["[Amount]"])];
-    // polyglot-sql's lineage of the piece's own text does not follow `x` to `[X]`.
-    for reader in ["select amount from c", "select x.amount from c as [X]"] {
-        let sql = format!("with c as (select [Amount] from s intersect select [Amount] from u) {reader}");
-        assert_eq!(
-            trace_in("tsql", catalog, &sql),
-            ["s.[Amount] -> t.amount copy", "u.[Amount] -> t.amount rows"],
-            "{reader}"
-        );
-    }
 }
 
 #[test]

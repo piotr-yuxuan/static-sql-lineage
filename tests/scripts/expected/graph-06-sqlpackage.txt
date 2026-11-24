@@ -1,0 +1,3 @@
+tests/scripts/tsql/06-sqlpackage.sql:7:1 [dbo].[vA] <- [dbo].[Orders]
+tests/scripts/tsql/06-sqlpackage.sql:11:1 [dbo].[vB] <- [dbo].[vA]
+skipped: 1

@@ -1,0 +1,3 @@
+tests/scripts/tsql/07-routines.sql:1:1 [dbo].[vSign] <- [dbo].[Orders]
+tests/scripts/tsql/07-routines.sql:9:1 [dbo].[vLate] <- [dbo].[Orders], [dbo].[Returns]
+skipped: 1

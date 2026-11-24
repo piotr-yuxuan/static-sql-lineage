@@ -2,6 +2,9 @@
 //! The binary run as a caller runs it, as `docs/protocol.md` gives its uses: here
 //! `--describe` and the arguments it refuses, and the helpers of the modules.
 
+#[macro_use]
+mod rows;
+
 mod agreement;
 mod answers;
 mod cases;
@@ -35,11 +38,17 @@ fn command(arguments: &[&str]) -> Output {
     binary().current_dir(env!("CARGO_MANIFEST_DIR")).args(arguments).output().expect("the binary runs")
 }
 
-/// The lines that the command line `arguments` prints, which the binary does not refuse.
-fn lines(arguments: &[&str]) -> Vec<String> {
+/// The text that the command line `arguments` prints, which the binary does not refuse.
+#[track_caller]
+fn stdout(arguments: &[&str]) -> String {
     let output = command(arguments);
     assert_succeeded(&output);
-    String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
+    String::from_utf8(output.stdout).expect("the output is UTF-8")
+}
+
+/// The lines that the command line `arguments` prints, which the binary does not refuse.
+fn lines(arguments: &[&str]) -> Vec<String> {
+    stdout(arguments).lines().map(str::to_string).collect()
 }
 
 /// The JSON that the command line `arguments` prints, as [`lines`] reads it.
@@ -109,6 +118,35 @@ fn trace(catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
     trace_in("snowflake", catalog, sql)
 }
 
+/// Asserts that the outline of the answer to `sql` against `catalog` in `dialect`, its
+/// target `t`, is `expected`.
+#[track_caller]
+fn traces_in(dialect: &str, catalog: &[(&str, &[&str])], sql: &str, expected: &[&str]) {
+    assert_eq!(trace_in(dialect, catalog, sql), expected, "{sql}");
+}
+
+/// Asserts that the outline of the answer to `sql` against `catalog` in Snowflake, its
+/// target `t`, is `expected`.
+#[track_caller]
+fn traces(catalog: &[(&str, &[&str])], sql: &str, expected: &[&str]) {
+    traces_in("snowflake", catalog, sql, expected);
+}
+
+/// Asserts that the answer to `sql` against `catalog` in Snowflake, its target `t`, gives
+/// the columns `columns` and the outline `expected`.
+#[track_caller]
+fn answered(catalog: &[(&str, &[&str])], sql: &str, columns: Value, expected: &[&str]) {
+    let answer = &respond(&request(catalog, &[("t", sql)]))[0];
+    assert_eq!(answer["columns"], columns, "{sql}");
+    assert_eq!(outline(answer), expected, "{sql}");
+}
+
+/// Asserts that no line of the outline `found` is `unwanted`, as a reject scenario says.
+#[track_caller]
+fn lacks(found: &[String], unwanted: impl Fn(&str) -> bool) {
+    assert!(!found.iter().any(|line| unwanted(line)), "{found:?}");
+}
+
 fn read(path: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).expect("a file of the repository reads")
 }
@@ -137,6 +175,7 @@ fn assert_succeeded(output: &Output) {
 
 /// A refusal: status 2, nothing on standard output, one line on standard error that
 /// contains `naming`.
+#[track_caller]
 fn assert_refused(output: &Output, naming: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
@@ -175,19 +214,12 @@ fn describe_follows_the_protocol_document() {
     assert_eq!(documented, described);
 }
 
-#[test]
-fn refuses_an_argument_other_than_describe() {
-    assert_refused(&run(&["--explain"]), "--explain");
-}
-
-#[test]
-fn refuses_describe_with_another_argument() {
-    assert_refused(&run(&["--describe", "--explain"]), "--explain");
-}
-
-#[cfg(unix)]
-#[test]
-fn refuses_an_argument_that_is_not_unicode() {
-    use std::os::unix::ffi::OsStrExt;
-    assert_refused(&run(&[OsStr::from_bytes(b"\xff")]), "\\xFF");
+cases! {
+    refuses_an_argument_other_than_describe: assert_refused(&run(&["--explain"]), "--explain");
+    refuses_describe_with_another_argument: assert_refused(&run(&["--describe", "--explain"]), "--explain");
+    #[cfg(unix)]
+    refuses_an_argument_that_is_not_unicode: {
+        use std::os::unix::ffi::OsStrExt;
+        assert_refused(&run(&[OsStr::from_bytes(b"\xff")]), "\\xFF");
+    };
 }

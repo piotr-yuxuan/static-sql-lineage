@@ -1,0 +1,5 @@
+dbo.Stage.Amount -> dbo.Fact.[Amount] copy tests/scripts/tsql/lineage/2-load.sql:1:1, tests/scripts/tsql/lineage/2-load.sql:2:1
+  [dbo].[Fact].[Amount] -> dbo.vBase.Total copy tests/scripts/tsql/lineage/3-views.sql:3:1
+    dbo.vBase.Total -> dbo.vTop.Total copy tests/scripts/tsql/lineage/3-views.sql:1:1
+    dbo.vBase.Total -> dbo.vBoth.Total copy tests/scripts/tsql/lineage/3-views.sql:7:1
+refused: tests/scripts/tsql/lineage/2-load.sql:4:1 invalid

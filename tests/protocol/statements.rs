@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 
-use super::{outline, outlines, request_in, respond, trace_in};
+use super::{answered, outline, outlines, request_in, respond, trace_in, traces_in};
 
 /// The probe's relations: `s` and `u` read, `t` the target of most writes.
 const CATALOG: &[(&str, &[&str])] = &[("s", &["k", "x", "y", "flag"]), ("u", &["k", "z"]), ("t", &["k", "a", "b"])];
@@ -25,6 +25,164 @@ fn traced(dialect: &str, writes: &[(&str, &str)]) -> Vec<Vec<String>> {
 /// The outline of the answer to `sql`, its target `t`, in `dialect` against `CATALOG`.
 fn trace(dialect: &str, sql: &str) -> Vec<String> {
     trace_in(dialect, CATALOG, sql)
+}
+
+/// Asserts that the outline of the answer to `sql`, its target `t`, in `dialect` against
+/// `CATALOG` is `expected`.
+#[track_caller]
+fn expect(dialect: &str, sql: &str, expected: &[&str]) {
+    traces_in(dialect, CATALOG, sql, expected);
+}
+
+cases! {
+    a_view_column_list_renames_its_outputs: {
+        answered(CATALOG, "create view t (kk, \"Xx\") as select k, x from s", json!(["kk", "\"Xx\""]),
+            &["s.k -> t.kk copy", "s.x -> t.\"Xx\" copy"]);
+        expect("tsql", "create view t (kk, [Xx]) as select k, x from s", &["s.k -> t.kk copy", "s.x -> t.[Xx] copy"]);
+    };
+    a_table_column_list_renames_its_outputs: assert_eq!(
+        traced("snowflake", &[
+            ("t", "create table t (kk int, \"Aa\" int) as select k, x + 1 from s"),
+            ("v", "select \"Aa\" from t"),
+        ]),
+        [vec!["s.k -> t.kk copy", "s.x -> t.\"Aa\" derive"], vec!["t.\"Aa\" -> v.\"Aa\" copy"]]
+    );
+    a_column_list_of_another_length_is_refused: {
+        expect("snowflake", "create view t (kk) as select k, x from s", &["refused invalid"]);
+        expect("snowflake", "create table t (kk int, aa int, bb int) as select k, x from s", &["refused invalid"]);
+    };
+    statements_that_are_not_writes_are_refused: {
+        expect("snowflake", "insert into t (k, a) values (1, 2)", &["refused not_a_query"]);
+        expect("snowflake", "create table t (k int, a int)", &["refused not_a_query"]);
+        expect("duckdb", "insert into t by name select x as a, k from s", &["refused not_a_query"]);
+        expect("snowflake", "insert all into t (k, a) values (k, x) select k, x from s", &["refused not_a_query"]);
+        expect("snowflake", "truncate table t", &["refused not_a_query"]);
+    };
+    a_statement_that_is_not_a_write_keeps_its_target:
+        for sql in ["insert into t (k, a) values (1, 2)", "create view v as select k, x from s"] {
+            assert_eq!(traced("snowflake", &[("t", sql), ("w", "select b from t")])[1], ["t.b -> w.b copy"], "{sql}");
+        };
+    insert_maps_its_list_by_position: {
+        // Ordered by the target's columns, `k`, `a`, `b`, which are its answer's.
+        answered(CATALOG, "insert into t (b, a, k) select x, y + 1, k from s where flag = 1", json!(["k", "a", "b"]), &[
+            "s.flag -> t.k rows",
+            "s.k -> t.k copy",
+            "s.flag -> t.a rows",
+            "s.y -> t.a derive",
+            "s.flag -> t.b rows",
+            "s.x -> t.b copy",
+        ]);
+        let answer = &respond(&writes("snowflake", &[("t", "insert into t (b, a) select x, y from s")]))[0];
+        assert_eq!(answer["columns"], json!(["a", "b"]));
+    };
+    insert_without_a_list_maps_the_targets_columns: expect("snowflake", "insert into t select k, x, y from s",
+        &["s.k -> t.k copy", "s.x -> t.a copy", "s.y -> t.b copy"]);
+    an_insert_of_unnamed_outputs_is_read: expect("snowflake", "insert into t select k, x + 1, k from s",
+        &["s.k -> t.k copy", "s.x -> t.a derive", "s.k -> t.b copy"]);
+    insert_overwrite_keeps_the_targets_columns: assert_eq!(
+        traced("snowflake", &[("t", "insert overwrite into t (k, a) select k, x from s"), ("v", "select b from t")]),
+        [vec!["s.k -> t.k copy", "s.x -> t.a copy"], vec!["t.b -> v.b copy"]]
+    );
+    insert_of_another_count_is_refused:
+        for sql in ["insert into t (k, a) select k, x, y from s", "insert into t select k, x from s"] {
+            expect("snowflake", sql, &["refused invalid"]);
+        };
+    insert_into_a_column_the_target_lacks_is_refused:
+        expect("snowflake", "insert into t (k, nope) select k, x from s", &["refused invalid"]);
+    a_with_before_a_statement_is_read: {
+        let expected = ["s.flag -> t.k rows", "s.k -> t.k copy", "s.flag -> t.a rows", "s.x -> t.a copy"];
+        let cte = "with c as (select k, x from s where flag = 1)";
+        expect("snowflake", &format!("{cte} insert into t (k, a) select k, x from c"), &expected);
+        expect("snowflake", &format!("insert into t (k, a) {cte} select k, x from c"), &expected);
+        expect("snowflake", "insert into t (k, a) (select k, x from s)", &["s.k -> t.k copy", "s.x -> t.a copy"]);
+    };
+    update_copies_the_columns_it_sets: answered(CATALOG, "update t set b = s.x, a = s.y from s", json!(["a", "b"]),
+        &["s.y -> t.a copy", "s.x -> t.b copy"]);
+    update_from_decides_rows_of_the_columns_it_sets:
+        expect("snowflake", "update t set a = s.x, b = s.y from s where t.k = s.k and s.flag = 1", &[
+        "s.flag -> t.a rows",
+        "s.k -> t.a rows",
+        "s.x -> t.a copy",
+        "s.flag -> t.b rows",
+        "s.k -> t.b rows",
+        "s.y -> t.b copy",
+    ]);
+    a_scalar_subquery_in_set_derives: expect("snowflake", "update t set a = (select max(x) from s where s.k = t.k)",
+        &["s.k -> t.a rows", "s.x -> t.a derive"]);
+    a_condition_on_the_targets_own_row_gives_no_edge:
+        expect("snowflake", "update t set a = s.x from s where t.b > 0", &["s.x -> t.a copy"]);
+    a_value_from_the_targets_own_row_is_an_edge: {
+        expect("snowflake", "update t set a = a + 1 where b > 0", &["t.a -> t.a derive"]);
+        expect("snowflake", "update t set b = a", &["t.a -> t.b copy"]);
+    };
+    set_of_a_column_the_target_lacks_is_refused:
+        expect("snowflake", "update t set nope = s.x from s", &["refused invalid"]);
+    tsql_update_through_an_alias_finds_its_target: {
+        let expected = ["s.k -> t.a rows", "s.x -> t.a copy"];
+        expect("tsql", "update tt set a = s.x from t as tt join s on tt.k = s.k", &expected);
+        expect("snowflake", "update t as tt set a = s.x from s where tt.k = s.k", &expected);
+    };
+    tsql_update_from_its_target_joined:
+        expect("tsql", "update t set a = s.x from t join s on t.k = s.k", &["s.k -> t.a rows", "s.x -> t.a copy"]);
+    tsql_with_before_an_update_is_read:
+        expect("tsql", "with c as (select k, x from s where flag = 1) update t set a = c.x from c where t.k = c.k",
+        &["s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy"]);
+    delete_using_decides_rows_of_every_column:
+        answered(CATALOG, "delete from t using s where t.k = s.k and s.flag = 0", json!(["k", "a", "b"]), &[
+        "s.flag -> t.k rows",
+        "s.k -> t.k rows",
+        "s.flag -> t.a rows",
+        "s.k -> t.a rows",
+        "s.flag -> t.b rows",
+        "s.k -> t.b rows",
+    ]);
+    tsql_delete_from_a_join_decides_rows:
+        for sql in ["delete t from t join s on t.k = s.k", "delete tt from t as tt join s on tt.k = s.k"] {
+            expect("tsql", sql, &["s.k -> t.k rows", "s.k -> t.a rows", "s.k -> t.b rows"]);
+        };
+    merge_on_decides_rows_of_every_column:
+        expect("snowflake", "merge into t using s on t.k = s.k when matched then update set a = s.x",
+        &["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
+    merge_update_copies_the_columns_it_sets:
+        expect("snowflake", "merge into t using s on t.k = s.k when matched then update set b = s.y + 1, a = s.x",
+        &["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows", "s.y -> t.b derive"]);
+    merge_insert_maps_its_list:
+        expect("snowflake", "merge into t using s on t.k = s.k when not matched then insert (b, k) values (s.x, s.k)",
+        &["s.k -> t.k copy", "s.k -> t.a rows", "s.k -> t.b rows", "s.x -> t.b copy"]);
+    // polyglot's validation refuses it, reading the values as the target's columns;
+    // Snowflake maps them by position.
+    merge_insert_without_a_list_is_read:
+        expect("snowflake", "merge into t using s on t.k = s.k when not matched then insert values (s.k, s.x, s.y)",
+        &["s.k -> t.k copy", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows", "s.y -> t.b copy"]);
+    merge_delete_decides_rows_of_every_column:
+        expect("snowflake", "merge into t using s on t.k = s.k when matched and s.flag = 0 then delete", &[
+        "s.flag -> t.k rows",
+        "s.k -> t.k rows",
+        "s.flag -> t.a rows",
+        "s.k -> t.a rows",
+        "s.flag -> t.b rows",
+        "s.k -> t.b rows",
+    ]);
+    a_when_condition_decides_rows_of_its_columns_only:
+        expect("snowflake", "merge into t using s on t.k = s.k when matched and s.flag = 1 then update set a = s.x",
+        &["s.k -> t.k rows", "s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
+    merge_of_a_column_the_target_lacks_is_refused: {
+        let merge = "merge into t using s on t.k = s.k when";
+        expect("snowflake", &format!("{merge} matched then update set nope = s.x"), &["refused invalid"]);
+        let insert = format!("{merge} not matched then insert (k, nope) values (s.k, s.x)");
+        expect("snowflake", &insert, &["refused invalid"]);
+    };
+    merge_into_an_alias_finds_its_target:
+        expect("snowflake", "merge into t as tt using s as ss on tt.k = ss.k when matched then update set tt.a = ss.x",
+        &["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
+    a_column_listed_twice_is_refused: {
+        expect("snowflake", "insert into t (a, a) select x, y from s", &["refused invalid"]);
+        expect("snowflake", "update t set a = 1, a = 2", &["refused invalid"]);
+        expect("snowflake", "merge into t using s on t.k = s.k when matched then update set a = s.x, A = s.y",
+            &["refused invalid"]);
+        // A replace write's list names its output columns, which may not be named alike.
+        expect("snowflake", "create view t (kk, KK) as select k, x from s", &["refused duplicate_column"]);
+    };
 }
 
 #[test]
@@ -67,33 +225,6 @@ fn a_view_answers_as_its_bare_query() {
 }
 
 #[test]
-fn a_view_column_list_renames_its_outputs() {
-    let answer = &respond(&writes("snowflake", &[("t", "create view t (kk, \"Xx\") as select k, x from s")]))[0];
-    assert_eq!(answer["columns"], json!(["kk", "\"Xx\""]));
-    assert_eq!(outline(answer), ["s.k -> t.kk copy", "s.x -> t.\"Xx\" copy"]);
-    let found = trace("tsql", "create view t (kk, [Xx]) as select k, x from s");
-    assert_eq!(found, ["s.k -> t.kk copy", "s.x -> t.[Xx] copy"]);
-}
-
-#[test]
-fn a_table_column_list_renames_its_outputs() {
-    let found = traced(
-        "snowflake",
-        &[("t", "create table t (kk int, \"Aa\" int) as select k, x + 1 from s"), ("v", "select \"Aa\" from t")],
-    );
-    assert_eq!(found, [vec!["s.k -> t.kk copy", "s.x -> t.\"Aa\" derive"], vec!["t.\"Aa\" -> v.\"Aa\" copy"]]);
-}
-
-#[test]
-fn a_column_list_of_another_length_is_refused() {
-    for sql in
-        ["create view t (kk) as select k, x from s", "create table t (kk int, aa int, bb int) as select k, x from s"]
-    {
-        assert_eq!(trace("snowflake", sql), ["refused invalid"], "{sql}");
-    }
-}
-
-#[test]
 fn a_statement_for_another_target_is_refused() {
     assert_eq!(trace("snowflake", "create view v as select k, x from s"), ["refused other_target"]);
     // Traced under its request's target before plan 006, a name that its answer got wrong.
@@ -103,241 +234,6 @@ fn a_statement_for_another_target_is_refused() {
     request["defaults"] = json!({"database": "db", "schema": "sch"});
     request["catalog"] = json!([{"relation": "s", "columns": ["k"]}]);
     assert_eq!(outline(&respond(&request)[0]), ["s.k -> t.k copy"]);
-}
-
-#[test]
-fn statements_that_are_not_writes_are_refused() {
-    let statements = [
-        ("snowflake", "insert into t (k, a) values (1, 2)"),
-        ("snowflake", "create table t (k int, a int)"),
-        ("duckdb", "insert into t by name select x as a, k from s"),
-        ("snowflake", "insert all into t (k, a) values (k, x) select k, x from s"),
-        ("snowflake", "truncate table t"),
-    ];
-    for (dialect, sql) in statements {
-        assert_eq!(trace(dialect, sql), ["refused not_a_query"], "{dialect}: {sql}");
-    }
-}
-
-#[test]
-fn a_statement_that_is_not_a_write_keeps_its_target() {
-    for sql in ["insert into t (k, a) values (1, 2)", "create view v as select k, x from s"] {
-        let found = traced("snowflake", &[("t", sql), ("w", "select b from t")]);
-        assert_eq!(found[1], ["t.b -> w.b copy"], "{sql}");
-    }
-}
-
-#[test]
-fn insert_maps_its_list_by_position() {
-    let answer =
-        &respond(&writes("snowflake", &[("t", "insert into t (b, a, k) select x, y + 1, k from s where flag = 1")]))[0];
-    // Ordered by the target's columns, `k`, `a`, `b`, which are its answer's.
-    assert_eq!(answer["columns"], json!(["k", "a", "b"]));
-    let expected = [
-        "s.flag -> t.k rows",
-        "s.k -> t.k copy",
-        "s.flag -> t.a rows",
-        "s.y -> t.a derive",
-        "s.flag -> t.b rows",
-        "s.x -> t.b copy",
-    ];
-    assert_eq!(outline(answer), expected);
-    let answer = &respond(&writes("snowflake", &[("t", "insert into t (b, a) select x, y from s")]))[0];
-    assert_eq!(answer["columns"], json!(["a", "b"]));
-}
-
-#[test]
-fn insert_without_a_list_maps_the_targets_columns() {
-    let found = trace("snowflake", "insert into t select k, x, y from s");
-    assert_eq!(found, ["s.k -> t.k copy", "s.x -> t.a copy", "s.y -> t.b copy"]);
-}
-
-#[test]
-fn an_insert_of_unnamed_outputs_is_read() {
-    let found = trace("snowflake", "insert into t select k, x + 1, k from s");
-    assert_eq!(found, ["s.k -> t.k copy", "s.x -> t.a derive", "s.k -> t.b copy"]);
-}
-
-#[test]
-fn insert_overwrite_keeps_the_targets_columns() {
-    let found =
-        traced("snowflake", &[("t", "insert overwrite into t (k, a) select k, x from s"), ("v", "select b from t")]);
-    assert_eq!(found, [vec!["s.k -> t.k copy", "s.x -> t.a copy"], vec!["t.b -> v.b copy"]]);
-}
-
-#[test]
-fn insert_of_another_count_is_refused() {
-    for sql in ["insert into t (k, a) select k, x, y from s", "insert into t select k, x from s"] {
-        assert_eq!(trace("snowflake", sql), ["refused invalid"], "{sql}");
-    }
-}
-
-#[test]
-fn insert_into_a_column_the_target_lacks_is_refused() {
-    assert_eq!(trace("snowflake", "insert into t (k, nope) select k, x from s"), ["refused invalid"]);
-}
-
-#[test]
-fn a_with_before_a_statement_is_read() {
-    let expected = ["s.flag -> t.k rows", "s.k -> t.k copy", "s.flag -> t.a rows", "s.x -> t.a copy"];
-    let cte = "with c as (select k, x from s where flag = 1)";
-    for sql in [
-        format!("{cte} insert into t (k, a) select k, x from c"),
-        format!("insert into t (k, a) {cte} select k, x from c"),
-    ] {
-        assert_eq!(trace("snowflake", &sql), expected, "{sql}");
-    }
-    assert_eq!(trace("snowflake", "insert into t (k, a) (select k, x from s)"), ["s.k -> t.k copy", "s.x -> t.a copy"]);
-}
-
-#[test]
-fn update_copies_the_columns_it_sets() {
-    let answer = &respond(&writes("snowflake", &[("t", "update t set b = s.x, a = s.y from s")]))[0];
-    assert_eq!(answer["columns"], json!(["a", "b"]));
-    assert_eq!(outline(answer), ["s.y -> t.a copy", "s.x -> t.b copy"]);
-}
-
-#[test]
-fn update_from_decides_rows_of_the_columns_it_sets() {
-    let found = trace("snowflake", "update t set a = s.x, b = s.y from s where t.k = s.k and s.flag = 1");
-    let expected = [
-        "s.flag -> t.a rows",
-        "s.k -> t.a rows",
-        "s.x -> t.a copy",
-        "s.flag -> t.b rows",
-        "s.k -> t.b rows",
-        "s.y -> t.b copy",
-    ];
-    assert_eq!(found, expected);
-}
-
-#[test]
-fn a_scalar_subquery_in_set_derives() {
-    let found = trace("snowflake", "update t set a = (select max(x) from s where s.k = t.k)");
-    assert_eq!(found, ["s.k -> t.a rows", "s.x -> t.a derive"]);
-}
-
-#[test]
-fn a_condition_on_the_targets_own_row_gives_no_edge() {
-    assert_eq!(trace("snowflake", "update t set a = s.x from s where t.b > 0"), ["s.x -> t.a copy"]);
-}
-
-#[test]
-fn a_value_from_the_targets_own_row_is_an_edge() {
-    assert_eq!(trace("snowflake", "update t set a = a + 1 where b > 0"), ["t.a -> t.a derive"]);
-    assert_eq!(trace("snowflake", "update t set b = a"), ["t.a -> t.b copy"]);
-}
-
-#[test]
-fn set_of_a_column_the_target_lacks_is_refused() {
-    assert_eq!(trace("snowflake", "update t set nope = s.x from s"), ["refused invalid"]);
-}
-
-#[test]
-fn tsql_update_through_an_alias_finds_its_target() {
-    let expected = ["s.k -> t.a rows", "s.x -> t.a copy"];
-    assert_eq!(trace("tsql", "update tt set a = s.x from t as tt join s on tt.k = s.k"), expected);
-    assert_eq!(trace("snowflake", "update t as tt set a = s.x from s where tt.k = s.k"), expected);
-}
-
-#[test]
-fn tsql_update_from_its_target_joined() {
-    assert_eq!(
-        trace("tsql", "update t set a = s.x from t join s on t.k = s.k"),
-        ["s.k -> t.a rows", "s.x -> t.a copy"]
-    );
-}
-
-#[test]
-fn tsql_with_before_an_update_is_read() {
-    let sql = "with c as (select k, x from s where flag = 1) update t set a = c.x from c where t.k = c.k";
-    assert_eq!(trace("tsql", sql), ["s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy"]);
-}
-
-#[test]
-fn delete_using_decides_rows_of_every_column() {
-    let answer = &respond(&writes("snowflake", &[("t", "delete from t using s where t.k = s.k and s.flag = 0")]))[0];
-    assert_eq!(answer["columns"], json!(["k", "a", "b"]));
-    let expected = [
-        "s.flag -> t.k rows",
-        "s.k -> t.k rows",
-        "s.flag -> t.a rows",
-        "s.k -> t.a rows",
-        "s.flag -> t.b rows",
-        "s.k -> t.b rows",
-    ];
-    assert_eq!(outline(answer), expected);
-}
-
-#[test]
-fn tsql_delete_from_a_join_decides_rows() {
-    let expected = ["s.k -> t.k rows", "s.k -> t.a rows", "s.k -> t.b rows"];
-    for sql in ["delete t from t join s on t.k = s.k", "delete tt from t as tt join s on tt.k = s.k"] {
-        assert_eq!(trace("tsql", sql), expected, "{sql}");
-    }
-}
-
-#[test]
-fn merge_on_decides_rows_of_every_column() {
-    let found = trace("snowflake", "merge into t using s on t.k = s.k when matched then update set a = s.x");
-    assert_eq!(found, ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
-}
-
-#[test]
-fn merge_update_copies_the_columns_it_sets() {
-    let sql = "merge into t using s on t.k = s.k when matched then update set b = s.y + 1, a = s.x";
-    let expected = ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows", "s.y -> t.b derive"];
-    assert_eq!(trace("snowflake", sql), expected);
-}
-
-#[test]
-fn merge_insert_maps_its_list() {
-    let sql = "merge into t using s on t.k = s.k when not matched then insert (b, k) values (s.x, s.k)";
-    assert_eq!(trace("snowflake", sql), ["s.k -> t.k copy", "s.k -> t.a rows", "s.k -> t.b rows", "s.x -> t.b copy"]);
-}
-
-#[test]
-fn merge_insert_without_a_list_is_read() {
-    // polyglot's validation refuses it, reading the values as the target's columns;
-    // Snowflake maps them by position.
-    let sql = "merge into t using s on t.k = s.k when not matched then insert values (s.k, s.x, s.y)";
-    let expected = ["s.k -> t.k copy", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows", "s.y -> t.b copy"];
-    assert_eq!(trace("snowflake", sql), expected);
-}
-
-#[test]
-fn merge_delete_decides_rows_of_every_column() {
-    let sql = "merge into t using s on t.k = s.k when matched and s.flag = 0 then delete";
-    let expected = [
-        "s.flag -> t.k rows",
-        "s.k -> t.k rows",
-        "s.flag -> t.a rows",
-        "s.k -> t.a rows",
-        "s.flag -> t.b rows",
-        "s.k -> t.b rows",
-    ];
-    assert_eq!(trace("snowflake", sql), expected);
-}
-
-#[test]
-fn a_when_condition_decides_rows_of_its_columns_only() {
-    let sql = "merge into t using s on t.k = s.k when matched and s.flag = 1 then update set a = s.x";
-    let expected = ["s.k -> t.k rows", "s.flag -> t.a rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"];
-    assert_eq!(trace("snowflake", sql), expected);
-}
-
-#[test]
-fn merge_of_a_column_the_target_lacks_is_refused() {
-    let merge = "merge into t using s on t.k = s.k when";
-    for clause in ["matched then update set nope = s.x", "not matched then insert (k, nope) values (s.k, s.x)"] {
-        assert_eq!(trace("snowflake", &format!("{merge} {clause}")), ["refused invalid"], "{clause}");
-    }
-}
-
-#[test]
-fn merge_into_an_alias_finds_its_target() {
-    let sql = "merge into t as tt using s as ss on tt.k = ss.k when matched then update set tt.a = ss.x";
-    assert_eq!(trace("snowflake", sql), ["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
 }
 
 #[test]
@@ -372,20 +268,6 @@ fn set_with_a_qualified_target_is_read() {
     assert_eq!(trace("snowflake", "update t set t.b = s.y, a = s.x from s"), ["s.x -> t.a copy", "s.y -> t.b copy"]);
     // A target that names no column, such as a tuple, is not read.
     assert_eq!(trace("snowflake", "update t set (a, b) = (select x, y from s)"), ["refused not_a_query"]);
-}
-
-#[test]
-fn a_column_listed_twice_is_refused() {
-    let statements = [
-        "insert into t (a, a) select x, y from s",
-        "update t set a = 1, a = 2",
-        "merge into t using s on t.k = s.k when matched then update set a = s.x, A = s.y",
-    ];
-    for sql in statements {
-        assert_eq!(trace("snowflake", sql), ["refused invalid"], "{sql}");
-    }
-    // A replace write's list names its output columns, which may not be named alike.
-    assert_eq!(trace("snowflake", "create view t (kk, KK) as select k, x from s"), ["refused duplicate_column"]);
 }
 
 #[test]

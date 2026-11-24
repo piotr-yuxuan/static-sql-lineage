@@ -1,0 +1,2 @@
+tests/scripts/tsql/02-views.sql:12:1 [dbo].[vCustomer] <- [dbo].[Customer]
+skipped: 4

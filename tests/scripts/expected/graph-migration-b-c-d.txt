@@ -1,0 +1,6 @@
+tests/scripts/tsql/migration/c-base.sql:3:1 [dbo].[vA] <- dbo.Stage
+tests/scripts/tsql/migration/d-redefine.sql:1:1 dbo.vA <- dbo.Stage2
+tests/scripts/tsql/migration/b-views.sql:1:1 dbo.vB <- dbo.vA
+tests/scripts/tsql/migration/b-views.sql:3:1 [dbo].[vC] <- dbo.Fact, dbo.vB
+replaced_twice: [dbo].[vA] (tests/scripts/tsql/migration/c-base.sql:3:1, tests/scripts/tsql/migration/d-redefine.sql:1:1)
+skipped: 0
