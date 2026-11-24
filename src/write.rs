@@ -853,7 +853,7 @@ fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &
 
 /// The steps of `path`, a scope's path as [`scopes`] writes it, each its kind and its
 /// index, after the path up to it.
-pub fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
+fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
     let steps = path.match_indices('.').map(move |(at, _)| (&path[..at], path[at + 1..].split(['[', ']'])));
     steps.filter_map(|(prefix, mut step)| Some((prefix, step.next()?, step.next()?.parse().ok()?)))
 }
