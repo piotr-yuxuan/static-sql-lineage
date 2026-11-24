@@ -139,7 +139,7 @@ impl Write {
         defaults: &[Name],
     ) -> Result<(RelationName, bool, Vec<Piece>), Refusal> {
         let refused = |reason, detail: String| Refusal { reason, detail };
-        let statement = (parse_one(&self.sql, dialect.polyglot()))
+        let statement = (tracing::trace_span!("parse_one").in_scope(|| parse_one(&self.sql, dialect.polyglot())))
             .map_err(|error| refused(RefusalReason::Unparsed, error.to_string()))?;
         let sql: Vec<char> = self.sql.chars().collect();
         let known = catalog.get(target).map(|(_, columns)| columns);
@@ -286,7 +286,7 @@ impl Write {
     /// The query that `sql` holds, the outermost one when it is parenthesised, as the
     /// engine reads it; refused when it is not one statement, or not a query.
     pub fn query(sql: &str, dialect: Dialect) -> Result<Expression, Refusal> {
-        let parsed = parse_one(sql, dialect.polyglot())
+        let parsed = (tracing::trace_span!("parse_one").in_scope(|| parse_one(sql, dialect.polyglot())))
             .map_err(|error| Refusal { reason: RefusalReason::Unparsed, detail: error.to_string() })?;
         match parsed {
             Expression::Subquery(subquery) if subquery.alias.is_none() => Ok(subquery.this),
@@ -551,8 +551,11 @@ impl Write {
         }
         let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
         let read = Write::query(text, dialect).ok();
-        let lineage =
-            |place| lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok();
+        let lineage = |place| {
+            tracing::trace_span!("lineage_at_with_schema").in_scope(|| {
+                lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok()
+            })
+        };
         order.iter().map(|&at| lineage(at)).collect()
     }
 
