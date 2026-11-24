@@ -48,8 +48,6 @@ RUNS, LARGE_RUNS, LARGE = 5, 3, 6000
 TIMEOUT_SECONDS = 900
 # The sizes whose times the growth compares.
 GROWTH = (1000, 6000)
-# Where Linux says this runner's resident memory, which a forked child's peak starts from.
-SELF = Path("/proc/self/status")
 DIALECT = "duckdb"
 # The SQL of sql-server-samples, never its data, at one commit; and what trace, uses and
 # outline are given there, as docs/performance.md pins them.
@@ -61,10 +59,8 @@ SAMPLES_PATTERNS = (
     "!**/PostDeploymentScripts/**",
 )
 # git without the user's or the system's configuration, hooks or conversion of line endings.
-GIT = (
-    "env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null"
-    " git -c core.autocrlf=false -c core.hooksPath=/dev/null"
-).split()
+GIT = "env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git".split()
+GIT += ["-c", "core.autocrlf=false", "-c", "core.hooksPath=/dev/null"]
 SAMPLES_COLUMN = "Website.Customers.CustomerID"
 SAMPLES_WRITE = (
     "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Website/Views/Customers.sql:1:1"
@@ -233,8 +229,9 @@ def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | Non
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
-            if SELF.exists():
-                floor = max(floor, int(SELF.read_text().split("VmRSS:")[1].split()[0]))
+            # Linux's word of this runner's resident memory, which a forked child starts from.
+            if (proc := Path("/proc/self/status")).exists():
+                floor = max(floor, int(proc.read_text().split("VmRSS:")[1].split()[0]))
             start = time.perf_counter()
             # A child starts with the resident memory of what it was copied from: a vfork,
             # which Popen uses without a preexec_fn, would give it this runner's peak, a
