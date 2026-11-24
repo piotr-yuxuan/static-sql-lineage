@@ -46,6 +46,8 @@ RUNS = 5
 TIMEOUT_SECONDS = 300
 # The sizes whose times the growth compares.
 GROWTH = (1000, 6000)
+# Where Linux says this runner's resident memory, which a forked child's peak starts from.
+SELF = Path("/proc/self/status")
 DIALECT = "duckdb"
 # The SQL of sql-server-samples, never its data, at one commit; and what trace, uses and
 # outline are given there, as docs/performance.md pins them.
@@ -226,13 +228,15 @@ def ways(dialect: str, paths: list[str], column: str, write: str, request: Path 
 
 def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | None) -> dict:
     """The figures of RUNS runs of the binary by one way in, under `label`."""
-    runs = []
-    for _ in range(RUNS):
+    runs, floor = [], 0
+    for run in range(RUNS):
         with (
             open(stdin or os.devnull, "rb") as given,
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
+            if SELF.exists():
+                floor = max(floor, int(SELF.read_text().split("VmRSS:")[1].split()[0]))
             start = time.perf_counter()
             # A child starts with the resident memory of what it was copied from: a vfork,
             # which Popen uses without a preexec_fn, would give it this runner's peak, a
@@ -253,14 +257,16 @@ def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | Non
                 message = f"{' '.join(argv)} in {cwd}: status {code} after {seconds:.0f} s: {said}"
                 raise BenchError(message)
             runs.append((seconds, usage.ru_maxrss))
-            out.seek(0)
-            output = out.read()
+            # Only the last output is read, so that none is resident while a child is forked.
+            if run == RUNS - 1:
+                out.seek(0)
+                output = out.read()
     seconds, peak = figures(runs, sys.platform)
     row = {**label, "way": way, "median_seconds": round(seconds, 4), "peak_kib": peak}
-    row |= counts(way, output)
+    row |= {"floor_kib": floor or None} | counts(way, output)
     found = " ".join(f"{key} {row[key]}" for key in ("writes", "refusals", "skipped") if key in row)
     line = f"{row['shape']:<18} {row['size']:>6} {way:<9} {seconds:>9.3f} s {peak:>9} KiB  {found}"
-    print(line, flush=True)
+    print(line, f"floor {floor} KiB", flush=True)
     return row
 
 
