@@ -7,11 +7,12 @@
 CARGO_JOBS ?= 4
 TEST_THREADS ?= 4
 BASE ?= main
-# The Python of the release and of its tests, fake-gh without an extension.
-PYTHON := scripts/release.py tests/tools tests/bin/fake-gh
+# The Python of the release, of the benchmarks and of their tests, fake-gh without
+# an extension.
+PYTHON := scripts/commands.py scripts/release.py scripts/bench.py tests/tools tests/bin/fake-gh
 export PYTHONDONTWRITEBYTECODE := 1
 
-.PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged size
+.PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged size bench bench-corpora
 
 check: fmt clippy licence python workflows test-python test
 
@@ -63,3 +64,15 @@ size:
 	@tokei src -t Rust -o json | $(TOKEI_CODE) src
 	@tokei tests -t Rust -o json | $(TOKEI_CODE) tests
 	@tokei scripts tests/tools -t Python -o json | $(TOKEI_CODE) python
+
+# The benchmarks of docs/performance.md, on the release build, outside `make check`:
+# `make bench SIZES="1000 6000"` compares a plan with its base.  The corpora need the
+# network and `nix develop .#bench`, which has duckdb.
+SIZES ?= 100 1000 6000
+bench:
+	@cargo build --release --locked -j $(CARGO_JOBS)
+	@python3 scripts/bench.py run --sizes $(SIZES)
+
+bench-corpora:
+	@cargo build --release --locked -j $(CARGO_JOBS)
+	@python3 scripts/bench.py corpora
