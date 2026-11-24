@@ -56,6 +56,11 @@ SAMPLES_PATTERNS = (
     "samples/databases/adventure-works/*-install-script/*.sql",
     "!**/PostDeploymentScripts/**",
 )
+# git without the user's or the system's configuration, hooks or conversion of line endings.
+GIT = (
+    "env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null"
+    " git -c core.autocrlf=false -c core.hooksPath=/dev/null"
+).split()
 SAMPLES_COLUMN = "Website.Customers.CustomerID"
 SAMPLES_WRITE = (
     "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Website/Views/Customers.sql:1:1"
@@ -314,8 +319,8 @@ def corpora() -> None:
             ["fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", SAMPLES_COMMIT],
             ["checkout", "-q", "FETCH_HEAD"],
         ):
-            call("git", "-C", scratch, *command)
-        head = call("git", "-C", scratch, "rev-parse", "HEAD").decode().strip()
+            call(*GIT, "-C", scratch, *command)
+        head = call(*GIT, "-C", scratch, "rev-parse", "HEAD").decode().strip()
         if head != SAMPLES_COMMIT:
             raise BenchError(f"sql-server-samples is at {head}, not {SAMPLES_COMMIT}")
         shutil.rmtree(samples, ignore_errors=True)
