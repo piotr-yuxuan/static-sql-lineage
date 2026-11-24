@@ -123,6 +123,26 @@ fn trace(catalog: &[(&str, &[&str])], sql: &str) -> Vec<String> {
     trace_in("snowflake", catalog, sql)
 }
 
+/// Asserts that the outline of the answer to `sql` against `catalog` in `dialect`, its
+/// target `t`, is `expected`.
+#[track_caller]
+fn traces_in(dialect: &str, catalog: &[(&str, &[&str])], sql: &str, expected: &[&str]) {
+    assert_eq!(trace_in(dialect, catalog, sql), expected, "{sql}");
+}
+
+/// Asserts that the outline of the answer to `sql` against `catalog` in Snowflake, its
+/// target `t`, is `expected`.
+#[track_caller]
+fn traces(catalog: &[(&str, &[&str])], sql: &str, expected: &[&str]) {
+    traces_in("snowflake", catalog, sql, expected);
+}
+
+/// Asserts that no line of the outline `found` is `unwanted`, as a reject scenario says.
+#[track_caller]
+fn lacks(found: &[String], unwanted: impl Fn(&str) -> bool) {
+    assert!(!found.iter().any(|line| unwanted(line)), "{found:?}");
+}
+
 fn read(path: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).expect("a file of the repository reads")
 }
