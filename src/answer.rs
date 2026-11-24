@@ -169,7 +169,8 @@ impl Answer {
             Ok(query) => query,
             Err(refusal) => return answer.refused(refusal),
         };
-        let relations = &Write::relations(sql, &query, dialect, defaults);
+        let reach = Reach::of(sql, &query, catalog, dialect, defaults);
+        let relations = &reach.relations;
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
         let mut gaps: Vec<Gap> = unknown.into_iter().map(Gap::unknown).collect();
         let schema = catalog.schema(relations);
@@ -243,9 +244,9 @@ impl Answer {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
         let children = End::of_columns(target, &outputs);
-        let reach = Reach::of(sql, &query, catalog, dialect, defaults).with_lineage(&text, &order, &schema, dialect);
+        let reach = reach.with_lineage(&text, &order, &schema, dialect);
         let own = piece.own.then_some(found);
-        let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, relations, catalog, own);
+        let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, catalog, own);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)
     }

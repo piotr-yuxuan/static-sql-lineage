@@ -133,7 +133,6 @@ have. A reject scenario names an answer that must not be given.
   - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
   - `Write::text`: the text of a piece of a statement, its own or its tree generated under the dialect.
   - `Write::query`: the query that a piece's text holds, or its refusal.
-  - `Write::relations`: the relations that a piece's query reads, as its text names them.
   - `Write::outputs`: the names of a piece's output columns, as its text names them, unknown, or its refusal.
   - `Reach::of`: where the clauses of one write's query reach.
   - `Reach::rows`: the output columns whose rows a use of a column decides.

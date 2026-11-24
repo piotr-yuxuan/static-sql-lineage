@@ -301,25 +301,28 @@ impl Write {
         }
     }
 
-    /// The relations that `query`, parsed from `sql`, reads: its table references that
-    /// name no CTE in scope, as the engine scopes them and as the dialect compares names,
-    /// and those that Snowflake's `IDENTIFIER` names by its one string literal in a `FROM`
-    /// or a join, ordered by their spelling.
-    pub fn relations(sql: &str, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
-        let sql: Vec<char> = sql.chars().collect();
-        let root = build_scope(query);
+    /// The relations that `query`, parsed from `sql`, whose scopes `all` lists, reads: its
+    /// table references that name no CTE in scope, as the engine scopes them and as the
+    /// dialect compares names, and those that Snowflake's `IDENTIFIER` names by its one
+    /// string literal in a `FROM` or a join, ordered by their spelling.
+    fn relations(
+        all: &[(String, &Scope, Option<Name>)],
+        sql: &[char],
+        query: &Expression,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Vec<RelationName> {
         // The engine's scopes match a CTE's name ignoring ASCII case alone.
         let cte = |scope: &Scope, table: &TableRef| {
             scope.cte_sources.values().any(|source| {
-                matches!(&source.expression, Expression::Cte(cte) if names_cte(table, &cte.alias, &sql, dialect))
+                matches!(&source.expression, Expression::Cte(cte) if names_cte(table, &cte.alias, sql, dialect))
             })
         };
-        let scoped = (scopes(&root, &sql, dialect).into_iter())
-            .flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (scope, source)));
+        let scoped = all.iter().flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (*scope, source)));
         let mut relations: Vec<RelationName> =
             (scoped.filter_map(|(scope, source)| match (&source.kind, &source.expression) {
                 (SourceKind::Table, Expression::Table(table)) if !cte(scope, table) => {
-                    RelationName::of(table, &sql, dialect, defaults)
+                    RelationName::of(table, sql, dialect, defaults)
                 }
                 _ => None,
             }))
@@ -558,14 +561,15 @@ impl Write {
     }
 }
 
-/// Where the clauses of one write's query reach, from its tree: whether a `SELECT` of it
-/// keeps rows by their order, whether its outermost query does, and whether it holds an
-/// `INTERSECT` or an `EXCEPT`; which CTEs of its outermost `WITH` that query reads,
-/// directly or through others of that `WITH`; the holders of its subqueries; the keys that
-/// its joins merge, if their sides are told; and, once [`Reach::with_lineage`] gives them,
-/// the places of its output columns and the engine's lineage of each, where the write
-/// needs it.
+/// One reading of the query of a piece of a write, from the engine's scopes, built once:
+/// the relations that it reads; whether a `SELECT` of it keeps rows by their order,
+/// whether its outermost query does, and whether it holds an `INTERSECT` or an `EXCEPT`;
+/// which CTEs of its outermost `WITH` that query reads, directly or through others of that
+/// `WITH`; the holders of its subqueries; the keys that its joins merge, if their sides are
+/// told; and, once [`Reach::with_lineage`] gives them, the places of its output columns and
+/// the engine's lineage of each, where the write needs it.
 pub struct Reach {
+    pub relations: Vec<RelationName>,
     limited: bool,
     outermost: bool,
     filtering: bool,
@@ -578,13 +582,15 @@ pub struct Reach {
 
 impl Reach {
     /// The reach of the clauses of `query`, parsed from `sql`, before its output columns
-    /// are known: the holders of its subqueries, as [`Write::holders`] finds them, and the
-    /// keys that its joins merge against `catalog`, as [`Write::keys`] finds them, both
-    /// from the one reading of its scopes. A CTE is matched by its name under the dialect.
+    /// are known: its relations, as [`Write::relations`] finds them, the holders of its
+    /// subqueries, as [`Write::holders`] finds them, and the keys that its joins merge
+    /// against `catalog`, as [`Write::keys`] finds them, all three from the one reading of
+    /// its scopes. A CTE is matched by its name under the dialect.
     pub fn of<'q>(sql: &str, query: &'q Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Reach {
         let sql: Vec<char> = sql.chars().collect();
         let root = build_scope(query);
         let all = scopes(&root, &sql, dialect);
+        let relations = Write::relations(&all, &sql, query, dialect, defaults);
         let limited = |select: &Select| {
             select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
         };
@@ -625,7 +631,7 @@ impl Reach {
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
         let (order, lineage) = (Vec::new(), Vec::new());
-        Reach { limited: limited || outermost, outermost, filtering, read, order, holders, keys, lineage }
+        Reach { relations, limited: limited || outermost, outermost, filtering, read, order, holders, keys, lineage }
     }
 
     /// This reach with the places of the output columns, whose projections `order`
@@ -712,20 +718,13 @@ impl Reach {
     /// expressions stand for the reference's kind, which the engine takes from the merge's
     /// `COALESCE`. None where the lineage does not say, such as for a key merged across
     /// more than two sources, or whose right side the lineage does not tell from its left.
-    pub fn kind(
-        &self,
-        place: usize,
-        parent: &End,
-        kind: Kind,
-        relations: &[RelationName],
-        catalog: &Catalog,
-    ) -> Option<Kind> {
+    pub fn kind(&self, place: usize, parent: &End, kind: Kind, catalog: &Catalog) -> Option<Kind> {
         let keys = self.keys.as_ref()?;
         let Some(step) = self.lineage.get(place) else { return Some(kind) };
         let step = step.as_ref()?;
         let leaf = |node: &LineageNode| match (&node.source_kind, &node.expression) {
             (SourceKind::Table, Expression::Column(column)) => {
-                End::of(&node.source_name, &column.name.name, relations, catalog).ok().flatten()
+                End::of(&node.source_name, &column.name.name, &self.relations, catalog).ok().flatten()
             }
             _ => None,
         };

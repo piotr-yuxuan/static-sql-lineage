@@ -136,7 +136,6 @@ impl Edge {
         analysis: &QueryAnalysis,
         reach: &Reach,
         children: &[End],
-        relations: &[RelationName],
         catalog: &Catalog,
         own: Option<&RelationName>,
     ) -> (Vec<Edge>, Vec<Gap>) {
@@ -162,7 +161,7 @@ impl Edge {
         let mut edges = Vec::new();
         for (place, reference, value) in found {
             let child = &children[place];
-            let edge = match Edge::of_reference(reference, Kind::Rows, child.clone(), relations, catalog) {
+            let edge = match Edge::of_reference(reference, Kind::Rows, child.clone(), &reach.relations, catalog) {
                 Ok(Some(edge)) => edge,
                 Ok(None) => continue,
                 Err(detail) => {
@@ -171,7 +170,7 @@ impl Edge {
                 }
             };
             let source = reference.source_name.as_deref().unwrap_or_default();
-            match value.map_or(Some(Kind::Rows), |kind| reach.kind(place, &edge.parent, kind, relations, catalog)) {
+            match value.map_or(Some(Kind::Rows), |kind| reach.kind(place, &edge.parent, kind, catalog)) {
                 Some(Kind::Rows) if own.is_some_and(|own| own.reported_as(source)) => {}
                 Some(kind) => edges.push((Some(place), Edge { kind, ..edge })),
                 None => {
