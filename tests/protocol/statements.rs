@@ -179,6 +179,9 @@ cases! {
         expect(dialect, &format!("{merge} matched then update set *"), &["refused not_a_query"]);
         expect(dialect, &format!("{merge} not matched then insert *"), &["refused not_a_query"]);
     };
+    // Snowflake's `INSERT ALL BY NAME` is an action of another form, refused alike.
+    merge_insert_by_name_is_refused: expect("snowflake",
+        "merge into t using s on t.k = s.k when not matched then insert all by name", &["refused not_a_query"]);
     merge_into_an_alias_finds_its_target:
         expect("snowflake", "merge into t as tt using s as ss on tt.k = ss.k when matched then update set tt.a = ss.x",
         &["s.k -> t.k rows", "s.k -> t.a rows", "s.x -> t.a copy", "s.k -> t.b rows"]);
