@@ -18,7 +18,8 @@ mod write;
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-use command::{Command, Verb};
+use clap::Parser;
+use command::{Cli, Command};
 use describe::Description;
 use request::Request;
 
@@ -28,23 +29,19 @@ const LIMIT: u64 = 512 << 20;
 
 fn main() -> ExitCode {
     // An argument need not be Unicode; it is refused like any other.
-    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let output = match arguments.as_slice() {
-        [] => Request::read(std::io::stdin().lock(), LIMIT)
+    let arguments: Vec<OsString> = std::env::args_os().collect();
+    let cli = Cli::try_parse_from(&arguments).map_err(|error| {
+        let reason = error.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
+        format!("given {:?}; {reason}", &arguments[1..])
+    });
+    let output = cli.and_then(|cli| match cli {
+        Cli { describe: true, .. } => Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
+            .expect("a description serialises")),
+        Cli { verb: Some(verb), .. } => Command::read(verb).and_then(|command| command.run()),
+        Cli { verb: None, .. } => Request::read(std::io::stdin().lock(), LIMIT)
             .and_then(Request::respond)
             .map(|response| serde_json::to_string(&response).expect("a response serialises")),
-        [only] if only == "--describe" => {
-            Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
-                .expect("a description serialises"))
-        }
-        [command, rest @ ..] => match Verb::ALL.into_iter().find(|verb| command == verb.name()) {
-            Some(verb) => Command::read(verb, rest).and_then(|command| command.run()),
-            None => {
-                let names = Verb::ALL.map(Verb::name).join(", ");
-                Err(format!("given {arguments:?}; the uses are --describe, {names}, or a request on standard input"))
-            }
-        },
-    };
+    });
     match output {
         Ok(output) => {
             println!("{output}");
