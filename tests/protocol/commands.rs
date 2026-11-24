@@ -42,7 +42,9 @@ fn ids(lines: &[String]) -> Vec<&str> {
 cases! {
     a_command_without_a_dialect_is_refused: {
         assert_usage_error(&graph(&["tests/scripts/tsql"]), "--dialect");
-        assert_refused(&graph(&["--dialect", "bigquery", "tests/scripts/tsql"]), "bigquery");
+        let unbuilt = graph(&["--dialect", "bigquery", "tests/scripts/tsql"]);
+        assert_usage_error(&unbuilt, "bigquery");
+        assert_usage_error(&unbuilt, "snowflake, tsql, duckdb");
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
     };
     an_unknown_command_is_refused:

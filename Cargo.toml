@@ -16,6 +16,7 @@ duckdb = ["polyglot-sql/dialect-duckdb"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 # semantic: lineage, validation, analysis; generate: analyze_query needs it;
 # stacker: deep expressions do not overflow the stack.
 polyglot-sql = { version = "=0.14.3", default-features = false, features = ["semantic", "generate", "stacker"] }

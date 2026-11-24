@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 use polyglot_sql::TokenType;
 use serde_json::json;
 
@@ -32,8 +34,9 @@ pub struct Cli {
 #[derive(Args)]
 pub struct Options {
     /// The dialect of the scripts.
-    #[arg(long)]
-    dialect: String,
+    #[arg(long, value_parser = PossibleValuesParser::new(Dialect::built().into_iter().map(Dialect::name))
+        .try_map(|name: String| Dialect::named(&name)))]
+    dialect: Dialect,
     /// The database that completes a name of fewer than three parts.
     #[arg(long)]
     database: Option<String>,
@@ -49,7 +52,8 @@ pub struct Options {
     paths: Vec<PathBuf>,
 }
 
-/// A command, as the command line gives it, with its argument, its options and its paths.
+/// What follows `static-sql-lineage`: a command, with its argument, its options and its
+/// paths; `completions` and its shell; or `-`.
 #[derive(Subcommand)]
 pub enum Verb {
     /// The writes of the scripts, in the order to migrate them in.
@@ -75,6 +79,11 @@ pub enum Verb {
         #[command(flatten)]
         options: Options,
     },
+    /// A script that completes the command line in a shell.
+    Completions {
+        #[arg(value_parser = PossibleValuesParser::new(["bash", "zsh", "fish"]).try_map(|name: String| name.parse::<Shell>()))]
+        shell: Shell,
+    },
     /// A request of protocol 1 on standard input, read even from a terminal.
     #[command(name = "-")]
     Request,
@@ -88,7 +97,7 @@ impl Verb {
             Verb::Trace { argument, options }
             | Verb::Uses { argument, options }
             | Verb::Outline { argument, options } => (argument, options),
-            Verb::Request => unreachable!("main reads a request"),
+            Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),
         }
     }
 }
@@ -104,10 +113,10 @@ pub struct Command {
 impl Command {
     /// The command that `verb` gives: `--dialect`, a dialect of the build; `--database` and
     /// `--schema`, the defaults, a database without a schema taking the dialect's usual one.
-    /// Refused for a dialect outside the build, or a default that is not one identifier.
+    /// Refused for a default that is not one identifier.
     pub fn read(verb: Verb) -> Result<Command, String> {
         let (_, options) = verb.parts();
-        let dialect = Dialect::named(&options.dialect)?;
+        let dialect = options.dialect;
         let defaults = Defaults::given(options.database.clone(), options.schema.clone(), dialect);
         defaults.read(dialect)?;
         Ok(Command { verb, dialect, defaults })
@@ -171,7 +180,7 @@ impl Command {
                 let walk = lineage.walk(&from, matches!(self.verb, Verb::Trace { .. }));
                 Ok(walk.ok_or_else(|| format!("no script knows the column {from}"))?.printed(options.json))
             }
-            Verb::Request => unreachable!("main reads a request"),
+            Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),
         }
     }
 

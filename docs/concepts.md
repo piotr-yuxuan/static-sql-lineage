@@ -302,6 +302,7 @@ have. A reject scenario names an answer that must not be given.
 - home: `Dialect`.
 - operations:
   - `Dialect::built`: the dialects that the build includes.
+  - `Dialect::name`: the dialect's name, as `--describe` spells it.
   - `Dialect::named`: a dialect of the build by its name.
   - `Dialect::polyglot`: the dialect as polyglot-sql names it.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.

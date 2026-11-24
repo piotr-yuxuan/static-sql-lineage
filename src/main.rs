@@ -40,6 +40,10 @@ fn main() -> ExitCode {
         Cli { verb: None | Some(Verb::Request), .. } => Request::read(std::io::stdin().lock(), LIMIT)
             .and_then(Request::respond)
             .map(|response| serde_json::to_string(&response).expect("a response serialises")),
+        Cli { verb: Some(Verb::Completions { shell }), .. } => {
+            clap_complete::generate(shell, &mut Cli::command(), "static-sql-lineage", &mut std::io::stdout());
+            return ExitCode::SUCCESS;
+        }
         Cli { verb: Some(verb), .. } => Command::read(verb).and_then(|command| command.run()),
     };
     match output {

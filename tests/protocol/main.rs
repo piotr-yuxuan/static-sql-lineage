@@ -243,7 +243,18 @@ cases! {
         assert_succeeded(&output);
         assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: static-sql-lineage"), "{arguments:?}");
     };
-    help_names_describe: assert!(String::from_utf8_lossy(&run(&["--help"]).stdout).contains("--describe"));
+    help_names_describe_and_completions: {
+        let help = String::from_utf8_lossy(&run(&["--help"]).stdout).into_owned();
+        assert!(help.contains("--describe") && help.contains("completions"), "{help}");
+    };
+    completions_name_the_commands_and_dialects: for shell in ["bash", "zsh", "fish"] {
+        let output = run(&["completions", shell]);
+        assert_succeeded(&output);
+        let script = String::from_utf8_lossy(&output.stdout);
+        for word in ["graph", "trace", "uses", "outline", "completions", "dialect", "database", "schema", "json", "snowflake", "tsql", "duckdb"] {
+            assert!(script.contains(word), "{shell} lacks {word}");
+        }
+    };
     dash_reads_a_request_as_no_argument_does: {
         let request = request(&[("s", &["a"])], &[("t", "select a from s")]).to_string();
         let output = piped(&["-"], request.as_bytes());

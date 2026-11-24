@@ -123,3 +123,7 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   as through the commands, where the Write entry reads it: polyglot-sql generates the
   string as `N'it's'`, which does not parse again. A bare query, which is not generated, is
   read. Class: a defect of the code.
+- The command line has uses that are not commands of lineage, where the command entry
+  of the context names `graph`, `trace`, `uses` and `outline` only: `completions`,
+  which prints a shell's completion script, clap's `help`, and `-`, which reads a
+  request on standard input; `Verb` holds them with the four. Class: an intended gap.
