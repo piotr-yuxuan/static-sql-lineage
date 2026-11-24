@@ -29,7 +29,7 @@ def views(files):
 
 class Estate(unittest.TestCase):
     def test_constants(self):
-        self.assertEqual((len(bench.COLUMNS), bench.CTES, bench.BRANCHES), (20, 8, 8))
+        self.assertEqual((len(bench.COLUMNS), bench.CTES, bench.BRANCHES), (20, 4, 4))
 
     def test_every_shape_has_its_writes_and_a_last_one_with_a_column_a(self):
         self.assertEqual(set(bench.SHAPES), {"chain", "fan", "ctes", "unions", "mix"})
@@ -75,7 +75,7 @@ class Estate(unittest.TestCase):
         self.assertTrue(all(query.endswith(" from base x") for _, query in views(files)))
 
     def test_shapes_of_one_write(self):
-        for shape, pattern, count in (("ctes", r"\bt\d as \(select ", 8), ("unions", " union all ", 7)):
+        for shape, pattern, count in (("ctes", r"\bt\d as \(select ", 4), ("unions", " union all ", 3)):
             with self.subTest(shape=shape):
                 for _, query in views(bench.estate(shape, 7, 20)):
                     self.assertEqual(len(re.findall(pattern, query)), count)

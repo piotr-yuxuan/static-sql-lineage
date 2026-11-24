@@ -78,8 +78,8 @@ TPCDS = (
 # W, the columns of every relation; K, the CTEs of a write of the shape `ctes`; B, the
 # branches of a write of the shape `unions`.  Only the number of writes grows.
 COLUMNS = tuple("abcdefghijklmnopqrst")
-CTES = 8
-BRANCHES = 8
+CTES = 4
+BRANCHES = 4
 # The smallest estate: the layers of the shape `mix` need ten writes.
 SMALLEST = 10
 # scripts/commands.py, found by this script's path, whether it runs or its tests load it.

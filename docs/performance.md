@@ -29,8 +29,8 @@ number of writes, the size, grows. Its shapes:
 |---|---|
 | `chain` | reads the write before it, the first the one base relation |
 | `fan` | reads the one base relation |
-| `ctes` | a chain of K = 8 CTEs over an earlier relation |
-| `unions` | a union of B = 8 branches, each over an earlier relation |
+| `ctes` | a chain of K = 4 CTEs over an earlier relation |
+| `unions` | a union of B = 4 branches, each over an earlier relation |
 | `mix` | shaped like a dbt project: the first two fifths, staging, each over one base relation, of a tenth as many as writes; the next two fifths, intermediate, each a join of two staging writes; the rest, marts, each a join of an intermediate write and any earlier one |
 
 An estate is three files: `tables.sql`, the base relations' `CREATE TABLE`, which
