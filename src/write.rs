@@ -52,7 +52,7 @@ pub enum Outputs {
 /// outermost query or of one of its branches, at an output column's place; or in that of
 /// a CTE or a derived table, whose name it gives with the column's.
 #[derive(Clone)]
-pub enum Holder {
+enum Holder {
     Clause(ColumnUseContext),
     Tuple(ColumnUseContext),
     Output(usize),
@@ -383,18 +383,19 @@ impl Write {
         Ok(Outputs::Named(names))
     }
 
-    /// Each subquery of `query`, parsed from `sql`, that no subquery holds, by the scope
-    /// path that the engine gives it, with its holder; none for one that the engine numbers
-    /// otherwise, or that follows a `*` in its select list, where its place would count the
-    /// `*` as one. The engine numbers the subqueries of a `SELECT` by its
-    /// `collect_subqueries`: the fields that hold them, in the order of its struct, each
-    /// walked by `walk_in_scope`, finding a `Subquery` with no alias, the query of `EXISTS`
-    /// and of `IN`, and that of `ANY` and `ALL` twice, as a quantifier's and as a
-    /// `Subquery`.
-    pub fn holders(sql: &str, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
-        let sql: Vec<char> = sql.chars().collect();
-        let root = build_scope(query);
-        let all = scopes(&root, &sql, dialect);
+    /// Each subquery of the query whose scopes `all` lists, parsed from `sql`, that no
+    /// subquery holds, by the scope path that the engine gives it, with its holder; none
+    /// for one that the engine numbers otherwise, or that follows a `*` in its select
+    /// list, where its place would count the `*` as one. The engine numbers the subqueries
+    /// of a `SELECT` by its `collect_subqueries`: the fields that hold them, in the order
+    /// of its struct, each walked by `walk_in_scope`, finding a `Subquery` with no alias,
+    /// the query of `EXISTS` and of `IN`, and that of `ANY` and `ALL` twice, as a
+    /// quantifier's and as a `Subquery`.
+    fn holders(
+        all: &[(String, &Scope, Option<Name>)],
+        sql: &[char],
+        dialect: Dialect,
+    ) -> Vec<(String, Option<Holder>)> {
         // A branch that filters an `INTERSECT` or an `EXCEPT`, or a branch of one, decides
         // rows by its select list.
         let filters = |path: &str| {
@@ -403,7 +404,7 @@ impl Write {
             scope_steps(path).filter(|&(_, kind, at)| (kind, at) == ("branches", 1)).any(|(prefix, ..)| set(prefix))
         };
         let mut found = Vec::new();
-        for (path, scope, owner) in &all {
+        for (path, scope, owner) in all {
             let Expression::Select(select) = query_of(scope) else { continue };
             if scope_steps(path).any(|(_, kind, _)| ["subqueries", "udtfs"].contains(&kind)) {
                 continue;
@@ -418,7 +419,7 @@ impl Write {
                     return (clause(ColumnUseContext::SetOperationFilter), expression);
                 }
                 let holder = owner.as_ref().map_or(Some(Holder::Output(at)), |owner| {
-                    Some(Holder::Column(owner.clone(), name(expression, &sql, dialect)?))
+                    Some(Holder::Column(owner.clone(), name(expression, sql, dialect)?))
                 });
                 (holder.filter(|_| star.is_none_or(|star| at < star)), expression)
             });
@@ -583,16 +584,13 @@ pub struct Reach {
 
 impl Reach {
     /// The reach of the clauses of `query`, parsed from `sql`, before its output columns
-    /// are known: its subqueries held as `holders` says, and the keys that its joins merge
-    /// `keys`. A CTE is matched by its name under the dialect.
-    pub fn of<'q>(
-        sql: &str,
-        query: &'q Expression,
-        holders: Vec<(String, Option<Holder>)>,
-        keys: Option<Vec<Key>>,
-        dialect: Dialect,
-    ) -> Reach {
+    /// are known: the holders of its subqueries, as [`Write::holders`] finds them from its
+    /// scopes, and the keys that its joins merge `keys`. A CTE is matched by its name under
+    /// the dialect.
+    pub fn of<'q>(sql: &str, query: &'q Expression, keys: Option<Vec<Key>>, dialect: Dialect) -> Reach {
         let sql: Vec<char> = sql.chars().collect();
+        let root = build_scope(query);
+        let all = scopes(&root, &sql, dialect);
         let limited = |select: &Select| {
             select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
         };
@@ -604,6 +602,7 @@ impl Reach {
             _ => (None, false),
         };
         let ctes = with.map_or(&[][..], |with| with.ctes.as_slice());
+        let holders = Write::holders(&all, &sql, dialect);
         let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
         let named = |tree: &'q Expression| -> Vec<&'q TableRef> {
             let one_part = |node: &'q Expression| match node {
