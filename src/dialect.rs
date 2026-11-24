@@ -14,6 +14,7 @@ pub enum Dialect {
     Tsql,
     Duckdb,
     Postgresql,
+    Redshift,
 }
 
 /// What sets a dialect apart: its name, as `--describe` spells it; polyglot-sql's name for
@@ -38,6 +39,7 @@ impl Dialect {
             (cfg!(feature = "tsql"), Dialect::Tsql),
             (cfg!(feature = "duckdb"), Dialect::Duckdb),
             (cfg!(feature = "postgresql"), Dialect::Postgresql),
+            (cfg!(feature = "redshift"), Dialect::Redshift),
         ]
         .into_iter()
         .filter_map(|(built, dialect)| built.then_some(dialect))
@@ -54,6 +56,10 @@ impl Dialect {
             Dialect::Tsql => rules("tsql", DialectType::TSQL, "dbo", true, false),
             Dialect::Duckdb => rules("duckdb", DialectType::DuckDB, "main", false, false),
             Dialect::Postgresql => rules("postgresql", DialectType::PostgreSQL, "public", false, true),
+            // Names ignore case, with `enable_case_sensitive_identifier` off, as by default.
+            // Redshift's documentation says nothing of the order of a `*` over `USING`: the
+            // SQL standard's, for a joined table, puts the merged keys first, as PostgreSQL does.
+            Dialect::Redshift => rules("redshift", DialectType::Redshift, "public", true, true),
         }
     }
 

@@ -111,6 +111,11 @@ cases! {
     dialect_postgresql_unquoted_as_exact: lacks(
         &trace_in("postgresql", &[("\"orders\"", &["\"orderid\""])], "select OrderId from Orders"),
         |line| line.starts_with("refused") || line.starts_with("gap unknown_relation"));
+    dialect_redshift_ignores_case: traces_in("redshift", &[("\"Orders\"", &["\"OrderId\""])],
+        "select orderid from orders", &["\"Orders\".\"OrderId\" -> t.orderid copy"]);
+    dialect_redshift_quoted_as_exact: lacks(
+        &trace_in("redshift", &[("\"Orders\"", &["\"OrderId\""])], "select orderid from orders"),
+        |line| line.starts_with("refused") || line.starts_with("gap unknown_relation"));
 }
 
 #[test]

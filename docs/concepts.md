@@ -323,6 +323,11 @@ have. A reject scenario names an answer that must not be given.
   `"orders"."orderid" -> t.OrderId`, `copy`; no gap.
 - reject `dialect.postgresql-unquoted-as-exact`: for that request, a refusal or an
   `unknown_relation` gap, as if `Orders` named `"Orders"` or `"ORDERS"`.
+- accept `dialect.redshift-ignores-case`: dialect `redshift`; catalog `"Orders"` with
+  the column `"OrderId"`; query `select orderid from orders`: the edge
+  `"Orders"."OrderId" -> t.orderid`, `copy`; no gap.
+- reject `dialect.redshift-quoted-as-exact`: for that request, a refusal or an
+  `unknown_relation` gap, as if `"Orders"` named only `Orders` exactly.
 
 ## Derived terms
 

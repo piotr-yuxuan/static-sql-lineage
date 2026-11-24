@@ -52,6 +52,20 @@ cases! {
         traces_in("tsql", catalog, "select [X].a, x.b from s as x", &expected);
         traces_in("tsql", catalog, "select q.a, Q.b from (select a, b from s) as [Q]", &expected);
     };
+    // A table alias read in another case, or quoted, each quoted as the dialect quotes.
+    aliases_ignore_case_in_redshift_and_databricks: {
+        let (dialect, q) = ("redshift", '"');
+        let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
+        let expected = ["s.a -> t.a copy", "s.b -> t.b copy"];
+        traces_in(dialect, catalog, "select o.a, O.b from s as O", &expected);
+        traces_in(dialect, catalog, &format!("select {q}X{q}.a, x.b from s as x"), &expected);
+        traces_in(dialect, catalog, &format!("select q.a, Q.b from (select a, b from s) as {q}Q{q}"), &expected);
+        let amount = format!("{q}Amount{q}");
+        let catalog: &[(&str, &[&str])] = &[("s", &[amount.as_str()]), ("u", &[amount.as_str()])];
+        let cte = format!("with c as (select {amount} from s intersect select {amount} from u)");
+        let expected = [format!("s.{amount} -> t.amount copy"), format!("u.{amount} -> t.amount rows")];
+        assert_eq!(trace_in(dialect, catalog, &format!("{cte} select x.amount from c as {q}X{q}")), expected);
+    };
     tsql_a_filter_branch_in_a_cte_reads_bracketed_names: {
         // polyglot-sql's lineage of the piece's own text does not follow `x` to `[X]`.
         let catalog: &[(&str, &[&str])] = &[("s", &["[Amount]"]), ("u", &["[Amount]"])];
