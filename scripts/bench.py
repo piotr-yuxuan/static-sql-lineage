@@ -18,7 +18,8 @@ The figures' median, peak and growth, and the counts read from an output, are pu
 functions; the rest runs the binary, alone in each child.
 
 Status 0: done.  Status 2, with one line on standard error: an input is malformed, or a
-child or a command failed or ran past TIMEOUT_SECONDS; no figure is recorded.
+child or a command failed or ran past TIMEOUT_SECONDS; no figure is recorded.  A script of
+a corpus that the binary crashes on is not a failure but a figure, `crashes`.
 """
 
 import argparse
@@ -334,15 +335,25 @@ def corpora() -> None:
         os.rename(scratch, samples)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    rows = []
+    rows, scripts = [], sorted(str(path.relative_to(samples)) for path in samples.rglob("*.sql"))
     for label, cwd, paths, column, outline, given in (
         ({"shape": "tpcds", "size": len(queries), "dialect": DIALECT}, tpcds,
          ["tables.sql", "queries.sql"], "q01.c_customer_id", "queries.sql:1:1", tpcds / "request.json"),
-        ({"shape": "sql-server-samples", "size": len(list(samples.rglob("*.sql"))), "dialect": "tsql"},
-         samples, ["samples"], SAMPLES_COLUMN, SAMPLES_WRITE, None),
+        ({"shape": "sql-server-samples", "size": len(scripts), "dialect": "tsql"},
+         samples, scripts, SAMPLES_COLUMN, SAMPLES_WRITE, None),
     ):
+        # A script that the binary crashes on, with a status that the protocol does not give,
+        # is counted with its status and left out, so that the rest is measured.
+        graph, crashes = [BINARY, "graph", "--dialect", label["dialect"]], {}
+        for path in paths:
+            done = subprocess.run([*graph, path], cwd=cwd, capture_output=True, timeout=TIMEOUT_SECONDS)
+            if done.returncode not in (0, 2):
+                crashes[path] = done.returncode
+                print(f"{label['shape']:<18} crash, status {done.returncode}: {path}", flush=True)
+        paths = [path for path in paths if path not in crashes]
+        label |= {"version": version, "crashes": crashes}
         for way, argv, stdin in ways(label["dialect"], paths, column, outline, given):
-            rows.append(measure(label | {"version": version}, way, argv, cwd, stdin))
+            rows.append(measure(label, way, argv, cwd, stdin))
     report(rows, BENCH / "corpora.json")
 
 

@@ -75,6 +75,7 @@ Each object of the output has these fields:
 | `version` | the binary's, from `--describe` |
 | `writes`, `refusals`, `gaps` | for `protocol1`, from the response; gaps by reason |
 | `writes`, `findings`, `skipped` | for `graph`, from its JSON; findings by kind |
+| `crashes` | of a corpus, the status of each script that the binary crashed on |
 
 The growth, printed for each shape and way in that ran at both 1,000 and 6,000 writes,
 is the ratio of the two times.
@@ -88,7 +89,7 @@ is the ratio of the two times.
   `!**/PostDeploymentScripts/**`, at depth 1 without blobs beyond them, then moved into
   `target/bench/corpora/sql-server-samples`: 368 `.sql` files, 1.2 MB, never the CSV
   data beside them. A fetch that fails, or whose `HEAD` is not that commit, ends the run.
-  Read in `tsql` from `samples`: `graph`; `trace` and `uses` of
+  Read in `tsql`, each of its scripts given by its path under `samples`: `graph`; `trace` and `uses` of
   `Website.Customers.CustomerID`; `outline` of
   `samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Website/Views/Customers.sql:1:1`.
 - TPC-DS, offline, from the `tpcds` extension built into duckdb: with
@@ -101,6 +102,11 @@ is the ratio of the two times.
   of `q01.c_customer_id`; `outline` of `q01`, `queries.sql:1:1`.
 
 Neither is committed or redistributed (R5).
+
+Before a corpus is measured, `graph` reads each of its scripts alone. A script that the
+binary crashes on, with a status other than the protocol's 0 and 2, is a figure rather
+than a failure: it is printed, kept in each of the corpus's objects under `crashes`, its
+status by script, and left out of what the corpus is then measured over.
 
 ## A plan's change in cost
 
