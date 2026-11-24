@@ -52,6 +52,13 @@ cases! {
         traces_in("tsql", catalog, "select [X].a, x.b from s as x", &expected);
         traces_in("tsql", catalog, "select q.a, Q.b from (select a, b from s) as [Q]", &expected);
     };
+    // PostgreSQL 17.12 finds no relation `orders` beside `"Orders"`, and reads `"Orders"` exactly.
+    postgresql_quoted_names_are_exact: {
+        let catalog: &[(&str, &[&str])] = &[("\"Orders\"", &["\"OrderId\""])];
+        traces_in("postgresql", catalog, "select orderid from orders", &["gap unknown_relation orders -"]);
+        traces_in("postgresql", catalog, "select \"OrderId\" from \"Orders\"",
+            &["\"Orders\".\"OrderId\" -> t.\"OrderId\" copy"]);
+    };
     // A table alias read in another case, or quoted, each quoted as the dialect quotes.
     aliases_ignore_case_in_redshift_and_databricks: for (dialect, q) in [("redshift", '"'), ("databricks", '`')] {
         let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
