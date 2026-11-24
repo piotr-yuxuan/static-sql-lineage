@@ -606,21 +606,21 @@ pub struct Reach {
     every: Vec<usize>,
     holders: Vec<(String, Option<Holder>)>,
     keys: Option<Vec<Key>>,
-    steps: Vec<Option<LineageNode>>,
+    lineage: Vec<Option<LineageNode>>,
 }
 
 impl Reach {
     /// The reach of the clauses of `query`, parsed from `sql`, which has `outputs` output
     /// columns, its subqueries held as `holders` says, the keys that its joins merge
-    /// `keys`, and the lineage of its output columns `steps`, or none. A CTE is matched by
-    /// its name under the dialect.
+    /// `keys`, and the lineage of its output columns `lineage`, or none. A CTE is matched
+    /// by its name under the dialect.
     pub fn of<'q>(
         sql: &str,
         query: &'q Expression,
         outputs: usize,
         holders: Vec<(String, Option<Holder>)>,
         keys: Option<Vec<Key>>,
-        steps: Vec<Option<LineageNode>>,
+        lineage: Vec<Option<LineageNode>>,
         dialect: Dialect,
     ) -> Reach {
         let sql: Vec<char> = sql.chars().collect();
@@ -660,7 +660,7 @@ impl Reach {
         }
         let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
         let every = (0..outputs).collect();
-        Reach { limited: limited || outermost, outermost, read, every, holders, keys, steps }
+        Reach { limited: limited || outermost, outermost, read, every, holders, keys, lineage }
     }
 
     /// The places of the output columns whose rows a use of `context` in the scope at
@@ -692,7 +692,7 @@ impl Reach {
                 Holder::Output(place) => Some(vec![*place]),
                 Holder::Column(source, column) => (self.every.iter())
                     .map(|&place| {
-                        let mut nodes = self.steps.get(place)?.as_ref()?.walk();
+                        let mut nodes = self.lineage.get(place)?.as_ref()?.walk();
                         Some(nodes.any(|node| source.reported_as(&node.source_name) && column.reported_as(&node.name)))
                             .map(|passes| passes.then_some(place))
                     })
@@ -733,7 +733,7 @@ impl Reach {
         catalog: &Catalog,
     ) -> Option<Kind> {
         let keys = self.keys.as_ref()?;
-        let Some(step) = self.steps.get(place) else { return Some(kind) };
+        let Some(step) = self.lineage.get(place) else { return Some(kind) };
         let step = step.as_ref()?;
         let leaf = |node: &LineageNode| match (&node.source_kind, &node.expression) {
             (SourceKind::Table, Expression::Column(column)) => {
