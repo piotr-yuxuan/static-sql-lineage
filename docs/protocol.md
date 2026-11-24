@@ -9,14 +9,29 @@ or refusal, in the terms of `docs/concepts.md`.
 
 | Use | Status | Standard output | Standard error |
 |---|---|---|---|
-| `static-sql-lineage`, a request on standard input | 0 | the response, as JSON | nothing |
-| the same, a request refused as a whole | 2 | nothing | one line, naming the reason |
+| `static-sql-lineage`, a request on standard input, which is not a terminal | 0 | the response, as JSON | nothing |
+| `static-sql-lineage -`, a request on standard input, read even from a terminal | 0 | the response, as JSON | nothing |
+| either, a request refused as a whole | 2 | nothing | one line, naming the reason |
+| `static-sql-lineage`, standard input a terminal | 2 | nothing | a usage error |
 | `static-sql-lineage --describe` | 0 | the description, as JSON | nothing |
+| `static-sql-lineage -h` or `--help`, or `static-sql-lineage help` and a command | 0 | the help | nothing |
+| `static-sql-lineage -V` or `--version` | 0 | `static-sql-lineage <version>` | nothing |
+| `static-sql-lineage completions bash`, `zsh` or `fish` | 0 | the shell's completion script | nothing |
 | `static-sql-lineage graph`, its options and paths | 0 | the graph of the scripts' writes, as text or JSON | nothing |
 | `static-sql-lineage trace` or `static-sql-lineage uses`, its options, a column and paths | 0 | the column's edges upstream or downstream, as text or JSON | nothing |
 | `static-sql-lineage outline`, its options, a write's id and paths | 0 | the write in brief, as text or JSON | nothing |
-| any of these, refused | 2 | nothing | one line, naming the reason |
-| any other argument | 2 | nothing | one line, naming what was given |
+| any of these commands, unable to run | 2 | nothing | one line, naming the reason |
+| any other argument | 2 | nothing | a usage error |
+
+A usage error is one that the command line's parser, clap, finds: an unknown command or
+option; an option without its value; a missing argument or path; a value that is not
+one of an option's possible values, such as a dialect that the build lacks; `--describe`
+or `-` with any other argument. Its form is clap's (R18): a first line `error: ` and the
+reason, then, as clap chooses for each kind of error, the possible values, a tip and a
+usage, then a line that points to `--help`. A command line that is not UTF-8 is one too.
+`--` ends the options: what follows it is an argument or a path, even if it starts with
+`-`. The help and the completion scripts list the commands, the options and the build's
+dialects.
 
 ## The request
 
@@ -164,9 +179,10 @@ static-sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] 
 - a path: a file, whatever its name, or a directory, whose files ending `.sql`, at any
   depth, are read sorted by path; at least one, read in the order given.
 
-Refused, with status 2, nothing on standard output and one line on standard error: an
-option that `graph` does not know, or one without its value; no dialect, or one that the
-build lacks; a default that is not one identifier; no path; a path that does not read.
+A usage error, as *Uses* says: an option that `graph` does not know, or one without its
+value; no dialect, or one that the build lacks; no path. Unable to run, with status 2,
+nothing on standard output and one line on standard error: a default that is not one
+identifier; a path that does not read.
 
 Each file is a script, read in order:
 
@@ -287,8 +303,8 @@ dynamic SQL or a file that does not decode, with its place and detail: any of th
 or write the column, and the tool cannot tell which. A cycle is a set of columns that the walk follows,
 each of which reaches the others, or one that reaches itself.
 
-Refused, with status 2, nothing on standard output and one line on standard error, as
-`graph` is, and for an argument that is not `<relation>.<column>`, or a column that no
+A usage error, or unable to run, as `graph` is, without its argument too; and unable to
+run, on one line, for an argument that is not `<relation>.<column>`, or a column that no
 declaration, edge or answer's output column names. A column that one names, with no edge
 and nothing met, gives an empty line.
 
@@ -347,7 +363,8 @@ static-sql-lineage outline --dialect <name> [--database <name>] [--schema <name>
   quoted name is none. For SSMS's existence check, the places are in the file, past the
   string's `N'` and each doubled quote.
 
-Refused, with status 2, as `graph` is, and for an id that no write of the scripts has.
+A usage error, or unable to run, as `graph` is, without its id too; and unable to run, on
+one line, for an id that no write of the scripts has.
 
 The text, by default: one field per line, then the answer's edges, `edge: <parent> ->
 <child> <kind>`, its gaps, `gap: <reason> <relation> <column>`, `-` for none, and its
