@@ -11,6 +11,7 @@ mod cases;
 mod catalogue;
 mod commands;
 mod edges;
+mod logging;
 mod requests;
 mod scenarios;
 mod stars;
@@ -24,9 +25,11 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 
-/// The command that runs the built binary.
+/// The command that runs the built binary, deaf to the caller's variables of logging.
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_static-sql-lineage"))
+    let mut binary = Command::new(env!("CARGO_BIN_EXE_static-sql-lineage"));
+    binary.env_remove("RUST_LOG").env_remove("STATIC_SQL_LINEAGE_LOG");
+    binary
 }
 
 fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
@@ -63,9 +66,13 @@ fn answers(input: &[u8]) -> Output {
 
 /// The binary's output for the command line `arguments` and `input` on its standard input.
 fn piped(arguments: &[&str], input: &[u8]) -> Output {
-    let mut child = (binary().args(arguments).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
-        .spawn()
-        .expect("the binary runs");
+    fed(binary().args(arguments), input)
+}
+
+/// The output of `command`, run with `input` on its standard input.
+fn fed(command: &mut Command, input: &[u8]) -> Output {
+    let mut child =
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("the binary runs");
     child.stdin.take().expect("a pipe to the binary").write_all(input).expect("the request is written");
     child.wait_with_output().expect("the binary ends")
 }

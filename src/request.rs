@@ -62,6 +62,7 @@ impl Request {
     }
 
     /// The response to this request, or why it is refused as a whole.
+    #[tracing::instrument(level = "info", skip_all, fields(dialect = %self.dialect, writes = self.writes.len()))]
     pub fn respond(self) -> Result<Response, String> {
         let dialect = Dialect::named(&self.dialect)?;
         let defaults = self.defaults.read(dialect)?;
@@ -73,11 +74,7 @@ impl Request {
             return Err(format!("two writes have the id {id:?}"));
         }
         let answers = (self.writes.iter().zip(targets))
-            .map(|(write, target)| {
-                let (answer, replaces) = Answer::of(write, &target, &catalog, dialect, &defaults);
-                catalog.record(target, replaces, answer.columns.clone());
-                answer
-            })
+            .map(|(write, target)| catalog.answer(write, target, dialect, &defaults))
             .collect();
         Ok(Response { protocol: self.protocol, answers })
     }

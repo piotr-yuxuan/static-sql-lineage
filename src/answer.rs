@@ -118,6 +118,7 @@ impl Answer {
                 return (answer.refused(refusal), replaces);
             }
         };
+        tracing::debug!(pieces = pieces.len(), "read");
         let mut answers =
             pieces.iter().map(|piece| Answer::of_piece(write, target, &found, piece, catalog, dialect, defaults));
         if replaces {
@@ -173,7 +174,8 @@ impl Answer {
         let mut gaps: Vec<Gap> = unknown.into_iter().map(Gap::unknown).collect();
         let schema = catalog.schema(relations);
         let text = dialect.polyglot_text(sql);
-        let checked = validate_with_schema(&text, dialect.polyglot(), &schema, &SchemaValidationOptions::default());
+        let checked = tracing::trace_span!("validate_with_schema")
+            .in_scope(|| validate_with_schema(&text, dialect.polyglot(), &schema, &SchemaValidationOptions::default()));
         let errors: Vec<String> = (checked.errors.into_iter())
             .filter(|error| error.severity == ValidationSeverity::Error && error.code != "E200")
             .map(|error| error.message)
@@ -223,7 +225,7 @@ impl Answer {
             });
             found.collect::<Option<Vec<usize>>>().filter(|_| projections.len() == outputs.len())
         };
-        let analysis = match analyze_query(&text, options) {
+        let analysis = match tracing::trace_span!("analyze_query").in_scope(|| analyze_query(&text, options)) {
             Ok(analysis) => analysis,
             Err(error) => {
                 gaps.push(Gap::of(GapReason::AnalysisFailed, None, error.to_string()));

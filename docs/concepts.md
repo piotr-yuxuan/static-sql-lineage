@@ -274,6 +274,7 @@ have. A reject scenario names an answer that must not be given.
   - `Catalog::get`: a relation as the catalog knows it, with its columns.
   - `Catalog::schema`: what the engine is told of the known relations that a write reads.
   - `Catalog::record`: what a write makes of its target.
+  - `Catalog::answer`: the answer to one write against the catalog as it stands, then what it makes of its target.
 - accept `catalog.unknown-relation`: query `select a from r`, with no catalog: an
   `unknown_relation` gap for `r`; no edge.
 - reject `catalog.columns-guessed`: for that query, the edge `r.a -> t.a`, as if the

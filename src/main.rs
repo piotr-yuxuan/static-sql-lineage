@@ -23,6 +23,8 @@ use clap::{CommandFactory, Parser};
 use command::{Cli, Command, Verb};
 use describe::Description;
 use request::Request;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 /// The longest request read, in bytes: a project of 6,000 models is a few tens of
 /// megabytes.
@@ -30,7 +32,15 @@ const LIMIT: u64 = 512 << 20;
 
 fn main() -> ExitCode {
     // A usage error, help and the version are clap's to print, and end the process.
-    let output = match Cli::parse() {
+    let cli = Cli::parse();
+    // The log asked for: by -v when given, else by the first variable set, else none.
+    let level = [None, Some("info"), Some("debug"), Some("trace")][usize::from(cli.verbose.min(3))].map(String::from);
+    let variable = |name| std::env::var(name).ok();
+    let filter = level.or_else(|| variable("STATIC_SQL_LINEAGE_LOG")).or_else(|| variable("RUST_LOG"));
+    let filter = EnvFilter::new(filter.as_deref().unwrap_or("off"));
+    let subscriber = tracing_subscriber::fmt().with_writer(std::io::stderr).with_timer(()).with_env_filter(filter);
+    subscriber.with_span_events(FmtSpan::CLOSE).init();
+    let output = match cli {
         Cli { describe: true, .. } => Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
             .expect("a description serialises")),
         Cli { verb: None, .. } if std::io::stdin().is_terminal() => {

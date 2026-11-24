@@ -7,8 +7,10 @@ use polyglot_sql::validation::ValidationSchema;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::answer::Answer;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName, repeated};
+use crate::write::Write;
 
 /// The request's form of a relation of its catalog: its name and its columns.
 #[derive(Deserialize)]
@@ -83,5 +85,18 @@ impl Catalog {
         if let Some(columns) = columns {
             self.relations.insert(target, columns);
         }
+    }
+
+    /// The answer to `write`, whose target is `target`, against the catalog as it stands
+    /// just before it, once what the write makes of its target is recorded.
+    #[tracing::instrument(level = "debug", skip_all, fields(id = %write.id))]
+    pub fn answer(&mut self, write: &Write, target: RelationName, dialect: Dialect, defaults: &[Name]) -> Answer {
+        let (answer, replaces) = Answer::of(write, &target, self, dialect, defaults);
+        let (edges, gaps, refused) = (answer.edges.len(), answer.gaps.len(), answer.refusal.is_some());
+        // A refused write's mode is not known; the catalog records it by its own rule, as a
+        // replace one only when it does not parse.
+        tracing::debug!(replaces = (!refused).then_some(replaces), edges, gaps, refused, "answered");
+        self.record(target, replaces, answer.columns.clone());
+        answer
     }
 }

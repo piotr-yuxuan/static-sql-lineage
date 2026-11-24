@@ -23,10 +23,13 @@ or refusal, in the terms of `docs/concepts.md`.
 | any of these commands, unable to run | 2 | nothing | one line, naming the reason |
 | any other argument | 2 | nothing | a usage error |
 
+Each "nothing" on standard error holds unless a log is asked for, as *Logging* says.
+
 A usage error is one that the command line's parser, clap, finds: an unknown command or
 option; an option without its value; a missing argument or path; a value that is not
 one of an option's possible values, such as a dialect that the build lacks; `--describe`
-or `-` with any other argument. Its form is clap's (R18): a first line `error: ` and the
+with any other argument, `-` with any other argument but `-v` after it, and `-v` before
+a command or `-`. Its form is clap's (R18): a first line `error: ` and the
 reason, then, as clap chooses for each kind of error, the possible values, a tip and a
 usage, then a line that points to `--help`. A command line that is not UTF-8 is one too.
 `-h` and `--help` print the help, and `-V` and `--version` the version, with status 0,
@@ -35,6 +38,37 @@ before a command or beside `--describe`, which they win over; after a command, `
 `--` ends the options: what follows it is an argument or a path, even if it starts with
 `-`. The help and the completion scripts list the commands, the options and the build's
 dialects.
+
+## Logging
+
+A log is what the binary writes on standard error, at the caller's request, about what
+it does and how long each part takes. It states no fact of lineage that the answer
+lacks: gaps and refusals are in the answer, which a log may repeat but never guesses
+past. Standard output and the status never change with logging.
+
+`-v` asks for a log at info, `-vv` at debug, and `-vvv` or more at trace; it has no long
+form. It is read after a command, as in `graph -v`, after `-`, as in `- -v`, and alone
+before a request on standard input; before a command or `-`, or beside `--describe`, it
+is a usage error.
+
+| Level | What it says |
+|---|---|
+| info | a request's dialect and number of writes, or a command's dialect and numbers of files and writes, and the time of each |
+| debug | each write answered, by its id: its mode unless it is refused, its numbers of edges and gaps, whether it is refused, the number of pieces its statement is read into, and its time |
+| trace | each call into the engine that answers a write, named after the engine's function, and its time |
+
+Without `-v`, either of two environment variables asks for a log, in the filter syntax
+of `tracing-subscriber`: a level, such as `debug`, or a level per module, such as
+`static_sql_lineage::write=trace`. Which wins: `-v` when given, the variables then
+ignored; else `STATIC_SQL_LINEAGE_LOG` when set, even empty, which logs nothing; else
+`RUST_LOG`; else nothing. A `RUST_LOG` set for another program therefore makes standard
+error speak, which `STATIC_SQL_LINEAGE_LOG=off`, or `STATIC_SQL_LINEAGE_LOG=` set empty,
+silences. A directive that the filter cannot read is reported on standard error by the
+filter itself.
+
+Each line is for a person: it names its level and its module, such as
+`static_sql_lineage::answer`; the rest of its layout is not promised. A part's last line
+gives its time, as `time.busy` and `time.idle`.
 
 ## The request
 

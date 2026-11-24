@@ -55,9 +55,8 @@ impl<'w> Lineage<'w> {
         let (mut answers, mut edges, mut found) = (Vec::new(), Vec::new(), HashMap::new());
         for scripted in writes {
             let (id, target, sql) = (scripted.id.clone(), scripted.target.to_string(), scripted.text.clone());
-            let (answer, replaces) =
-                Answer::of(&Write { id, target, sql }, &scripted.target, &catalog, dialect, &scripted.defaults);
-            catalog.record(scripted.target.clone(), replaces, answer.columns.clone());
+            let answer =
+                catalog.answer(&Write { id, target, sql }, scripted.target.clone(), dialect, &scripted.defaults);
             for edge in &answer.edges {
                 let at = *found.entry((edge.parent.clone(), edge.child.clone())).or_insert(edges.len());
                 if at == edges.len() {
