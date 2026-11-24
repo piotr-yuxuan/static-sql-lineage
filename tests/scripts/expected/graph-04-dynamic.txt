@@ -1,0 +1,5 @@
+not_read: tests/scripts/tsql/04-dynamic.sql:1:1 dynamic SQL
+not_read: tests/scripts/tsql/04-dynamic.sql:4:1 dynamic SQL
+not_read: tests/scripts/tsql/04-dynamic.sql:5:1 dynamic SQL
+not_read: tests/scripts/tsql/04-dynamic.sql:6:1 dynamic SQL
+skipped: 2

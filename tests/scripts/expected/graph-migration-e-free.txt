@@ -1,0 +1,4 @@
+tests/scripts/tsql/migration/e-free.sql:3:1 dbo.vY <- dbo.Orders
+tests/scripts/tsql/migration/e-free.sql:5:1 dbo.vZ <- dbo.Orders
+tests/scripts/tsql/migration/e-free.sql:1:1 dbo.vX <- dbo.vZ
+skipped: 0

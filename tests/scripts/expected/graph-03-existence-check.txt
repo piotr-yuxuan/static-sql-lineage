@@ -1,0 +1,2 @@
+tests/scripts/tsql/03-existence-check.sql:9:1 [dbo].[vOpen] <- [dbo].[Orders]
+skipped: 3

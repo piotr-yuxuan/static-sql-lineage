@@ -1,0 +1,6 @@
+tests/scripts/tsql/05-load.sql:5:1 dbo.Fact <- dbo.Stage
+tests/scripts/tsql/05-load.sql:7:1 dbo.Fact <- dbo.Fact
+tests/scripts/tsql/05-load.sql:8:3 dbo.Fact <- dbo.Fact
+tests/scripts/tsql/05-load.sql:11:1 dbo.Gone <- dbo.Fact
+tests/scripts/tsql/05-load.sql:15:1 dbo.Dim <- dbo.Dim, dbo.Stage
+skipped: 1

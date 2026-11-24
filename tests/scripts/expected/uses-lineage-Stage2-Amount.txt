@@ -1,0 +1,4 @@
+dbo.Stage2.Amount -> dbo.Fact.[Amount] copy tests/scripts/tsql/lineage/2-load.sql:3:1
+  [dbo].[Fact].[Amount] -> dbo.vBase.Total copy tests/scripts/tsql/lineage/3-views.sql:3:1
+    dbo.vBase.Total -> dbo.vTop.Total copy tests/scripts/tsql/lineage/3-views.sql:1:1
+    dbo.vBase.Total -> dbo.vBoth.Total copy tests/scripts/tsql/lineage/3-views.sql:7:1

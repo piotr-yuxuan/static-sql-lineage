@@ -1,0 +1,3 @@
+tests/scripts/tsql/migration/g-undeclared.sql:3:1 dbo.vGone <- dbo.Stage
+tests/scripts/tsql/migration/g-undeclared.sql:1:1 dbo.Fact <- dbo.Fact, dbo.vGone
+skipped: 0

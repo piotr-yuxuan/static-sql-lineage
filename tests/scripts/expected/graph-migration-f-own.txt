@@ -1,0 +1,5 @@
+tests/scripts/tsql/migration/f-own.sql:3:1 dbo.Fact <- dbo.Stage
+tests/scripts/tsql/migration/f-own.sql:4:1 dbo.Fact <- dbo.Fact
+tests/scripts/tsql/migration/f-own.sql:5:1 dbo.Fact <- dbo.Stage2
+tests/scripts/tsql/migration/f-own.sql:1:1 dbo.vFact <- dbo.Fact
+skipped: 0

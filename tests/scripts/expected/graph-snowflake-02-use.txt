@@ -1,0 +1,5 @@
+tests/scripts/snowflake/02-use.sql:3:1 SALES.MART.V_BASE <- SALES.RAW.ORDERS
+tests/scripts/snowflake/02-use.sql:2:1 V_TOP <- V_BASE
+tests/scripts/snowflake/02-use.sql:6:1 V_SRC <- SALES.RAW.ORDERS
+tests/scripts/snowflake/02-use.sql:5:1 V_LOW <- SALES.STAGE.V_SRC
+skipped: 0
