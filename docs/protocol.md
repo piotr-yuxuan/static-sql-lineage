@@ -54,7 +54,7 @@ is a usage error.
 | Level | What it says |
 |---|---|
 | info | a request's dialect and number of writes, or a command's dialect and numbers of files and writes, and the time of each |
-| debug | each write answered, by its id: its mode, its numbers of edges and gaps, whether it is refused, the number of pieces its statement is read into, and its time |
+| debug | each write answered, by its id: its mode unless it is refused, its numbers of edges and gaps, whether it is refused, the number of pieces its statement is read into, and its time |
 | trace | each call into the engine that answers a write, named after the engine's function, and its time |
 
 Without `-v`, either of two environment variables asks for a log, in the filter syntax

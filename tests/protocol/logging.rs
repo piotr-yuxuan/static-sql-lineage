@@ -51,8 +51,12 @@ fn precedence() {
 fn levels() {
     let info = said(&logged(&["-v"], &[]));
     assert!(info.contains("dialect=snowflake") && info.contains("writes=1") && !info.contains("answer{id="), "{info}");
-    let debug = said(&logged(&["-vv"], &[]));
-    assert!(debug.contains("answer{id=t") && debug.contains("answered"), "{debug}");
+    let request = request(&[("s", &["a"])], &[("t", "select a from s"), ("u", "select from from")]).to_string();
+    let debug = said(&fed(binary().arg("-vv"), request.as_bytes()));
+    let answered: Vec<&str> = debug.lines().filter(|line| line.contains("answered")).collect();
+    let [t, u] = answered[..] else { panic!("{debug}") };
+    assert!(t.contains("answer{id=t") && t.contains("replaces=true") && t.contains("edges=1"), "{t}");
+    assert!(u.contains("answer{id=u") && u.contains("refused=true") && !u.contains("replaces"), "{u}");
     let trace = said(&logged(&["-vvv"], &[]));
     assert!(trace.lines().any(|line| line.contains("analyze_query") && line.contains("time.busy")), "{trace}");
     let graph = said(&command(&["graph", "-v", "--dialect", "duckdb", "examples/tpch"]));

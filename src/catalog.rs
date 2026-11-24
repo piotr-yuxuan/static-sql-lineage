@@ -93,7 +93,8 @@ impl Catalog {
     pub fn answer(&mut self, write: &Write, target: RelationName, dialect: Dialect, defaults: &[Name]) -> Answer {
         let (answer, replaces) = Answer::of(write, &target, self, dialect, defaults);
         let (edges, gaps, refused) = (answer.edges.len(), answer.gaps.len(), answer.refusal.is_some());
-        tracing::debug!(replaces, edges, gaps, refused, "answered");
+        // A refused write's mode is not known, though the catalog takes it for a replace one.
+        tracing::debug!(replaces = (!refused).then_some(replaces), edges, gaps, refused, "answered");
         self.record(target, replaces, answer.columns.clone());
         answer
     }
