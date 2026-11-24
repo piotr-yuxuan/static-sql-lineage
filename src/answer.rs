@@ -11,9 +11,9 @@ use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::edge::{Edge, End, Reach};
+use crate::edge::{Edge, End};
 use crate::relation::{Name, RelationName, one_line};
-use crate::write::{Outputs, Piece, Write};
+use crate::write::{Outputs, Piece, Reach, Write};
 
 /// The answer to one write.
 #[derive(Serialize)]

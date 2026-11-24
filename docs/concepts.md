@@ -127,7 +127,7 @@ have. A reject scenario names an answer that must not be given.
   no relation: `INSERT ... VALUES`, `TRUNCATE`, or `CREATE TABLE` with a column list.
 - avoid: query, which a write contains; statement, since most statements are not
   writes; model, view, producer, definition, transformation, job.
-- home: `Write`, `Outputs`, `Holder`, `Key`, `Piece`, `Columns`, `Reading`, `Place`.
+- home: `Write`, `Outputs`, `Holder`, `Key`, `Reach`, `Piece`, `Columns`, `Reading`, `Place`.
 - operations:
   - `Write::pieces`: the pieces, each a `SELECT`, that the write's statement is read into, its target and its mode.
   - `Write::read`: a statement's target, mode and pieces, read without the catalog, before their columns are mapped.
@@ -139,6 +139,9 @@ have. A reject scenario names an answer that must not be given.
   - `scope_steps`: the steps of a scope's path, each its kind and index, after the path up to it.
   - `Write::steps`: the engine's lineage of each output column, through the query's steps.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
+  - `Reach::of`: where the clauses of one write's query reach.
+  - `Reach::rows`: the output columns whose rows a use of a column decides.
+  - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
   - `Write::clauses`: the words and the offset of each clause of a statement, its location part.
   - `word`: the text of a token as a word of SQL, none for a quoted name or a string.
   - `Place::at`: the line and the column of an offset in a text of SQL.
@@ -190,13 +193,10 @@ have. A reject scenario names an answer that must not be given.
   `DISTINCT`, nor from a literal, `count(*)` or `current_date`, which have no parent
   column.
 - avoid: link, flow, dependency, mapping.
-- home: `Edge`, `End`, `Kind`, `Reach`.
+- home: `Edge`, `End`, `Kind`.
 - operations:
   - `Kind::of`: the kind of a projection's upstream reference.
   - `Kind::sides`: the kinds of a merged key's two sides, by the kind of the join that merges it.
-  - `Reach::of`: where the clauses of one write's query reach.
-  - `Reach::rows`: the output columns whose rows a use of a column decides.
-  - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
   - `End::of`: the end that the engine's names of a relation and of its column resolve to.
   - `End::of_columns`: the ends of a relation's columns, as a write's target gives them.
   - `Edge::of_reference`: the edge from what a reference of the engine reads.
