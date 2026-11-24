@@ -168,6 +168,7 @@ tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edg
                      the explanations of each difference
 tests/tools/         the tests of scripts/release.py and scripts/bench.py; tests/bin/fake-gh
                      stands in for gh
+scripts/commands.py  what a command prints, or why it failed, for the scripts beside it
 scripts/release.py   CD's release: the version commit, the release and its notes
 scripts/bench.py     the benchmarks: synthetic estates, the corpora, and their figures
 .github/workflows/   CI, `make check` on every push; CD, a release after each green push

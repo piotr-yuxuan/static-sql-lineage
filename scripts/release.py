@@ -22,6 +22,7 @@ answered something else.  No write follows the failure.
 """
 
 import base64
+import importlib.util
 import json
 import os
 import re
@@ -29,6 +30,7 @@ import subprocess
 import sys
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 BRANCH = "main"
 MANIFEST, LOCK = "Cargo.toml", "Cargo.lock"
@@ -76,10 +78,14 @@ query ($owner: String!, $name: String!, $tag: String!) {
   repository(owner: $owner, name: $name) { release(tagName: $tag) { tagName } }
 }
 """
+# scripts/commands.py, found by this script's path, whether CD runs it or its tests load it.
+_SPEC = importlib.util.spec_from_file_location("commands", Path(__file__).with_name("commands.py"))
+commands = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(commands)
 
 
 class ReleaseError(Exception):
-    """An input that cannot be trusted as written, or a command that failed."""
+    """An input that cannot be trusted as written."""
 
 
 @dataclass(frozen=True)
@@ -212,18 +218,7 @@ def decide(found: Found, bump: str) -> Decision:
 
 def run(*command: str, stdin: bytes = b"") -> bytes:
     """What a command prints; any failure stops the release."""
-    result = subprocess.run(
-        command,
-        input=stdin,
-        capture_output=True,
-        check=False,
-        timeout=COMMAND_TIMEOUT_SECONDS,
-    )
-    if result.returncode != 0:
-        reason = result.stderr.decode(errors="replace").strip()
-        message = f"{' '.join(command)} failed: {reason}"
-        raise ReleaseError(message)
-    return result.stdout
+    return commands.output(command, COMMAND_TIMEOUT_SECONDS, stdin)
 
 
 def api(method: str, path: str, body: object = None) -> object:
@@ -399,7 +394,13 @@ def main() -> int:
             f"repos/{repository}/releases",
             {"tag_name": version, "target_commitish": target, "name": version, "body": notes},
         )
-    except (ReleaseError, subprocess.TimeoutExpired, OSError, UnicodeError) as error:
+    except (
+        ReleaseError,
+        commands.CommandError,
+        subprocess.TimeoutExpired,
+        OSError,
+        UnicodeError,
+    ) as error:
         print(f"release: {error}", file=sys.stderr)
         return 2
     print(f"release: released {version} on {target}")
