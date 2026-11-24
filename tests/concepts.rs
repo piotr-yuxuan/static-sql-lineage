@@ -6,6 +6,10 @@
 //! is a name in backticks on a `home:` line, or in the Home cell of a table's row.  Also
 //! `kernel_changes`, which `make kernel-unchanged` runs.
 
+#[macro_use]
+#[path = "protocol/rows.rs"]
+mod rows;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -307,72 +311,41 @@ const CONCEPTS: &str = "\
 | protocol | the number of its format | |
 ";
 
-#[test]
-fn concepts_report_a_type_with_no_home() {
-    let source = "struct Answer; struct Request; enum Stray {} union Loose { a: u8 }";
-    let found = undeclared(&[source.to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { types: names(&["Loose", "Stray"]), ..Undeclared::default() });
+/// Asserts that the check finds `expected` in `source` against `CONCEPTS`.
+#[track_caller]
+fn finds(source: &str, expected: Undeclared) {
+    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), expected);
 }
 
-#[test]
-fn concepts_report_a_home_with_no_type() {
-    let found = undeclared(&["struct Answer;".to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { homes: names(&["Request"]), ..Undeclared::default() });
-}
-
-#[test]
-fn concepts_report_a_name_defined_twice() {
-    let sources = ["struct Answer; struct Request;".to_string(), "mod other { pub enum Request {} }".to_string()];
-    let found = undeclared(&sources, CONCEPTS);
-    assert_eq!(found, Undeclared { duplicates: names(&["Request"]), ..Undeclared::default() });
-}
-
-#[test]
-fn concepts_ignore_associated_types() {
-    let source = "struct Answer; struct Request;
-        impl std::str::FromStr for Answer { type Err = (); fn from_str(_: &str) -> Result<Self, ()> { Err(()) } }";
-    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
-}
-
-#[test]
-fn concepts_ignore_comments() {
-    let source = "// struct Stray;
+cases! {
+    concepts_report_a_type_with_no_home: finds("struct Answer; struct Request; enum Stray {} union Loose { a: u8 }",
+        Undeclared { types: names(&["Loose", "Stray"]), ..Undeclared::default() });
+    concepts_report_a_home_with_no_type:
+        finds("struct Answer;", Undeclared { homes: names(&["Request"]), ..Undeclared::default() });
+    concepts_report_a_name_defined_twice: {
+        let sources = ["struct Answer; struct Request;".to_string(), "mod other { pub enum Request {} }".to_string()];
+        let found = undeclared(&sources, CONCEPTS);
+        assert_eq!(found, Undeclared { duplicates: names(&["Request"]), ..Undeclared::default() });
+    };
+    concepts_ignore_associated_types: finds("struct Answer; struct Request;
+        impl std::str::FromStr for Answer { type Err = (); fn from_str(_: &str) -> Result<Self, ()> { Err(()) } }",
+        Undeclared::default());
+    concepts_ignore_comments: finds("// struct Stray;
         /// Says struct Documented;
         struct Answer;
         struct Request;
-        const TEXT: &str = \"struct Quoted;\";";
-    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
-}
-
-#[test]
-fn concepts_ignore_test_types() {
-    let source = "struct Answer; struct Request;
+        const TEXT: &str = \"struct Quoted;\";", Undeclared::default());
+    concepts_ignore_test_types: finds("struct Answer; struct Request;
         #[cfg(test)] struct Helper;
         #[cfg(test)] mod tests { struct Fixture; }
-        #[cfg(test)] fn fixture() { struct Local; }";
-    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
-}
-
-#[test]
-fn concepts_ignore_test_impls() {
-    let source = "struct Answer; struct Request;
+        #[cfg(test)] fn fixture() { struct Local; }", Undeclared::default());
+    concepts_ignore_test_impls: finds("struct Answer; struct Request;
         #[cfg(test)] impl Answer { fn fixture() { struct Local; } }
-        impl Request { #[cfg(test)] fn fixture() { struct Inner; } }";
-    assert_eq!(undeclared(&[source.to_string()], CONCEPTS), Undeclared::default());
-}
-
-#[test]
-fn concepts_find_types_in_inline_modules() {
-    let source = "struct Answer; mod inner { pub struct Request; type Stray = u8; }";
-    let found = undeclared(&[source.to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { types: names(&["Stray"]), ..Undeclared::default() });
-}
-
-#[test]
-fn concepts_find_types_in_function_bodies() {
-    let source = "struct Answer; struct Request; fn main() { struct Hidden; }";
-    let found = undeclared(&[source.to_string()], CONCEPTS);
-    assert_eq!(found, Undeclared { types: names(&["Hidden"]), ..Undeclared::default() });
+        impl Request { #[cfg(test)] fn fixture() { struct Inner; } }", Undeclared::default());
+    concepts_find_types_in_inline_modules: finds("struct Answer; mod inner { pub struct Request; type Stray = u8; }",
+        Undeclared { types: names(&["Stray"]), ..Undeclared::default() });
+    concepts_find_types_in_function_bodies: finds("struct Answer; struct Request; fn main() { struct Hidden; }",
+        Undeclared { types: names(&["Hidden"]), ..Undeclared::default() });
 }
 
 #[test]
@@ -411,58 +384,47 @@ const KERNEL: &str = "\
 | protocol | its number | |
 ";
 
-#[test]
-fn kernel_allows_a_first_fill() {
-    let head = (KERNEL.replace("- home: none yet.", "- home: `Answer`."))
-        .replace("- operations: none yet.", "- operations:\n  - `Answer::of`: builds one.")
-        .replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
-    assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+/// What `kernel_changes` finds in `KERNEL` with `from` replaced by `to`.
+fn changed(from: &str, to: &str) -> Vec<String> {
+    kernel_changes(KERNEL, &KERNEL.replace(from, to))
 }
 
-#[test]
-fn kernel_allows_an_added_item() {
-    let head = KERNEL.replace("reads one request.\n", "reads one request.\n  - `Request::write`: writes one.\n");
-    assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+/// Asserts that `changes` are one change, which names `naming`.
+#[track_caller]
+fn one_change(changes: &[String], naming: &str) {
+    assert!(matches!(changes, [change] if change.contains(naming)), "{changes:?}");
 }
 
-#[test]
-fn kernel_refuses_a_removed_name() {
-    let changes = kernel_changes(KERNEL, &KERNEL.replace("- home: `Request`.", "- home: none yet."));
-    assert!(matches!(changes.as_slice(), [change] if change.contains("Request") && change.contains("`Request`")));
-}
-
-#[test]
-fn kernel_refuses_a_name_moved_to_another_entry() {
-    let base = KERNEL.replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
-    let head = KERNEL.replace("| protocol | its number | |", "| protocol | its number | `Request` |");
-    let changes = kernel_changes(&base, &head);
-    assert!(matches!(changes.as_slice(), [change] if change.contains("Request / request")), "{changes:?}");
-}
-
-#[test]
-fn kernel_refuses_a_reworded_item() {
-    let changes = kernel_changes(KERNEL, &KERNEL.replace("reads one request.", "reads a request."));
-    assert!(matches!(changes.as_slice(), [change] if change.contains("reads one request")), "{changes:?}");
-}
-
-#[test]
-fn kernel_refuses_a_changed_line() {
-    let changes = kernel_changes(KERNEL, &KERNEL.replace("| its number |", "| its version |"));
-    assert!(matches!(changes.as_slice(), [change] if change.contains("its version")), "{changes:?}");
-}
-
-#[test]
-fn kernel_refuses_prose_in_a_home() {
-    let head = KERNEL.replace("- home: `Request`.", "- home: `Request`; and a CTE is also a relation.");
-    let changes = kernel_changes(KERNEL, &head);
-    assert!(changes.iter().any(|change| change.contains("a CTE is also a relation")), "{changes:?}");
-}
-
-#[test]
-fn kernel_refuses_prose_in_an_item() {
-    let head = KERNEL.replace("reads one request.\n", "reads one request.\n    And a write may have no target.\n");
-    let changes = kernel_changes(KERNEL, &head);
-    assert!(changes.iter().any(|change| change.contains("a write may have no target")), "{changes:?}");
+cases! {
+    kernel_allows_a_first_fill: {
+        let head = (KERNEL.replace("- home: none yet.", "- home: `Answer`."))
+            .replace("- operations: none yet.", "- operations:\n  - `Answer::of`: builds one.")
+            .replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
+        assert_eq!(kernel_changes(KERNEL, &head), Vec::<String>::new());
+    };
+    kernel_allows_an_added_item: assert_eq!(
+        changed("reads one request.\n", "reads one request.\n  - `Request::write`: writes one.\n"),
+        Vec::<String>::new()
+    );
+    kernel_refuses_a_removed_name: {
+        let changes = changed("- home: `Request`.", "- home: none yet.");
+        assert!(matches!(changes.as_slice(), [change] if change.contains("Request") && change.contains("`Request`")));
+    };
+    kernel_refuses_a_name_moved_to_another_entry: {
+        let base = KERNEL.replace("| request | one JSON document | |", "| request | one JSON document | `Request` |");
+        let head = KERNEL.replace("| protocol | its number | |", "| protocol | its number | `Request` |");
+        one_change(&kernel_changes(&base, &head), "Request / request");
+    };
+    kernel_refuses_a_reworded_item: one_change(&changed("reads one request.", "reads a request."), "reads one request");
+    kernel_refuses_a_changed_line: one_change(&changed("| its number |", "| its version |"), "its version");
+    kernel_refuses_prose_in_a_home: {
+        let changes = changed("- home: `Request`.", "- home: `Request`; and a CTE is also a relation.");
+        assert!(changes.iter().any(|change| change.contains("a CTE is also a relation")), "{changes:?}");
+    };
+    kernel_refuses_prose_in_an_item: {
+        let changes = changed("reads one request.\n", "reads one request.\n    And a write may have no target.\n");
+        assert!(changes.iter().any(|change| change.contains("a write may have no target")), "{changes:?}");
+    };
 }
 
 /// `docs/concepts.md` where the branch began against `HEAD`, as `make kernel-unchanged`
@@ -493,46 +455,31 @@ fn operations_of(source: &str) -> BTreeSet<String> {
     undeclared(&[source.to_string()], OPERATIONS).operations
 }
 
-#[test]
-fn concepts_find_an_operation_in_an_impl() {
-    assert_eq!(
+cases! {
+    concepts_find_an_operation_in_an_impl: assert_eq!(
         operations_of("pub struct Answer; impl Answer { pub fn of() -> Self { Answer } }"),
         names(&["answer_all"])
     );
-}
-
-#[test]
-fn concepts_find_a_free_function_operation() {
-    assert_eq!(operations_of("pub struct Answer; pub fn answer_all() {}"), names(&["Answer::of"]));
-}
-
-#[test]
-fn concepts_report_an_operation_with_no_function() {
-    assert_eq!(operations_of("pub struct Answer;"), names(&["Answer::of", "answer_all"]));
-}
-
-#[test]
-fn concepts_report_an_operation_of_another_type() {
-    let source = "pub struct Answer; pub struct Other; impl Other { pub fn of() {} } pub fn answer_all() {}";
-    assert_eq!(operations_of(source), names(&["Answer::of"]));
-}
-
-#[test]
-fn concepts_report_a_method_named_as_a_free_function() {
-    let source = "pub struct Answer; impl Answer { pub fn of() {} pub fn answer_all() {} }";
-    assert_eq!(operations_of(source), names(&["answer_all"]));
-}
-
-#[test]
-fn concepts_report_a_private_operation() {
-    let source = "pub struct Answer; impl Answer { fn of() {} } pub fn answer_all() {}";
-    assert_eq!(operations_of(source), names(&["Answer::of"]));
-}
-
-#[test]
-fn concepts_report_a_test_only_operation() {
-    let source = "pub struct Answer; impl Answer { #[cfg(test)] pub fn of() {} } #[test] pub fn answer_all() {}";
-    assert_eq!(operations_of(source), names(&["Answer::of", "answer_all"]));
+    concepts_find_a_free_function_operation:
+        assert_eq!(operations_of("pub struct Answer; pub fn answer_all() {}"), names(&["Answer::of"]));
+    concepts_report_an_operation_with_no_function:
+        assert_eq!(operations_of("pub struct Answer;"), names(&["Answer::of", "answer_all"]));
+    concepts_report_an_operation_of_another_type: assert_eq!(
+        operations_of("pub struct Answer; pub struct Other; impl Other { pub fn of() {} } pub fn answer_all() {}"),
+        names(&["Answer::of"])
+    );
+    concepts_report_a_method_named_as_a_free_function: assert_eq!(
+        operations_of("pub struct Answer; impl Answer { pub fn of() {} pub fn answer_all() {} }"),
+        names(&["answer_all"])
+    );
+    concepts_report_a_private_operation: assert_eq!(
+        operations_of("pub struct Answer; impl Answer { fn of() {} } pub fn answer_all() {}"),
+        names(&["Answer::of"])
+    );
+    concepts_report_a_test_only_operation: assert_eq!(
+        operations_of("pub struct Answer; impl Answer { #[cfg(test)] pub fn of() {} } #[test] pub fn answer_all() {}"),
+        names(&["Answer::of", "answer_all"])
+    );
 }
 
 #[test]
