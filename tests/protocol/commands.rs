@@ -8,7 +8,7 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, assert_succeeded, command, lines, printed_json, read, run};
+use super::{assert_refused, assert_succeeded, command, lacks, lines, printed_json, read, run};
 
 /// Asserts that the command line `line`, its arguments split at spaces, prints from the
 /// repository's root the file `name` of `tests/scripts/expected/`, byte for byte.
@@ -366,14 +366,10 @@ fn tsql_storage_clauses_are_ignored() {
     assert_eq!(found.last().map(String::as_str), Some("skipped: 0"));
 }
 
-#[test]
-fn a_partition_scheme_is_kept() {
+cases! {
     // `ON ps_Day([Day])` is read as polyglot reads it; blanked, its `([Day])` would not parse.
-    let found = tables();
-    assert!(
-        !found.iter().any(|line| line.starts_with("refused: tests/scripts/tsql/18-storage.sql:10:1 ")),
-        "{found:?}"
-    );
+    a_partition_scheme_is_kept:
+        lacks(&tables(), |line| line.starts_with("refused: tests/scripts/tsql/18-storage.sql:10:1 "));
 }
 
 #[test]
