@@ -29,6 +29,8 @@ one of an option's possible values, such as a dialect that the build lacks; `--d
 or `-` with any other argument. Its form is clap's (R18): a first line `error: ` and the
 reason, then, as clap chooses for each kind of error, the possible values, a tip and a
 usage, then a line that points to `--help`. A command line that is not UTF-8 is one too.
+`-h`, `--help`, `-V` and `--version` are clap's actions, and win wherever they come, as
+after `--describe`: they print the help or the version, with status 0.
 `--` ends the options: what follows it is an argument or a path, even if it starts with
 `-`. The help and the completion scripts list the commands, the options and the build's
 dialects.

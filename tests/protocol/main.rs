@@ -262,6 +262,9 @@ cases! {
         assert_eq!(output.stdout, answers(request.as_bytes()).stdout);
     };
     refuses_dash_with_another_argument: assert_usage_error(&run(&["-", "--describe"]), "--describe");
+    refuses_describe_with_a_command:
+        assert_usage_error(&command(&["--describe", "graph", "--dialect", "duckdb", "examples/tpch"]), "'graph'");
+    refuses_describe_with_dash: assert_usage_error(&run(&["--describe", "-"]), "'-'");
     version_names_the_tool: for flag in ["--version", "-V"] {
         let output = run(&[flag]);
         assert_succeeded(&output);
