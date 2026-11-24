@@ -191,10 +191,10 @@ impl Defaults {
     /// a catalog is one of a database. None for a `USE` of anything else, such as a role, or
     /// of a name that does not read.
     pub fn used(&self, kind: Option<UseKind>, parts: &[String], dialect: Dialect) -> Option<Defaults> {
-        let kind = match kind {
-            None | Some(UseKind::Database) if dialect == Dialect::Databricks => Some(UseKind::Schema),
-            Some(UseKind::Catalog) if dialect == Dialect::Databricks => Some(UseKind::Database),
-            kind => kind,
+        let kind = match (dialect, kind) {
+            (Dialect::Databricks, None | Some(UseKind::Database)) => Some(UseKind::Schema),
+            (Dialect::Databricks, Some(UseKind::Catalog)) => Some(UseKind::Database),
+            (_, kind) => kind,
         };
         let used = match (kind, parts) {
             (Some(UseKind::Schema), [schema]) => {
