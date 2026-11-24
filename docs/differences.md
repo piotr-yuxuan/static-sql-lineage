@@ -6,11 +6,14 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - A T-SQL database whose collation is sensitive to case, or a column with such a
   collation, is not modelled: under T-SQL every name compares as SQL Server's default
   collation compares it, ignoring case. Class: an intended gap.
-- Under Snowflake and DuckDB, a table alias read in another case than it was given, as
-  `o.a` in `select o.a from s as O`, gives an `unresolved_reference` gap, where the
-  Edge entry gives the edge `s.a -> t.a`, `copy`, since the dialect's rules for case
-  make `o` and `O` one alias: polyglot-sql looks a qualifier up exactly. Class: a defect
-  of the code.
+- A Redshift database with `enable_case_sensitive_identifier` on is not modelled: under
+  Redshift every name ignores case, quoted or not, as with that setting off, its
+  default. Class: an intended gap.
+- Under Snowflake, DuckDB and PostgreSQL, a table alias read in another case than it
+  was given, as `o.a` in `select o.a from s as O`, gives an `unresolved_reference` gap,
+  where the Edge entry gives the edge `s.a -> t.a`, `copy`, since the dialect's rules
+  for case make `o` and `O` one alias: polyglot-sql looks a qualifier up exactly. Class:
+  a defect of the code.
 - T-SQL's alias written before its expression, as in `select Total = a from s`, is read
   as a comparison, and the write refused, where the Write entry names its output column
   `Total`: polyglot-sql does not parse that form. Class: a defect of the code.
@@ -71,6 +74,14 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - Snowflake's `INSERT ALL`, which writes several targets, and DuckDB's
   `INSERT ... BY NAME`, which maps its columns by name, are refused `not_a_query`, where
   the Write entry reads `INSERT ... SELECT` as a write. Class: an aspiration.
+- A `MERGE` whose action is `UPDATE SET *` or `INSERT *`, which polyglot-sql parses in
+  every dialect, is refused `not_a_query`, where the Write entry reads it as copying
+  each column of the source onto the target's column of that name. Class: an aspiration.
+- A contribute write that maps a `*` over `USING` or `NATURAL` onto its target's columns
+  by position takes its sources' order of columns, not the `*`'s, which lists the merged
+  keys first in Snowflake, PostgreSQL, Redshift and Databricks, so that a key and a
+  column before it swap targets, where the Write entry maps the `*`'s columns in order.
+  Class: a defect of the code.
 - Statements that Snowflake refuses and polyglot-sql reads, such as `WITH ... INSERT`,
   `WHEN NOT MATCHED BY SOURCE` in a `MERGE`, or `SELECT ... INTO`, are traced as the
   statements of the dialects that accept them: validating SQL is out of scope. Class: an
@@ -88,8 +99,9 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   the Write entry reads each statement that writes a relation. Class: an aspiration.
 - A user's default schema other than the dialect's usual one is known from `--schema`
   alone: `--database` without `--schema`, and a `USE` of a database, take `dbo`,
-  `PUBLIC` or `main`, where the Relation entry completes a name with the defaults that
-  the SQL is read under. Class: an intended gap.
+  `PUBLIC`, `main`, `public` or `default`, and PostgreSQL's and Redshift's
+  `SET search_path` is skipped, where the Relation entry completes a name with the
+  defaults that the SQL is read under. Class: an intended gap.
 - In a script in T-SQL, a statement that polyglot-sql refuses ends before the next line
   that starts with a statement's first word, so that its continuation, such as the
   `SELECT` of a refused `INSERT`, is read as a statement of its own, where the Write
@@ -115,6 +127,21 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   a masking policy on a column, is refused, and its relation left unknown, where the
   Catalog entry declares its relation and its columns: polyglot-sql parses `cluster by`
   alone and `comment` alone, not both, and no masking policy. Class: a defect of the code.
+- In a script, a declaration with PostgreSQL's `TABLESPACE` or `ON COMMIT DROP`,
+  Redshift's `INTERLEAVED SORTKEY`, or Databricks's `PARTITIONED BY` followed by
+  `COMMENT` or `TBLPROPERTIES`, is refused, and its relation left unknown, where the
+  Catalog entry declares its relation and its columns: polyglot-sql parses none of them.
+  Class: a defect of the code.
+- In a script in PostgreSQL, a declaration by `PARTITION OF` is refused as a table with
+  no column, where its columns are its parent's, which the Catalog entry would declare.
+  Class: an aspiration.
+- In a script in Databricks, `SET CATALOG`, a synonym of `USE CATALOG`, is skipped,
+  where the Relation entry completes a name with the defaults that the SQL is read
+  under. Class: an aspiration.
+- Redshift's navigation of a `SUPER` value in `FROM`, as `o.items` in
+  `from s o, o.items f`, is read as the relation `o.items`, an `unknown_relation` gap,
+  where the Write entry reads only `s`: polyglot-sql does not read the navigation.
+  Class: a defect of the code.
 - A column that `ALTER TABLE ... ADD` adds to a declared relation is not added to its
   columns, where the Catalog entry knows the columns that the scripts give a relation: the
   statement is skipped. Class: an aspiration.
