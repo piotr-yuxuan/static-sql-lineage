@@ -208,19 +208,12 @@ fn describe_follows_the_protocol_document() {
     assert_eq!(documented, described);
 }
 
-#[test]
-fn refuses_an_argument_other_than_describe() {
-    assert_refused(&run(&["--explain"]), "--explain");
-}
-
-#[test]
-fn refuses_describe_with_another_argument() {
-    assert_refused(&run(&["--describe", "--explain"]), "--explain");
-}
-
-#[cfg(unix)]
-#[test]
-fn refuses_an_argument_that_is_not_unicode() {
-    use std::os::unix::ffi::OsStrExt;
-    assert_refused(&run(&[OsStr::from_bytes(b"\xff")]), "\\xFF");
+cases! {
+    refuses_an_argument_other_than_describe: assert_refused(&run(&["--explain"]), "--explain");
+    refuses_describe_with_another_argument: assert_refused(&run(&["--describe", "--explain"]), "--explain");
+    #[cfg(unix)]
+    refuses_an_argument_that_is_not_unicode: {
+        use std::os::unix::ffi::OsStrExt;
+        assert_refused(&run(&[OsStr::from_bytes(b"\xff")]), "\\xFF");
+    };
 }
