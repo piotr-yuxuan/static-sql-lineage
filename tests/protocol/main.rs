@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! The binary run as a caller runs it, as `docs/protocol.md` gives its uses: here
-//! `--describe` and the arguments it refuses, and the helpers of the modules.
+//! `--describe`, help, the version and usage errors, and the helpers of the modules.
 
 #[macro_use]
 mod rows;
@@ -184,6 +184,17 @@ fn assert_refused(output: &Output, naming: &str) {
     assert!(stderr.contains(naming), "stderr does not name {naming}: {stderr}");
 }
 
+/// A usage error, in clap's form: status 2, nothing on standard output, and on standard
+/// error a first line `error: `, then more, that name `naming`.
+#[track_caller]
+fn assert_usage_error(output: &Output, naming: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(output.stdout.is_empty(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
+    assert!(stderr.starts_with("error: ") && stderr.lines().count() > 1, "stderr: {stderr}");
+    assert!(stderr.contains(naming), "stderr does not name {naming}: {stderr}");
+}
+
 #[test]
 fn describe_names_the_build() {
     let description = description();
@@ -215,11 +226,22 @@ fn describe_follows_the_protocol_document() {
 }
 
 cases! {
-    refuses_an_argument_other_than_describe: assert_refused(&run(&["--explain"]), "--explain");
-    refuses_describe_with_another_argument: assert_refused(&run(&["--describe", "--explain"]), "--explain");
+    refuses_an_argument_other_than_describe: assert_usage_error(&run(&["--explain"]), "--explain");
+    refuses_describe_with_another_argument: assert_usage_error(&run(&["--describe", "--explain"]), "--explain");
     #[cfg(unix)]
     refuses_an_argument_that_is_not_unicode: {
         use std::os::unix::ffi::OsStrExt;
-        assert_refused(&run(&[OsStr::from_bytes(b"\xff")]), "\\xFF");
+        assert_usage_error(&run(&[OsStr::from_bytes(b"\xff")]), "'\u{FFFD}'");
+    };
+    help_prints_a_usage: for arguments in [&["--help"][..], &["-h"], &["help", "trace"]] {
+        let output = run(arguments);
+        assert_succeeded(&output);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: static-sql-lineage"), "{arguments:?}");
+    };
+    help_names_describe: assert!(String::from_utf8_lossy(&run(&["--help"]).stdout).contains("--describe"));
+    version_names_the_tool: for flag in ["--version", "-V"] {
+        let output = run(&[flag]);
+        assert_succeeded(&output);
+        assert_eq!(String::from_utf8_lossy(&output.stdout), format!("static-sql-lineage {}\n", env!("CARGO_PKG_VERSION")));
     };
 }

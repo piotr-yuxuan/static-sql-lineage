@@ -15,7 +15,6 @@ mod request;
 mod script;
 mod write;
 
-use std::ffi::OsString;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -28,20 +27,15 @@ use request::Request;
 const LIMIT: u64 = 512 << 20;
 
 fn main() -> ExitCode {
-    // An argument need not be Unicode; it is refused like any other.
-    let arguments: Vec<OsString> = std::env::args_os().collect();
-    let cli = Cli::try_parse_from(&arguments).map_err(|error| {
-        let reason = error.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
-        format!("given {:?}; {reason}", &arguments[1..])
-    });
-    let output = cli.and_then(|cli| match cli {
+    // A usage error, help and the version are clap's to print, and end the process.
+    let output = match Cli::parse() {
         Cli { describe: true, .. } => Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
             .expect("a description serialises")),
         Cli { verb: Some(verb), .. } => Command::read(verb).and_then(|command| command.run()),
         Cli { verb: None, .. } => Request::read(std::io::stdin().lock(), LIMIT)
             .and_then(Request::respond)
             .map(|response| serde_json::to_string(&response).expect("a response serialises")),
-    });
+    };
     match output {
         Ok(output) => {
             println!("{output}");

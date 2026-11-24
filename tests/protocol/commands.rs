@@ -8,7 +8,7 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, command, lacks, lines, printed_json, read, run, stdout};
+use super::{assert_refused, assert_usage_error, command, lacks, lines, printed_json, read, run, stdout};
 
 /// Asserts that the command line `line`, its arguments split at spaces, prints from the
 /// repository's root the file `name` of `tests/scripts/expected/`, byte for byte.
@@ -41,14 +41,14 @@ fn ids(lines: &[String]) -> Vec<&str> {
 
 cases! {
     a_command_without_a_dialect_is_refused: {
-        assert_refused(&graph(&["tests/scripts/tsql"]), "--dialect");
+        assert_usage_error(&graph(&["tests/scripts/tsql"]), "--dialect");
         assert_refused(&graph(&["--dialect", "bigquery", "tests/scripts/tsql"]), "bigquery");
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
     };
     an_unknown_command_is_refused:
-        assert_refused(&run(&["migrate", "--dialect", "tsql", "tests/scripts/tsql"]), "migrate");
+        assert_usage_error(&run(&["migrate", "--dialect", "tsql", "tests/scripts/tsql"]), "migrate");
     an_unknown_option_is_refused: {
-        assert_refused(&graph(&["--dialect", "tsql", "--verbose", "tests/scripts/tsql"]), "--verbose");
+        assert_usage_error(&graph(&["--dialect", "tsql", "--verbose", "tests/scripts/tsql"]), "--verbose");
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
     };
     a_path_that_does_not_exist_is_refused: {
@@ -154,7 +154,7 @@ cases! {
     an_unknown_write_is_refused: {
         let id = format!("{LINEAGE}/2-load.sql:9:1");
         assert_refused(&command(&["outline", "--dialect", "tsql", &id, LINEAGE]), &id);
-        assert_refused(&command(&["outline", "--dialect", "tsql", LINEAGE]), "outline");
+        assert_usage_error(&command(&["outline", "--dialect", "tsql", LINEAGE]), "outline");
     };
 }
 

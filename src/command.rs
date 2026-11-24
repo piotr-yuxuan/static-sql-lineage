@@ -19,7 +19,6 @@ use crate::script::{Script, Scripted};
 /// The command line: `--describe`, or a command; with neither, a request on standard input.
 #[derive(Parser)]
 #[command(version, about, args_conflicts_with_subcommands = true)]
-#[command(disable_help_flag = true, disable_version_flag = true, disable_help_subcommand = true)]
 pub struct Cli {
     /// Print what this build is, as JSON.
     #[arg(long)]
