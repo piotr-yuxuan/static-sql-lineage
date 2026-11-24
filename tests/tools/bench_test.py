@@ -145,10 +145,16 @@ class Counts(unittest.TestCase):
 class Measure(unittest.TestCase):
     """measure() over children that stand in for the binary, as D3 asks of each run."""
 
-    def measure(self, *argv):
-        label = {"shape": "test", "size": 10, "dialect": "duckdb", "version": "0"}
+    def measure(self, *argv, size=10):
+        label = {"shape": "test", "size": size, "dialect": "duckdb", "version": "0"}
         with tempfile.TemporaryDirectory() as cwd, contextlib.redirect_stdout(io.StringIO()):
             return bench.measure(label, "trace", list(argv), Path(cwd), None)
+
+    def test_five_runs_below_six_thousand_writes_and_three_from_it(self):
+        for size, runs in ((1000, 5), (6000, 3)):
+            with self.subTest(size=size), tempfile.NamedTemporaryFile() as log:
+                self.measure("sh", "-c", f"echo run >> {log.name}", size=size)
+                self.assertEqual(Path(log.name).read_text().count("run"), runs)
 
     def test_a_child_that_fails_stops_the_run(self):
         with self.assertRaisesRegex(bench.BenchError, "status 3 "):

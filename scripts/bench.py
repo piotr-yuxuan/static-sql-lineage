@@ -41,9 +41,10 @@ BINARY = str(ROOT / "target" / "release" / "static-sql-lineage")
 BENCH = ROOT / "target" / "bench"
 SEED = 7
 SIZES = (100, 1000, 6000)
-# The runs of each way in, of which the median time is kept; the seconds that one may last.
-RUNS = 5
-TIMEOUT_SECONDS = 300
+# The runs of each way in, of which the median time is kept: RUNS, or LARGE_RUNS from LARGE
+# writes on; and the seconds that one run may last.
+RUNS, LARGE_RUNS, LARGE = 5, 3, 6000
+TIMEOUT_SECONDS = 900
 # The sizes whose times the growth compares.
 GROWTH = (1000, 6000)
 # Where Linux says this runner's resident memory, which a forked child's peak starts from.
@@ -227,9 +228,9 @@ def ways(dialect: str, paths: list[str], column: str, write: str, request: Path 
 
 
 def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | None) -> dict:
-    """The figures of RUNS runs of the binary by one way in, under `label`."""
-    runs, floor = [], 0
-    for run in range(RUNS):
+    """The figures of the runs of the binary by one way in, under `label`."""
+    runs, floor, count = [], 0, RUNS if label["size"] < LARGE else LARGE_RUNS
+    for run in range(count):
         with (
             open(stdin or os.devnull, "rb") as given,
             tempfile.TemporaryFile() as out,
@@ -258,7 +259,7 @@ def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | Non
                 raise BenchError(message)
             runs.append((seconds, usage.ru_maxrss))
             # Only the last output is read, so that none is resident while a child is forked.
-            if run == RUNS - 1:
+            if run == count - 1:
                 out.seek(0)
                 output = out.read()
     seconds, peak = figures(runs, sys.platform)

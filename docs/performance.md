@@ -49,16 +49,16 @@ as its catalog. The last write is `last`, with a column `a`.
 
 ## Figures
 
-Each way in runs five times. A run's peak resident memory is that child's alone, from
-`os.wait4` on its pid: `ru_maxrss`, in KiB on Linux and bytes on macOS. The runner
-forks each child rather than letting Popen vfork it, since a child's peak starts from the
-memory of what it was copied from: with a fork, the runner's resident memory at that
+Each way in runs five times, three at 6,000 writes and more. A run's peak resident
+memory is that child's alone, from `os.wait4` on its pid: `ru_maxrss`, in KiB on Linux
+and bytes on macOS. The runner forks each child rather than letting Popen vfork it, since
+a child's peak starts from the memory of what it was copied from: with a fork, the runner's resident memory at that
 moment, which is the floor of every peak; with a vfork, the runner's own peak, which
 grows over a run. So that the floor stays low, the runner reads a child's output only
 after the last run, and holds no output while it forks; so that a peak can be read
 against it, the runner records its own resident memory at each fork, from Linux's
 `/proc/self/status`, the largest as `floor_kib`. A peak near that floor says little of
-the child. A child that exits with a status other than 0, or runs past 300 seconds, ends
+the child. A child that exits with a status other than 0, or runs past 900 seconds, ends
 the run with status 2 and one line on standard error, and nothing is written.
 
 Each object of the output has these fields:
@@ -69,8 +69,8 @@ Each object of the output has these fields:
 | `size` | the writes of an estate; of a corpus, its `.sql` files or TPC-DS's queries |
 | `way` | the way in |
 | `dialect` | the dialect |
-| `median_seconds` | the median wall time of the five runs |
-| `peak_kib` | the largest peak of the five runs |
+| `median_seconds` | the median wall time of its runs |
+| `peak_kib` | the largest peak of its runs |
 | `floor_kib` | the runner's largest resident memory at a fork of these runs; none without `/proc` |
 | `version` | the binary's, from `--describe` |
 | `writes`, `refusals`, `gaps` | for `protocol1`, from the response; gaps by reason |
