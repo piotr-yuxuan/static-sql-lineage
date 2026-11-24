@@ -40,8 +40,8 @@ Reuses: <operations and types at the base that the steps call or extend>
   definition, an aspiration or an intended gap.
 - Tests take their expectations from `docs/concepts.md`, the protocol and the
   catalogue of clauses carried over from the proof of concept, never from the
-  implementation; a scenario's test carries its identifier. A scenario's test is named
-  after its identifier, `.` and `-` becoming `_`.
+  implementation. A scenario's row carries its identifier, and a failing row names it:
+  the macro names its test after it, `.` and `-` becoming `_`.
 - The diagrams in `docs/diagrams/` are derived from `docs/concepts.md` and
   `docs/decisions.md`, drawn with the skill `diagram-design:diagram-design`; a plan
   that changes what one shows redraws it.
@@ -158,9 +158,11 @@ tests/protocol/      the binary run as a caller runs it: --describe and the uses
                      refuses, requests, scenarios, answers, edges, stars, catalogue (of
                      clauses), cases (Snowflake's), agreement (with dbt's lineage),
                      statements (replace and contribute), commands (graph on scripts,
-                     and the README's examples)
+                     and the README's examples); rows, the macro of rows, which
+                     tests/concepts.rs loads too
 tests/scripts/       synthetic scripts as SQL Server's tools, Snowflake and DuckDB write
-                     them, kept byte for byte by `.gitattributes`: CRLF, UTF-16
+                     them, kept byte for byte by `.gitattributes`: CRLF, UTF-16; and in
+                     expected/, what commands print from them, written from the protocol
 tests/agreement/     the fixture and the probes, synthetic: a request, dbt's edges, and
                      the explanations of each difference
 tests/tools/         the tests of scripts/release.py; tests/bin/fake-gh stands in for gh
