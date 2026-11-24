@@ -22,6 +22,7 @@ child or a command failed or ran past TIMEOUT_SECONDS; no figure is recorded.
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import random
@@ -74,6 +75,10 @@ CTES = 8
 BRANCHES = 8
 # The smallest estate: the layers of the shape `mix` need ten writes.
 SMALLEST = 10
+# scripts/commands.py, found by this script's path, whether it runs or its tests load it.
+_SPEC = importlib.util.spec_from_file_location("commands", Path(__file__).with_name("commands.py"))
+commands = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(commands)
 
 
 def projection(rng: random.Random, aliases: tuple[str, ...]) -> str:
@@ -156,8 +161,8 @@ def write(directory: Path, files: dict[str, str]) -> None:
         (directory / name).write_text(text)
 
 
-class BenchError(Exception):
-    """A child or a command that failed."""
+class BenchError(commands.CommandError):
+    """A child that failed, or a command that printed what was not expected."""
 
 
 def figures(samples: list[tuple[float, int]], platform: str) -> tuple[float, int]:
@@ -201,11 +206,7 @@ def growth(rows: list[dict]) -> dict[tuple[str, str], float]:
 
 def call(*command: str) -> bytes:
     """What a command prints; any failure stops the run."""
-    result = subprocess.run(command, capture_output=True, check=False, timeout=TIMEOUT_SECONDS)
-    if result.returncode != 0:
-        message = f"{' '.join(command)} failed: {result.stderr.decode(errors='replace').strip()}"
-        raise BenchError(message)
-    return result.stdout
+    return commands.output(command, TIMEOUT_SECONDS)
 
 
 def ways(dialect: str, paths: list[str], column: str, write: str, request: Path | None) -> list:
@@ -336,13 +337,13 @@ def corpora() -> None:
 def main() -> int:
     """Run one subcommand: 0 when done, 2 on a failure, said in one line."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    commands = parser.add_subparsers(dest="command", required=True)
-    generate = commands.add_parser("generate")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    generate = subcommands.add_parser("generate")
     generate.add_argument("--seed", type=int, required=True)
     generate.add_argument("--size", type=int, required=True)
     generate.add_argument("--out", type=Path, required=True)
-    commands.add_parser("run").add_argument("--sizes", type=int, nargs="+", default=SIZES)
-    commands.add_parser("corpora")
+    subcommands.add_parser("run").add_argument("--sizes", type=int, nargs="+", default=SIZES)
+    subcommands.add_parser("corpora")
     arguments = parser.parse_args()
     try:
         if arguments.command == "run":
@@ -352,7 +353,7 @@ def main() -> int:
         else:
             for shape in SHAPES:
                 write(arguments.out / shape, estate(shape, arguments.seed, arguments.size))
-    except (BenchError, ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
+    except (commands.CommandError, ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
         print(f"bench: {error}", file=sys.stderr)
         return 2
     return 0
