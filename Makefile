@@ -11,7 +11,7 @@ BASE ?= main
 PYTHON := scripts/release.py tests/tools tests/bin/fake-gh
 export PYTHONDONTWRITEBYTECODE := 1
 
-.PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged
+.PHONY: check fmt clippy licence python workflows test-python test kernel-unchanged size
 
 check: fmt clippy licence python workflows test-python test
 
@@ -55,3 +55,11 @@ kernel-unchanged:
 	@git show HEAD:docs/concepts.md > target/concepts-at-head.md
 	@SQL_LINEAGE_CONCEPTS_BASE=target/concepts-at-base.md SQL_LINEAGE_CONCEPTS_HEAD=target/concepts-at-head.md \
 		cargo test --locked -j $(CARGO_JOBS) --test concepts -- --test-threads=$(TEST_THREADS) --ignored --exact kernel_unchanged
+
+# tokei's count of code, as formatted, which AGENTS.md's budgets read: the Rust
+# of src/ and of tests/, and the Python of scripts/ and tests/tools/.
+TOKEI_CODE := python3 -c 'import json, sys; print(sys.argv[1], json.load(sys.stdin)["Total"]["code"])'
+size:
+	@tokei src -t Rust -o json | $(TOKEI_CODE) src
+	@tokei tests -t Rust -o json | $(TOKEI_CODE) tests
+	@tokei scripts tests/tools -t Python -o json | $(TOKEI_CODE) python
