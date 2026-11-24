@@ -21,9 +21,17 @@
           pkgs.tokei
         ];
       };
+      # For `make bench-corpora`: the default shell's packages, and duckdb, whose
+      # built-in tpcds gives TPC-DS's tables and queries.
+      bench = pkgs: pkgs.mkShellNoCC {
+        inputsFrom = [ (shell pkgs) ];
+        packages = [ pkgs.duckdb ];
+      };
     in
     {
       devShells.x86_64-linux.default = shell nixpkgs.legacyPackages.x86_64-linux;
       devShells.aarch64-darwin.default = shell nixpkgs.legacyPackages.aarch64-darwin;
+      devShells.x86_64-linux.bench = bench nixpkgs.legacyPackages.x86_64-linux;
+      devShells.aarch64-darwin.bench = bench nixpkgs.legacyPackages.aarch64-darwin;
     };
 }

@@ -9,6 +9,9 @@
              time each way in over the estates of each size, written under target/bench,
              with the release build, which it does not build; print each way's figures
              as they come, then write them to target/bench/results.json
+    corpora  write TPC-DS from duckdb's built-in tpcds and fetch sql-server-samples' SQL
+             at its pinned commit, both under target/bench/corpora, then time each way
+             in over them and write target/bench/corpora.json
 
 The estates are a pure function of the seed and the size.  Every SQL text is synthetic.
 The figures' median, peak and growth, and the counts read from an output, are pure
@@ -22,6 +25,7 @@ import argparse
 import json
 import os
 import random
+import shutil
 import statistics
 import subprocess
 import sys
@@ -42,6 +46,27 @@ TIMEOUT_SECONDS = 300
 # The sizes whose times the growth compares.
 GROWTH = (1000, 6000)
 DIALECT = "duckdb"
+# The SQL of sql-server-samples, never its data, at one commit; and what trace, uses and
+# outline are given there, as docs/performance.md pins them.
+SAMPLES = "https://github.com/microsoft/sql-server-samples.git"
+SAMPLES_COMMIT = "26dc1258b431470f515775b8c98ae77e1d66e39a"
+SAMPLES_PATTERNS = (
+    "samples/databases/wide-world-importers/**/*.sql",
+    "samples/databases/adventure-works/*-install-script/*.sql",
+    "!**/PostDeploymentScripts/**",
+)
+SAMPLES_COLUMN = "Website.Customers.CustomerID"
+SAMPLES_WRITE = (
+    "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Website/Views/Customers.sql:1:1"
+)
+# TPC-DS from the tpcds that duckdb has built in, which nothing may download.
+OFFLINE = "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; "
+LOADED = "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'tpcds'"
+TPCDS = (
+    "CALL dsdgen(sf = 0); SELECT table_name, sql, (SELECT list(column_name ORDER BY column_index)"
+    " FROM duckdb_columns() c WHERE c.table_name = t.table_name) AS columns FROM duckdb_tables() t"
+    " ORDER BY table_name; SELECT query_nr, query FROM tpcds_queries() ORDER BY query_nr"
+)
 # W, the columns of every relation; K, the CTEs of a write of the shape `ctes`; B, the
 # branches of a write of the shape `unions`.  Only the number of writes grows.
 COLUMNS = tuple("abcdefghijklmnopqrst")
@@ -250,6 +275,59 @@ def run(sizes: list[int]) -> None:
     report(rows, BENCH / "results.json")
 
 
+def corpora() -> None:
+    """Write TPC-DS and fetch sql-server-samples, then time each way in over each."""
+    version = json.loads(call(BINARY, "--describe"))["version"]
+    root = BENCH / "corpora"
+    if call("duckdb", "-jsonlines", "-c", OFFLINE + LOADED).strip() != b'{"loaded":true}':
+        raise BenchError("this duckdb has no tpcds built in")
+    dumped = call("duckdb", "-jsonlines", "-c", OFFLINE + TPCDS)
+    found = [json.loads(line) for line in dumped.splitlines() if line]
+    tables = [row for row in found if "table_name" in row]
+    queries = {f"q{row['query_nr']:02}": row["query"] for row in found if "query_nr" in row}
+    queries = {name: query.strip().rstrip(";") for name, query in queries.items()}
+    request = {
+        "protocol": 1,
+        "dialect": DIALECT,
+        "catalog": [{"relation": table["table_name"], "columns": table["columns"]} for table in tables],
+        "writes": [{"id": name, "target": name, "sql": query} for name, query in queries.items()],
+    }
+    tpcds = root / "tpcds"
+    write(tpcds, {
+        "tables.sql": "".join(table["sql"] + "\n" for table in tables),
+        "queries.sql": "".join(f"create view {name} as {query};\n" for name, query in queries.items()),
+        "request.json": json.dumps(request) + "\n",
+    })
+    # Fetched apart, then moved into place, so that a fetch cut short leaves nothing behind.
+    samples, scratch = root / "sql-server-samples", tempfile.mkdtemp(dir=root)
+    try:
+        for command in (
+            ["init", "-q"],
+            ["remote", "add", "origin", SAMPLES],
+            ["sparse-checkout", "set", "--no-cone", *SAMPLES_PATTERNS],
+            ["fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", SAMPLES_COMMIT],
+            ["checkout", "-q", "FETCH_HEAD"],
+        ):
+            call("git", "-C", scratch, *command)
+        head = call("git", "-C", scratch, "rev-parse", "HEAD").decode().strip()
+        if head != SAMPLES_COMMIT:
+            raise BenchError(f"sql-server-samples is at {head}, not {SAMPLES_COMMIT}")
+        shutil.rmtree(samples, ignore_errors=True)
+        os.rename(scratch, samples)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    rows = []
+    for label, cwd, paths, column, outline, given in (
+        ({"shape": "tpcds", "size": len(queries), "dialect": DIALECT}, tpcds,
+         ["tables.sql", "queries.sql"], "q01.c_customer_id", "queries.sql:1:1", tpcds / "request.json"),
+        ({"shape": "sql-server-samples", "size": len(list(samples.rglob("*.sql"))), "dialect": "tsql"},
+         samples, ["samples"], SAMPLES_COLUMN, SAMPLES_WRITE, None),
+    ):
+        for way, argv, stdin in ways(label["dialect"], paths, column, outline, given):
+            rows.append(measure(label | {"version": version}, way, argv, cwd, stdin))
+    report(rows, BENCH / "corpora.json")
+
+
 def main() -> int:
     """Run one subcommand: 0 when done, 2 on a failure, said in one line."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -259,10 +337,13 @@ def main() -> int:
     generate.add_argument("--size", type=int, required=True)
     generate.add_argument("--out", type=Path, required=True)
     commands.add_parser("run").add_argument("--sizes", type=int, nargs="+", default=SIZES)
+    commands.add_parser("corpora")
     arguments = parser.parse_args()
     try:
         if arguments.command == "run":
             run(arguments.sizes)
+        elif arguments.command == "corpora":
+            corpora()
         else:
             for shape in SHAPES:
                 write(arguments.out / shape, estate(shape, arguments.seed, arguments.size))
