@@ -103,6 +103,40 @@ Taken with plan 009 under the owner's standing word, for the owner to see:
   polyglot-sql refuses, such as `TEXTIMAGE_ON` or `ROWGUIDCOL`, are replaced by spaces
   before it is parsed, rather than fixed upstream (D3).
 
+Ruled by the owner on 2026-11-24, before the chain of plans 012 to 021:
+
+- R16. Routines and the bodies of functions are deferred, not out of scope; so are
+  BigQuery and ClickHouse (see "Deferred").
+- R17. Dialects: `Dialect` stays an enum of ours (R3, R4). The new dialects are
+  PostgreSQL, Redshift and Databricks, not Spark or Trino, named `postgresql`,
+  `redshift` and `databricks`. `SET search_path` is not read, an intended gap:
+  `--schema` completes unqualified names.
+- R18. Command line: a usage error takes clap's form, several lines on standard error,
+  with status 2, and `protocol.md` is amended for it; a refused request and a
+  command that cannot run keep one line. `completions` is visible.
+- R19. Logging: off by default, on with `-v`; both `STATIC_SQL_LINEAGE_LOG` and
+  `RUST_LOG` are honoured.
+- R20. Formats: OpenLineage among them, and a `lineage` command. OpenLineage's
+  namespace is an option, `--namespace <uri>`, by default
+  `static-sql-lineage://<dialect>`.
+- R21. Steps: their kinds are CTE, derived table, subquery and branch. Protocol 1 gives
+  `steps` on the answer and, on each edge, `paths`, each a list of hops
+  `{"step", "column", "kind"}`. The edges inside a write have no list of their own:
+  the hops of the paths are those edges. Plan 017's kernel text is approved, and that
+  plan writes it into `concepts.md`.
+- R22. Performance: measured, optional in CI. No plan worsens the time of 6,000
+  writes, through protocol 1 or `trace`, by more than 10% without saying why, and that
+  time grows by a factor below 8 from 1,000 to 6,000 writes.
+- R23. Size: lines are counted in the repository as formatted, by `tokei`'s count of
+  code, in `make size`. A budget per plan stands beside the check of every three plans,
+  both as `AGENTS.md` says.
+- R24. Order: the tests are consolidated first (plan 019), a scenario's row carrying
+  its identifier and a failing row naming it; one reading of a query comes in its own
+  plan before steps (plan 020), the owner's word given for retiring names from Write's
+  and Edge's homes; a reduction follows the chain (plan 021), approved before it is
+  built.
+- R25. The documentation after Diátaxis comes last.
+
 ## Widening, in order
 
 Each step reuses what the steps before it built, so that the cheapest concepts come
@@ -121,15 +155,25 @@ drafted at a time, and the owner may reorder for value.
    graph and the migration order from the relations that each write reads, since
    answers in reading order leave a relation unknown to its readers, then the rest from
    answers in that order; Q9 first. Serves U2.
-5. Routines and functions: the facts that `concepts.md` lists as not yet modelled; Q2
-   probed and Q6 ruled first. Serves U2.
-6. Duplicated logic: units of logic and their fingerprints, rooted through `copy`
+5. The dialects of plan 016, under R3: PostgreSQL, Redshift and Databricks (R17).
+6. Steps, in plan 017, as R21 rules. Serves U2, and later U3.
+7. Duplicated logic: units of logic and their fingerprints, rooted through `copy`
    edges. Serves U3.
-7. A linter of migration traps and design smells: findings read from the syntax tree
+8. A linter of migration traps and design smells: findings read from the syntax tree
    rather than from answers. Serves U2.
-8. A check of a translation against a warehouse: the only command that would connect
+9. A check of a translation against a warehouse: the only command that would connect
    to a database, against the promise below, so its plan first decides whether it
    belongs here. Serves U2.
+
+## Conventions and quality
+
+The work that adds no scope, beside the steps above:
+
+- the performance baseline, of the tool's own time (plan 013, R22);
+- the command line (plan 014, R18);
+- logging (plan 015, R19);
+- the output formats (plan 018, R20);
+- the documentation after Diátaxis, last (R25).
 
 ## Promises
 
@@ -152,24 +196,40 @@ concept's yet.
 - No dbt, no Jinja, no network, no warehouse. The same request gives the same
   response.
 
-These hold until a plan that the owner approves says otherwise; step 8 is the only one
+These hold until a plan that the owner approves says otherwise; step 9 is the only one
 foreseen to ask.
+
+## Deferred
+
+What waits, why, and what would bring it back. Deferred is not out of scope: each
+returns through a plan that the owner approves, when needed.
+
+- Routines and the bodies of functions, formerly step 5 of "Widening": the facts that
+  `concepts.md` lists as not yet modelled. Q2 and Q6 stay open, parked until routines
+  return, and R2's probe still comes first. They would serve U2.
+- BigQuery: one quoted identifier holds three parts, whose parts compare case
+  differently. It needs a ruling under R11 and the Relation entry of `concepts.md`.
+- ClickHouse: its names have two levels, a database and a table, and
+  `CREATE MATERIALIZED VIEW ... TO` adds rows to another relation, a contribute write
+  where the Write entry of `concepts.md` calls a materialised view a replace write.
 
 ## Out of scope
 
 - Rendering Jinja, and anything of dbt: nodes, manifests, compilation, which build
   compiled the SQL.
-- Translating between dialects, except as step 8 may decide.
+- Translating between dialects, except as step 9 may decide.
 - Validating SQL for its own sake: lineage validates only to decide what it may trace.
-- Column types, formatting, performance, parity of data.
+- Column types, formatting, how fast the SQL read would run on a database, parity of
+  data.
 
 ## Open questions
 
 | # | Question | Closed by | Before step |
 |---|---|---|---|
-| Q2 | How it reads T-SQL routines and functions: `BEGIN ... END`, `#t` and `@t`, `IF ... ELSE`, dynamic SQL run by `EXEC`, inline and multi-statement table functions, `CROSS APPLY`, a scalar function whose body reads a table | a probe | 5 |
-| Q6 | Whether every branch of a routine counts, so that lineage says what may happen; whether answers about a routine show its temporary relations or pass through them | the owner | 5 |
-| Q8 | Whether the repository will be public | the owner | the first release |
+| Q2 | How it reads T-SQL routines and functions: `BEGIN ... END`, `#t` and `@t`, `IF ... ELSE`, dynamic SQL run by `EXEC`, inline and multi-statement table functions, `CROSS APPLY`, a scalar function whose body reads a table | a probe | when routines return |
+| Q6 | Whether every branch of a routine counts, so that lineage says what may happen; whether answers about a routine show its temporary relations or pass through them | the owner | when routines return |
+
+Q8, whether the repository will be public, closed on 2026-11-24: it is public.
 
 ## Provenance
 
