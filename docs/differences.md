@@ -80,6 +80,12 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   reads it as copying each column of the source onto the target's column of that name.
   `graph` still orders it, after the writes of the relations that it reads and before
   those that read its target. Class: an aspiration.
+- A `MERGE` action that is not a tuple of its keyword and its lists, such as
+  PostgreSQL's `DO NOTHING`, is read as a `DELETE`: its condition and the `ON` give
+  `rows` edges to every column of the target, as in
+  `when matched and s.a > 1 then do nothing`, though such a clause changes no row of the
+  target. An over-approximation, at the base in every dialect, which
+  PostgreSQL's `DO NOTHING` now reaches. Class: a defect of the code.
 - A contribute write that maps a `*` over `USING` or `NATURAL` onto its target's columns
   by position takes its sources' order of columns, not the `*`'s, which lists the merged
   keys first in Snowflake, PostgreSQL, Redshift and Databricks, so that a key and a
