@@ -29,9 +29,10 @@ fn placement() {
         assert!(said(&output).contains("INFO"));
     }
     assert_usage_error(&command(&[&["-v"], &graph[..]].concat()), "'graph'");
-    assert_usage_error(&logged(&["-v", "-"], &[]), "'-'");
-    assert_usage_error(&logged(&["--describe", "-v"], &[]), "-v");
-    assert_usage_error(&logged(&["-v", "--describe"], &[]), "-v");
+    // Refused before standard input is read, so none is given.
+    assert_usage_error(&command(&["-v", "-"]), "'-'");
+    assert_usage_error(&command(&["--describe", "-v"]), "-v");
+    assert_usage_error(&command(&["-v", "--describe"]), "-v");
 }
 
 #[test]
