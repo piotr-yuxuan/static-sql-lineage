@@ -300,7 +300,7 @@ have. A reject scenario names an answer that must not be given.
 - not: the engine that parses it, polyglot-sql, which can be replaced behind the
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
-- home: `Dialect`.
+- home: `Dialect`, `Rules`.
 - operations:
   - `Dialect::built`: the dialects that the build includes.
   - `Dialect::name`: the dialect's name, as `--describe` spells it.
@@ -309,6 +309,7 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
   - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
   - `Dialect::default_schema`: the schema of a database given without one.
+  - `Dialect::keys_first`: whether a `*` over `USING` or `NATURAL` lists the merged keys first.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.

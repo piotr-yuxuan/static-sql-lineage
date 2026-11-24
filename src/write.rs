@@ -671,7 +671,7 @@ fn joined<'a>(
             columns.iter().filter(|(_, joins)| joins.contains(&at)).map(|(column, _)| column).collect();
         let rest: Vec<Name> = right.iter().filter(|column| !merged.contains(column)).cloned().collect();
         columns.extend(rest.into_iter().map(|column| (column, Vec::new())));
-        if dialect == Dialect::Snowflake {
+        if dialect.keys_first() {
             columns.sort_by_key(|(column, joins)| (!joins.contains(&at), using.iter().position(|key| key == column)));
         }
     }
