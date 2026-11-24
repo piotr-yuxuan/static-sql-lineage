@@ -15,10 +15,12 @@ mod request;
 mod script;
 mod write;
 
-use std::ffi::OsString;
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use command::{Command, Verb};
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser};
+use command::{Cli, Command, Verb};
 use describe::Description;
 use request::Request;
 
@@ -27,23 +29,22 @@ use request::Request;
 const LIMIT: u64 = 512 << 20;
 
 fn main() -> ExitCode {
-    // An argument need not be Unicode; it is refused like any other.
-    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let output = match arguments.as_slice() {
-        [] => Request::read(std::io::stdin().lock(), LIMIT)
+    // A usage error, help and the version are clap's to print, and end the process.
+    let output = match Cli::parse() {
+        Cli { describe: true, .. } => Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
+            .expect("a description serialises")),
+        Cli { verb: None, .. } if std::io::stdin().is_terminal() => {
+            let reason = "standard input is a terminal: give a request on it, `-` to read one from it, or a command";
+            Cli::command().error(ErrorKind::MissingSubcommand, reason).exit()
+        }
+        Cli { verb: None | Some(Verb::Request), .. } => Request::read(std::io::stdin().lock(), LIMIT)
             .and_then(Request::respond)
             .map(|response| serde_json::to_string(&response).expect("a response serialises")),
-        [only] if only == "--describe" => {
-            Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
-                .expect("a description serialises"))
+        Cli { verb: Some(Verb::Completions { shell }), .. } => {
+            clap_complete::generate(shell, &mut Cli::command(), "static-sql-lineage", &mut std::io::stdout());
+            return ExitCode::SUCCESS;
         }
-        [command, rest @ ..] => match Verb::ALL.into_iter().find(|verb| command == verb.name()) {
-            Some(verb) => Command::read(verb, rest).and_then(|command| command.run()),
-            None => {
-                let names = Verb::ALL.map(Verb::name).join(", ");
-                Err(format!("given {arguments:?}; the uses are --describe, {names}, or a request on standard input"))
-            }
-        },
+        Cli { verb: Some(verb), .. } => Command::read(verb).and_then(|command| command.run()),
     };
     match output {
         Ok(output) => {

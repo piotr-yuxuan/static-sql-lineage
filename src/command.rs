@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! The commands, as the command line names them, and what they print.
 
-use std::ffi::OsString;
 use std::path::PathBuf;
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
+use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 use polyglot_sql::TokenType;
 use serde_json::json;
 
@@ -16,76 +18,108 @@ use crate::lineage::Lineage;
 use crate::relation::{Defaults, Name, RelationName, listing};
 use crate::script::{Script, Scripted};
 
-/// A command's name, as the command line gives it.
-#[derive(Clone, Copy, PartialEq)]
+/// The command line: `--describe`, or a command; with neither, a request on standard input.
+#[derive(Parser)]
+#[command(version, about, args_conflicts_with_subcommands = true)]
+#[command(after_help = "With no argument, a request of protocol 1 on standard input, unless it is a terminal.")]
+pub struct Cli {
+    /// Print what this build is, as JSON.
+    #[arg(long)]
+    pub describe: bool,
+    #[command(subcommand)]
+    pub verb: Option<Verb>,
+}
+
+/// The options that the commands share, and their paths.
+#[derive(Args)]
+pub struct Options {
+    /// The dialect of the scripts.
+    #[arg(long, value_parser = PossibleValuesParser::new(Dialect::built().into_iter().map(Dialect::name))
+        .try_map(|name: String| Dialect::named(&name)))]
+    dialect: Dialect,
+    /// The database that completes a name of fewer than three parts.
+    #[arg(long)]
+    database: Option<String>,
+    /// The schema that completes a name of fewer than three parts; for a database alone,
+    /// the dialect's usual one.
+    #[arg(long)]
+    schema: Option<String>,
+    /// Print JSON rather than text.
+    #[arg(long)]
+    json: bool,
+    /// A file, or a directory whose files ending `.sql` are read, sorted by path.
+    #[arg(required = true)]
+    paths: Vec<PathBuf>,
+}
+
+/// What follows `static-sql-lineage`: a command, with its argument, its options and its
+/// paths; `completions` and its shell; or `-`.
+#[derive(Subcommand)]
 pub enum Verb {
-    Graph,
-    Trace,
-    Uses,
-    Outline,
+    /// The writes of the scripts, in the order to migrate them in.
+    Graph(Options),
+    /// A column's edges upstream, through the writes that fill its relation.
+    Trace {
+        #[arg(value_name = "RELATION.COLUMN")]
+        argument: String,
+        #[command(flatten)]
+        options: Options,
+    },
+    /// A column's edges downstream, through the writes that read it.
+    Uses {
+        #[arg(value_name = "RELATION.COLUMN")]
+        argument: String,
+        #[command(flatten)]
+        options: Options,
+    },
+    /// One write in brief, by its id as `graph` prints it.
+    Outline {
+        #[arg(value_name = "ID")]
+        argument: String,
+        #[command(flatten)]
+        options: Options,
+    },
+    /// A script that completes the command line in a shell.
+    Completions {
+        #[arg(value_parser = PossibleValuesParser::new(["bash", "zsh", "fish"]).try_map(|name: String| name.parse::<Shell>()))]
+        shell: Shell,
+    },
+    /// A request of protocol 1 on standard input, read even from a terminal.
+    #[command(name = "-")]
+    Request,
 }
 
 impl Verb {
-    /// The commands.
-    pub const ALL: [Verb; 4] = [Verb::Graph, Verb::Trace, Verb::Uses, Verb::Outline];
-
-    /// The name that the command line gives the command.
-    pub fn name(self) -> &'static str {
+    /// The command's argument, empty for `graph`, and its options.
+    fn parts(&self) -> (&str, &Options) {
         match self {
-            Verb::Graph => "graph",
-            Verb::Trace => "trace",
-            Verb::Uses => "uses",
-            Verb::Outline => "outline",
+            Verb::Graph(options) => ("", options),
+            Verb::Trace { argument, options }
+            | Verb::Uses { argument, options }
+            | Verb::Outline { argument, options } => (argument, options),
+            Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),
         }
     }
 }
 
-/// A command as the command line gives it: its verb, its dialect, its defaults, whether it
-/// prints JSON, its argument, for all but `graph`, and its paths, each a file, or a directory
-/// whose files ending `.sql` it reads.
+/// A command to run: its verb, as the command line gives it, then its dialect and its
+/// defaults, as its options give them.
 pub struct Command {
     verb: Verb,
     dialect: Dialect,
     defaults: Defaults,
-    json: bool,
-    argument: Option<String>,
-    paths: Vec<PathBuf>,
 }
 
 impl Command {
-    /// The command `verb` that `arguments`, those after its name, give: `--dialect`, a
-    /// dialect of the build; `--database` and `--schema`, the defaults, a database without
-    /// a schema taking the dialect's usual one; `--json`; then, but for `graph`, its
-    /// argument; and its paths, at least one. Refused for an option that it does not know,
-    /// or one without its value.
-    pub fn read(verb: Verb, arguments: &[OsString]) -> Result<Command, String> {
-        let name = verb.name();
-        let (mut dialect, mut database, mut schema, mut json, mut paths) = (None, None, None, false, Vec::new());
-        let mut arguments = arguments.iter();
-        while let Some(argument) = arguments.next() {
-            let mut value = || {
-                let value = arguments.next().and_then(|value| value.to_str()).map(str::to_string);
-                value.ok_or_else(|| format!("{argument:?} needs a value"))
-            };
-            match argument.to_str() {
-                Some("--dialect") => dialect = Some(value()?),
-                Some("--database") => database = Some(value()?),
-                Some("--schema") => schema = Some(value()?),
-                Some("--json") => json = true,
-                Some(option) if option.starts_with("--") => return Err(format!("{name} has no option {option}")),
-                _ => paths.push(PathBuf::from(argument)),
-            }
-        }
-        let given = dialect.ok_or_else(|| format!("{name} needs --dialect"))?;
-        let dialect = Dialect::named(&given)?;
-        let defaults = Defaults::given(database, schema, dialect);
+    /// The command that `verb` gives: `--dialect`, a dialect of the build; `--database` and
+    /// `--schema`, the defaults, a database without a schema taking the dialect's usual one.
+    /// Refused for a default that is not one identifier.
+    pub fn read(verb: Verb) -> Result<Command, String> {
+        let (_, options) = verb.parts();
+        let dialect = options.dialect;
+        let defaults = Defaults::given(options.database.clone(), options.schema.clone(), dialect);
         defaults.read(dialect)?;
-        let graph = verb == Verb::Graph;
-        if paths.len() < 2 - usize::from(graph) {
-            return Err(format!("{name} needs {}", if graph { "a path" } else { "its argument and a path" }));
-        }
-        let argument = (!graph).then(|| paths.remove(0).to_string_lossy().into_owned());
-        Ok(Command { verb, dialect, defaults, json, argument, paths })
+        Ok(Command { verb, dialect, defaults })
     }
 
     /// What the command prints, or why it cannot run: a path that does not read, or an
@@ -95,9 +129,10 @@ impl Command {
     /// `trace` and `uses` the walk from the argument's column, upstream or downstream, over the
     /// lineage of the writes, and `outline` the argument's write in brief.
     pub fn run(&self) -> Result<String, String> {
+        let (argument, options) = self.verb.parts();
         let unread = |path: &PathBuf, error: std::io::Error| format!("{} does not read: {error}", path.display());
         let (mut scripts, mut catalog) = (Vec::new(), Catalog::default());
-        for given in &self.paths {
+        for given in &options.paths {
             // Each path to read, with whether it is a directory: a link to one found under a
             // directory is not, so that a cyclic link ends.
             let (mut pending, mut files) = (vec![(given.clone(), given.is_dir())], Vec::new());
@@ -123,16 +158,15 @@ impl Command {
             }
         }
         let graph = Graph::of(scripts);
-        let argument = self.argument.as_deref().unwrap_or_default();
         match self.verb {
-            Verb::Graph => Ok(graph.printed(self.json)),
-            Verb::Outline => {
+            Verb::Graph(_) => Ok(graph.printed(options.json)),
+            Verb::Outline { .. } => {
                 let at = graph.writes.iter().position(|write| write.id == argument);
                 let at = at.ok_or_else(|| format!("no script has the write {argument}"))?;
                 let lineage = Lineage::of(&graph, catalog, self.dialect);
                 Ok(self.outline(&graph.writes[at], &lineage.answers[at]))
             }
-            Verb::Trace | Verb::Uses => {
+            Verb::Trace { .. } | Verb::Uses { .. } => {
                 // The argument's last part is its column, the rest its relation.
                 let tokens = polyglot_sql::Dialect::get(self.dialect.polyglot()).tokenize(argument).unwrap_or_default();
                 let dot = tokens.iter().rposition(|token| token.token_type == TokenType::Dot);
@@ -143,9 +177,10 @@ impl Command {
                 let relation = RelationName::read(&relation.iter().collect::<String>(), self.dialect, &defaults)?;
                 let from = End { relation, column: Name::read(&column.iter().collect::<String>(), self.dialect)? };
                 let lineage = Lineage::of(&graph, catalog, self.dialect);
-                let walk = lineage.walk(&from, self.verb == Verb::Trace);
-                Ok(walk.ok_or_else(|| format!("no script knows the column {from}"))?.printed(self.json))
+                let walk = lineage.walk(&from, matches!(self.verb, Verb::Trace { .. }));
+                Ok(walk.ok_or_else(|| format!("no script knows the column {from}"))?.printed(options.json))
             }
+            Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),
         }
     }
 
@@ -153,7 +188,7 @@ impl Command {
     /// answer's edges, gaps and refusal, then the words and the place of each of its clauses.
     pub fn outline(&self, write: &Scripted, answer: &Answer) -> String {
         let mode = if write.replaces { "replace" } else { "contribute" };
-        if self.json {
+        if self.verb.parts().1.json {
             let clauses =
                 write.clauses.iter().map(|(words, place)| json!({"keyword": words, "place": place.to_string()}));
             let clauses: Vec<_> = clauses.collect();

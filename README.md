@@ -178,6 +178,16 @@ In a clone, `nix develop` gives Rust, and `cargo install --locked --path .` inst
 from it. The default build reads Snowflake, T-SQL and DuckDB;
 `static-sql-lineage --describe` says which dialects a build reads.
 
+`static-sql-lineage --help` lists the commands, and `static-sql-lineage help trace`
+gives one in full. A shell completes the commands, the options and the dialects once it
+loads the script that `completions` prints, for instance from its startup file:
+
+```sh
+source <(static-sql-lineage completions bash)    # in ~/.bashrc
+source <(static-sql-lineage completions zsh)     # in ~/.zshrc, after compinit
+static-sql-lineage completions fish | source     # in ~/.config/fish/config.fish
+```
+
 ## What it does not do
 
 - It never connects to a database or a warehouse.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! The binary run as a caller runs it, as `docs/protocol.md` gives its uses: here
-//! `--describe` and the arguments it refuses, and the helpers of the modules.
+//! `--describe`, help, the version and usage errors, and the helpers of the modules.
 
 #[macro_use]
 mod rows;
@@ -58,7 +58,12 @@ fn printed_json(arguments: &[&str]) -> Value {
 
 /// The binary's output for `input` on its standard input.
 fn answers(input: &[u8]) -> Output {
-    let mut child = (binary().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
+    piped(&[], input)
+}
+
+/// The binary's output for the command line `arguments` and `input` on its standard input.
+fn piped(arguments: &[&str], input: &[u8]) -> Output {
+    let mut child = (binary().args(arguments).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
         .spawn()
         .expect("the binary runs");
     child.stdin.take().expect("a pipe to the binary").write_all(input).expect("the request is written");
@@ -184,6 +189,17 @@ fn assert_refused(output: &Output, naming: &str) {
     assert!(stderr.contains(naming), "stderr does not name {naming}: {stderr}");
 }
 
+/// A usage error, in clap's form: status 2, nothing on standard output, and on standard
+/// error a first line `error: `, then more, that name `naming`.
+#[track_caller]
+fn assert_usage_error(output: &Output, naming: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(output.stdout.is_empty(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
+    assert!(stderr.starts_with("error: ") && stderr.lines().count() > 1, "stderr: {stderr}");
+    assert!(stderr.contains(naming), "stderr does not name {naming}: {stderr}");
+}
+
 #[test]
 fn describe_names_the_build() {
     let description = description();
@@ -215,11 +231,43 @@ fn describe_follows_the_protocol_document() {
 }
 
 cases! {
-    refuses_an_argument_other_than_describe: assert_refused(&run(&["--explain"]), "--explain");
-    refuses_describe_with_another_argument: assert_refused(&run(&["--describe", "--explain"]), "--explain");
+    refuses_an_argument_other_than_describe: assert_usage_error(&run(&["--explain"]), "--explain");
+    refuses_describe_with_another_argument: assert_usage_error(&run(&["--describe", "--explain"]), "--explain");
     #[cfg(unix)]
     refuses_an_argument_that_is_not_unicode: {
         use std::os::unix::ffi::OsStrExt;
-        assert_refused(&run(&[OsStr::from_bytes(b"\xff")]), "\\xFF");
+        assert_usage_error(&run(&[OsStr::from_bytes(b"\xff")]), "'\u{FFFD}'");
+    };
+    help_prints_a_usage: for arguments in [&["--help"][..], &["-h"], &["help", "trace"]] {
+        let output = run(arguments);
+        assert_succeeded(&output);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: static-sql-lineage"), "{arguments:?}");
+    };
+    help_names_describe_and_completions: {
+        let help = String::from_utf8_lossy(&run(&["--help"]).stdout).into_owned();
+        assert!(help.contains("--describe") && help.contains("completions"), "{help}");
+    };
+    completions_name_the_commands_and_dialects: for shell in ["bash", "zsh", "fish"] {
+        let output = run(&["completions", shell]);
+        assert_succeeded(&output);
+        let script = String::from_utf8_lossy(&output.stdout);
+        for word in ["graph", "trace", "uses", "outline", "completions", "dialect", "database", "schema", "json", "snowflake", "tsql", "duckdb"] {
+            assert!(script.contains(word), "{shell} lacks {word}");
+        }
+    };
+    dash_reads_a_request_as_no_argument_does: {
+        let request = request(&[("s", &["a"])], &[("t", "select a from s")]).to_string();
+        let output = piped(&["-"], request.as_bytes());
+        assert_succeeded(&output);
+        assert_eq!(output.stdout, answers(request.as_bytes()).stdout);
+    };
+    refuses_dash_with_another_argument: assert_usage_error(&run(&["-", "--describe"]), "--describe");
+    refuses_describe_with_a_command:
+        assert_usage_error(&command(&["--describe", "graph", "--dialect", "duckdb", "examples/tpch"]), "'graph'");
+    refuses_describe_with_dash: assert_usage_error(&run(&["--describe", "-"]), "'-'");
+    version_names_the_tool: for flag in ["--version", "-V"] {
+        let output = run(&[flag]);
+        assert_succeeded(&output);
+        assert_eq!(String::from_utf8_lossy(&output.stdout), format!("static-sql-lineage {}\n", env!("CARGO_PKG_VERSION")));
     };
 }
