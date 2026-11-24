@@ -58,7 +58,12 @@ fn printed_json(arguments: &[&str]) -> Value {
 
 /// The binary's output for `input` on its standard input.
 fn answers(input: &[u8]) -> Output {
-    let mut child = (binary().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
+    piped(&[], input)
+}
+
+/// The binary's output for the command line `arguments` and `input` on its standard input.
+fn piped(arguments: &[&str], input: &[u8]) -> Output {
+    let mut child = (binary().args(arguments).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
         .spawn()
         .expect("the binary runs");
     child.stdin.take().expect("a pipe to the binary").write_all(input).expect("the request is written");
