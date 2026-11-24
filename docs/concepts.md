@@ -296,7 +296,10 @@ have. A reject scenario names an answer that must not be given.
 - means: the grammar, and the rules for quoting and case, under which every name and
   every write of one request is read. One per request, and one of the build's. T-SQL's
   rule for case is that of SQL Server's default collation: a name ignores case, whether
-  it is delimited or not; a database with another collation is not modelled.
+  it is delimited or not; a database with another collation is not modelled. Redshift's,
+  with `enable_case_sensitive_identifier` off as by default, and Databricks's are as
+  T-SQL's; a Redshift database with that setting on is not modelled. PostgreSQL's
+  lowers a name unless it is quoted, and a quoted name is exact.
 - not: the engine that parses it, polyglot-sql, which can be replaced behind the
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
@@ -328,6 +331,11 @@ have. A reject scenario names an answer that must not be given.
   `"Orders"."OrderId" -> t.orderid`, `copy`; no gap.
 - reject `dialect.redshift-quoted-as-exact`: for that request, a refusal or an
   `unknown_relation` gap, as if `"Orders"` named only `Orders` exactly.
+- accept `dialect.databricks-ignores-case`: dialect `databricks`; catalog `` `Orders` ``
+  with the column `` `OrderId` ``; query `select orderid from orders`: the edge
+  `` `Orders`.`OrderId` -> t.orderid ``, `copy`; no gap.
+- reject `dialect.databricks-quoted-as-exact`: for that request, a refusal or an
+  `unknown_relation` gap, as if `` `Orders` `` named only `Orders` exactly.
 
 ## Derived terms
 

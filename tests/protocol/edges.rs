@@ -65,7 +65,7 @@ fn edges_spell_names_as_given() {
 
 #[test]
 fn traces_in_each_built_dialect() {
-    for dialect in ["snowflake", "tsql", "duckdb", "postgresql", "redshift"] {
+    for dialect in ["snowflake", "tsql", "duckdb", "postgresql", "redshift", "databricks"] {
         assert_eq!(trace_in(dialect, &[("s", &["a"])], "select a as b from s"), ["s.a -> t.b copy"], "{dialect}");
     }
 }

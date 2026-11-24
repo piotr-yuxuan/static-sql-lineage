@@ -15,6 +15,7 @@ pub enum Dialect {
     Duckdb,
     Postgresql,
     Redshift,
+    Databricks,
 }
 
 /// What sets a dialect apart: its name, as `--describe` spells it; polyglot-sql's name for
@@ -40,6 +41,7 @@ impl Dialect {
             (cfg!(feature = "duckdb"), Dialect::Duckdb),
             (cfg!(feature = "postgresql"), Dialect::Postgresql),
             (cfg!(feature = "redshift"), Dialect::Redshift),
+            (cfg!(feature = "databricks"), Dialect::Databricks),
         ]
         .into_iter()
         .filter_map(|(built, dialect)| built.then_some(dialect))
@@ -60,6 +62,7 @@ impl Dialect {
             // Redshift's documentation says nothing of the order of a `*` over `USING`: the
             // SQL standard's, for a joined table, puts the merged keys first, as PostgreSQL does.
             Dialect::Redshift => rules("redshift", DialectType::Redshift, "public", true, true),
+            Dialect::Databricks => rules("databricks", DialectType::Databricks, "default", true, true),
         }
     }
 

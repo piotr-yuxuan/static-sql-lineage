@@ -99,6 +99,8 @@ cases! {
         prints("graph-postgresql-01-dollar", "graph --dialect postgresql tests/scripts/postgresql/01-dollar.sql");
     redshift_dollar_quotes_split_nothing:
         prints("graph-redshift-01-dollar", "graph --dialect redshift tests/scripts/redshift/01-dollar.sql");
+    databricks_dollar_quotes_split_nothing:
+        prints("graph-databricks-01-dollar", "graph --dialect databricks tests/scripts/databricks/01-dollar.sql");
     // Given in the order b, a, c, d: the writes of `dbo.Fact`, the cycle, the two writes of
     // `vA`, then `vB`, which reads `vA`, then `vC`, which reads `dbo.Fact` and `vB`.
     graph_orders_writes_after_what_they_read:
@@ -268,13 +270,14 @@ fn place(ids: &[String], id: &str) -> usize {
 #[test]
 fn a_database_option_without_a_schema_takes_the_usual_one() {
     // `vTop` reads the database's view `vBase`, named without a schema: it comes after it only
-    // when the usual schema completes that name, `dbo`, `PUBLIC`, `main` or `public`.
+    // when the usual schema completes that name, `dbo`, `PUBLIC`, `main`, `public` or `default`.
     let scripts = [
         ("tsql", "tests/scripts/tsql/10-defaults.sql", "Sales", 3),
         ("snowflake", "tests/scripts/snowflake/03-defaults.sql", "SALES", 2),
         ("duckdb", "tests/scripts/duckdb/02-defaults.sql", "sales", 2),
         ("postgresql", "tests/scripts/postgresql/02-defaults.sql", "sales", 2),
         ("redshift", "tests/scripts/redshift/02-defaults.sql", "sales", 2),
+        ("databricks", "tests/scripts/databricks/02-defaults.sql", "sales", 2),
     ];
     for (dialect, path, database, line) in scripts {
         let (top, base) = (format!("{path}:1:1"), format!("{path}:{line}:1"));

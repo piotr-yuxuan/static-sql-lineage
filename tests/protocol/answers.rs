@@ -53,8 +53,7 @@ cases! {
         traces_in("tsql", catalog, "select q.a, Q.b from (select a, b from s) as [Q]", &expected);
     };
     // A table alias read in another case, or quoted, each quoted as the dialect quotes.
-    aliases_ignore_case_in_redshift_and_databricks: {
-        let (dialect, q) = ("redshift", '"');
+    aliases_ignore_case_in_redshift_and_databricks: for (dialect, q) in [("redshift", '"'), ("databricks", '`')] {
         let catalog: &[(&str, &[&str])] = &[("s", &["a", "b"])];
         let expected = ["s.a -> t.a copy", "s.b -> t.b copy"];
         traces_in(dialect, catalog, "select o.a, O.b from s as O", &expected);

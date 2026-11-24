@@ -116,6 +116,11 @@ cases! {
     dialect_redshift_quoted_as_exact: lacks(
         &trace_in("redshift", &[("\"Orders\"", &["\"OrderId\""])], "select orderid from orders"),
         |line| line.starts_with("refused") || line.starts_with("gap unknown_relation"));
+    dialect_databricks_ignores_case: traces_in("databricks", &[("`Orders`", &["`OrderId`"])],
+        "select orderid from orders", &["`Orders`.`OrderId` -> t.orderid copy"]);
+    dialect_databricks_quoted_as_exact: lacks(
+        &trace_in("databricks", &[("`Orders`", &["`OrderId`"])], "select orderid from orders"),
+        |line| line.starts_with("refused") || line.starts_with("gap unknown_relation"));
 }
 
 #[test]
