@@ -180,6 +180,7 @@ fn assert_succeeded(output: &Output) {
 
 /// A refusal: status 2, nothing on standard output, one line on standard error that
 /// contains `naming`.
+#[track_caller]
 fn assert_refused(output: &Output, naming: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
