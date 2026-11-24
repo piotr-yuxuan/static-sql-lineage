@@ -38,11 +38,17 @@ fn command(arguments: &[&str]) -> Output {
     binary().current_dir(env!("CARGO_MANIFEST_DIR")).args(arguments).output().expect("the binary runs")
 }
 
-/// The lines that the command line `arguments` prints, which the binary does not refuse.
-fn lines(arguments: &[&str]) -> Vec<String> {
+/// The text that the command line `arguments` prints, which the binary does not refuse.
+#[track_caller]
+fn stdout(arguments: &[&str]) -> String {
     let output = command(arguments);
     assert_succeeded(&output);
-    String::from_utf8(output.stdout).expect("the output is UTF-8").lines().map(str::to_string).collect()
+    String::from_utf8(output.stdout).expect("the output is UTF-8")
+}
+
+/// The lines that the command line `arguments` prints, which the binary does not refuse.
+fn lines(arguments: &[&str]) -> Vec<String> {
+    stdout(arguments).lines().map(str::to_string).collect()
 }
 
 /// The JSON that the command line `arguments` prints, as [`lines`] reads it.

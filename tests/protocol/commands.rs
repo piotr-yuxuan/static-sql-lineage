@@ -8,16 +8,14 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, assert_succeeded, command, lacks, lines, printed_json, read, run};
+use super::{assert_refused, command, lacks, lines, printed_json, read, run, stdout};
 
 /// Asserts that the command line `line`, its arguments split at spaces, prints from the
 /// repository's root the file `name` of `tests/scripts/expected/`, byte for byte.
 #[track_caller]
 fn prints(name: &str, line: &str) {
-    let output = command(&line.split_whitespace().collect::<Vec<_>>());
-    assert_succeeded(&output);
     let expected = read(&format!("tests/scripts/expected/{name}.txt"));
-    assert_eq!(String::from_utf8(output.stdout).expect("the output is UTF-8"), expected, "{line}");
+    assert_eq!(stdout(&line.split_whitespace().collect::<Vec<_>>()), expected, "{line}");
 }
 
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
