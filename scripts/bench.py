@@ -170,10 +170,6 @@ def write(directory: Path, files: dict[str, str]) -> None:
         (directory / name).write_text(text)
 
 
-class BenchError(commands.CommandError):
-    """A child that failed, or a command that printed what was not expected."""
-
-
 def figures(samples: list[tuple[float, int]], platform: str) -> tuple[float, int]:
     """The median seconds and the largest peak in KiB of the runs of one way in.
 
@@ -257,7 +253,7 @@ def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | Non
                 err.seek(0)
                 said = " ".join(err.read().decode(errors="replace").split())
                 message = f"{' '.join(argv)} in {cwd}: status {code} after {seconds:.0f} s: {said}"
-                raise BenchError(message)
+                raise commands.ScriptError(message)
             runs.append((seconds, usage.ru_maxrss))
             # Only the last output is read, so that none is resident while a child is forked.
             if run == count - 1:
@@ -299,7 +295,7 @@ def corpora() -> None:
     version = json.loads(call(BINARY, "--describe"))["version"]
     root = BENCH / "corpora"
     if call("duckdb", "-jsonlines", "-c", OFFLINE + LOADED).strip() != b'{"loaded":true}':
-        raise BenchError("this duckdb has no tpcds built in")
+        raise commands.ScriptError("this duckdb has no tpcds built in")
     dumped = call("duckdb", "-jsonlines", "-c", OFFLINE + TPCDS)
     found = [json.loads(line) for line in dumped.splitlines() if line]
     tables = [row for row in found if "table_name" in row]
@@ -330,7 +326,7 @@ def corpora() -> None:
             call(*GIT, "-C", scratch, *command)
         head = call(*GIT, "-C", scratch, "rev-parse", "HEAD").decode().strip()
         if head != SAMPLES_COMMIT:
-            raise BenchError(f"sql-server-samples is at {head}, not {SAMPLES_COMMIT}")
+            raise commands.ScriptError(f"sql-server-samples is at {head}, not {SAMPLES_COMMIT}")
         shutil.rmtree(samples, ignore_errors=True)
         os.rename(scratch, samples)
     finally:
@@ -376,7 +372,7 @@ def main() -> int:
         else:
             for shape in SHAPES:
                 write(arguments.out / shape, estate(shape, arguments.seed, arguments.size))
-    except (commands.CommandError, ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
+    except (commands.ScriptError, ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
         print(f"bench: {error}", file=sys.stderr)
         return 2
     return 0

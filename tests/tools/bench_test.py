@@ -157,7 +157,7 @@ class Measure(unittest.TestCase):
                 self.assertEqual(Path(log.name).read_text().count("run"), runs)
 
     def test_a_child_that_fails_stops_the_run(self):
-        with self.assertRaisesRegex(bench.BenchError, "status 3 "):
+        with self.assertRaisesRegex(bench.commands.ScriptError, "status 3 "):
             self.measure(sys.executable, "-c", "import sys; sys.exit(3)")
 
     def test_a_child_past_the_timeout_is_killed_and_stops_the_run(self):
@@ -165,7 +165,7 @@ class Measure(unittest.TestCase):
         bench.TIMEOUT_SECONDS = 1
         self.addCleanup(setattr, bench, "TIMEOUT_SECONDS", before)
         start = time.monotonic()
-        with self.assertRaisesRegex(bench.BenchError, "status -9 "):
+        with self.assertRaisesRegex(bench.commands.ScriptError, "status -9 "):
             self.measure("sleep", "30")
         self.assertLess(time.monotonic() - start, 10)
 

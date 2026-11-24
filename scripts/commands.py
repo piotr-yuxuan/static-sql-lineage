@@ -4,19 +4,15 @@
 import subprocess
 
 
-class CommandError(Exception):
-    """A command that exited with a status other than 0."""
+class ScriptError(Exception):
+    """What stops a script beside this one, said in one line."""
 
 
 def output(command: tuple[str, ...], timeout: float, stdin: bytes = b"") -> bytes:
-    """What `command` prints, given `stdin`; any failure stops the caller.
-
-    CommandError, with what it printed on standard error in one line, when it exits with a
-    status other than 0; subprocess.TimeoutExpired when it runs past `timeout` seconds.
-    """
+    """What `command` prints, given `stdin`; its standard error as a ScriptError if it fails."""
     result = subprocess.run(command, input=stdin, capture_output=True, check=False, timeout=timeout)
     if result.returncode != 0:
         reason = " ".join(result.stderr.decode(errors="replace").split())
         message = f"{' '.join(command)} failed: {reason}"
-        raise CommandError(message)
+        raise ScriptError(message)
     return result.stdout

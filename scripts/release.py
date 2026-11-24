@@ -84,7 +84,7 @@ commands = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(commands)
 
 
-class ReleaseError(Exception):
+class ReleaseError(commands.ScriptError):
     """An input that cannot be trusted as written."""
 
 
@@ -394,13 +394,7 @@ def main() -> int:
             f"repos/{repository}/releases",
             {"tag_name": version, "target_commitish": target, "name": version, "body": notes},
         )
-    except (
-        ReleaseError,
-        commands.CommandError,
-        subprocess.TimeoutExpired,
-        OSError,
-        UnicodeError,
-    ) as error:
+    except (commands.ScriptError, subprocess.TimeoutExpired, OSError, UnicodeError) as error:
         print(f"release: {error}", file=sys.stderr)
         return 2
     print(f"release: released {version} on {target}")
