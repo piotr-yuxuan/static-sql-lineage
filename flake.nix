@@ -17,6 +17,8 @@
           pkgs.python3
           pkgs.ruff
           pkgs.actionlint
+          # For `make size`.
+          pkgs.tokei
         ];
       };
     in
