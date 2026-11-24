@@ -75,8 +75,11 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   `INSERT ... BY NAME`, which maps its columns by name, are refused `not_a_query`, where
   the Write entry reads `INSERT ... SELECT` as a write. Class: an aspiration.
 - A `MERGE` whose action is `UPDATE SET *` or `INSERT *`, which polyglot-sql parses in
-  every dialect, is refused `not_a_query`, where the Write entry reads it as copying
-  each column of the source onto the target's column of that name. Class: an aspiration.
+  every dialect, or of another form that the tool does not read, such as Snowflake's
+  `INSERT ALL BY NAME`, is answered with a refusal, `not_a_query`, where the Write entry
+  reads it as copying each column of the source onto the target's column of that name.
+  `graph` still orders it, after the writes of the relations that it reads and before
+  those that read its target. Class: an aspiration.
 - A contribute write that maps a `*` over `USING` or `NATURAL` onto its target's columns
   by position takes its sources' order of columns, not the `*`'s, which lists the merged
   keys first in Snowflake, PostgreSQL, Redshift and Databricks, so that a key and a

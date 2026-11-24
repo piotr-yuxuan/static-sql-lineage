@@ -105,6 +105,9 @@ cases! {
     // the schema; `USE SCHEMA crm.core` sets both.
     databricks_use_sets_the_schema:
         prints("graph-databricks-03-use", "graph --dialect databricks tests/scripts/databricks/03-use.sql");
+    // A `MERGE` of `*`, which answers refuse, still reads its sources and writes its target.
+    graph_orders_a_merge_of_a_star:
+        prints("graph-databricks-04-merge", "graph --dialect databricks tests/scripts/databricks/04-merge.sql");
     // Given in the order b, a, c, d: the writes of `dbo.Fact`, the cycle, the two writes of
     // `vA`, then `vB`, which reads `vA`, then `vC`, which reads `dbo.Fact` and `vB`.
     graph_orders_writes_after_what_they_read:
