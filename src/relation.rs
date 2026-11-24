@@ -187,9 +187,15 @@ impl Defaults {
 
     /// The defaults after a `USE` of `kind` that names `parts`, each spelled as SQL text: a
     /// schema alone keeps the database; a database takes its schema, or the dialect's usual
-    /// one. None for a `USE` of anything else, such as a role, or of a name that does not
-    /// read.
+    /// one. In Databricks, a `USE` of no kind or of a database is one of a schema, and one of
+    /// a catalog is one of a database. None for a `USE` of anything else, such as a role, or
+    /// of a name that does not read.
     pub fn used(&self, kind: Option<UseKind>, parts: &[String], dialect: Dialect) -> Option<Defaults> {
+        let kind = match kind {
+            None | Some(UseKind::Database) if dialect == Dialect::Databricks => Some(UseKind::Schema),
+            Some(UseKind::Catalog) if dialect == Dialect::Databricks => Some(UseKind::Database),
+            kind => kind,
+        };
         let used = match (kind, parts) {
             (Some(UseKind::Schema), [schema]) => {
                 Defaults { database: self.database.clone(), schema: Some(schema.clone()) }

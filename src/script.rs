@@ -362,10 +362,9 @@ impl Script {
         let like = |constraint: &TableConstraint| matches!(constraint, TableConstraint::Like { .. });
         match &tree {
             Expression::Use(used) => {
-                let named = tokens.iter().skip(1);
-                let named = named.filter(|token| {
-                    !matches!(token.token_type, TokenType::Database | TokenType::Schema | TokenType::Dot)
-                });
+                // The parts after `USE` and the word of its kind, whatever that word.
+                let named = tokens.iter().skip(1 + usize::from(used.kind.is_some()));
+                let named = named.filter(|token| token.token_type != TokenType::Dot);
                 let parts: Vec<String> =
                     named.map(|token| sql[token.span.start - base..token.span.end - base].iter().collect()).collect();
                 match self.defaults.used(used.kind, &parts, dialect) {

@@ -101,6 +101,10 @@ cases! {
         prints("graph-redshift-01-dollar", "graph --dialect redshift tests/scripts/redshift/01-dollar.sql");
     databricks_dollar_quotes_split_nothing:
         prints("graph-databricks-01-dollar", "graph --dialect databricks tests/scripts/databricks/01-dollar.sql");
+    // `USE CATALOG sales` sets the schema `default`; `USE mart` and `USE DATABASE stage` set
+    // the schema; `USE SCHEMA crm.core` sets both.
+    databricks_use_sets_the_schema:
+        prints("graph-databricks-03-use", "graph --dialect databricks tests/scripts/databricks/03-use.sql");
     // Given in the order b, a, c, d: the writes of `dbo.Fact`, the cycle, the two writes of
     // `vA`, then `vB`, which reads `vA`, then `vC`, which reads `dbo.Fact` and `vB`.
     graph_orders_writes_after_what_they_read:
