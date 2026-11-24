@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Tests of scripts/bench.py: the estates that it writes, as plan 013's D1 shapes them."""
 
+import contextlib
 import importlib.util
+import io
 import json
 import re
+import resource
+import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -134,3 +140,32 @@ class Counts(unittest.TestCase):
     def test_nothing_from_the_other_ways(self):
         for way in ("trace", "uses", "outline"):
             self.assertEqual(bench.counts(way, b"not json"), {})
+
+
+class Measure(unittest.TestCase):
+    """measure() over children that stand in for the binary, as D3 asks of each run."""
+
+    def measure(self, *argv):
+        label = {"shape": "test", "size": 10, "dialect": "duckdb", "version": "0"}
+        with tempfile.TemporaryDirectory() as cwd, contextlib.redirect_stdout(io.StringIO()):
+            return bench.measure(label, "trace", list(argv), Path(cwd), None)
+
+    def test_a_child_that_fails_stops_the_run(self):
+        with self.assertRaisesRegex(bench.BenchError, "status 3 "):
+            self.measure(sys.executable, "-c", "import sys; sys.exit(3)")
+
+    def test_a_child_past_the_timeout_is_killed_and_stops_the_run(self):
+        before = bench.TIMEOUT_SECONDS
+        bench.TIMEOUT_SECONDS = 1
+        self.addCleanup(setattr, bench, "TIMEOUT_SECONDS", before)
+        start = time.monotonic()
+        with self.assertRaisesRegex(bench.BenchError, "status -9 "):
+            self.measure("sleep", "30")
+        self.assertLess(time.monotonic() - start, 10)
+
+    @unittest.skipUnless(sys.platform == "linux", "ru_maxrss in KiB")
+    def test_a_childs_peak_is_its_own_not_the_runners(self):
+        touched = b"x" * (200 << 20)
+        del touched
+        self.assertGreater(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, 200 << 10)
+        self.assertLess(self.measure(sys.executable, "-c", "pass")["peak_kib"], 100 << 10)
