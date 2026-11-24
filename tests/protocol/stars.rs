@@ -41,9 +41,9 @@ cases! {
         "u.c -> t.c copy",
         "u.j -> t.c rows",
     ]);
-    using_keys_come_first_in_snowflake: {
-        assert_eq!(columns_in("snowflake", "select * from s join w using (a, k)"), json!(["a", "k", "b", "y"]));
-        assert_eq!(columns_in("snowflake", "select * from w2 join s using (k, a)"), json!(["k", "a", "y", "b"]));
+    using_keys_come_first: for dialect in ["snowflake", "postgresql", "redshift", "databricks"] {
+        assert_eq!(columns_in(dialect, "select * from s join w using (a, k)"), json!(["a", "k", "b", "y"]), "{dialect}");
+        assert_eq!(columns_in(dialect, "select * from w2 join s using (k, a)"), json!(["k", "a", "y", "b"]), "{dialect}");
     };
     using_keys_stay_in_place_in_duckdb: {
         assert_eq!(columns_in("duckdb", "select * from s join w using (a, k)"), json!(["k", "a", "b", "y"]));

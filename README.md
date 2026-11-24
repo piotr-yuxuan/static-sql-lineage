@@ -13,7 +13,7 @@ no running pipeline.
 [![Licence](https://img.shields.io/github/license/piotr-yuxuan/static-sql-lineage)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/piotr-yuxuan/static-sql-lineage)](https://github.com/piotr-yuxuan/static-sql-lineage/issues)
 [![Minimum Rust](https://img.shields.io/badge/rust-1.99%2B-informational)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/Cargo.toml)
-[![Dialects](https://img.shields.io/badge/dialects-DuckDB%20%7C%20Snowflake%20%7C%20T--SQL-blue)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/docs/protocol.md)
+[![Dialects](https://img.shields.io/badge/dialects-Databricks%20%7C%20DuckDB%20%7C%20PostgreSQL%20%7C%20Redshift%20%7C%20Snowflake%20%7C%20T--SQL-blue)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/docs/protocol.md)
 [![SQL engine](https://img.shields.io/badge/SQL%20engine-polyglot--sql-informational)](https://crates.io/crates/polyglot-sql)
 [![Nix flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](https://github.com/piotr-yuxuan/static-sql-lineage/blob/main/flake.nix)
 
@@ -175,8 +175,8 @@ cargo install --locked --git https://github.com/piotr-yuxuan/static-sql-lineage
 ```
 
 In a clone, `nix develop` gives Rust, and `cargo install --locked --path .` installs
-from it. The default build reads Snowflake, T-SQL and DuckDB;
-`static-sql-lineage --describe` says which dialects a build reads.
+from it. The default build reads Snowflake, T-SQL, DuckDB, PostgreSQL, Redshift and
+Databricks; `static-sql-lineage --describe` says which dialects a build reads.
 
 `static-sql-lineage --help` lists the commands, and `static-sql-lineage help trace`
 gives one in full. A shell completes the commands, the options and the dialects once it

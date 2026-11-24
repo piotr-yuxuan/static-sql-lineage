@@ -13,6 +13,21 @@ pub enum Dialect {
     Snowflake,
     Tsql,
     Duckdb,
+    Postgresql,
+    Redshift,
+    Databricks,
+}
+
+/// What sets a dialect apart: its name, as `--describe` spells it; polyglot-sql's name for
+/// it; the schema of a database given without one; whether its text is lowered, its names
+/// ignoring case, delimited or not; whether a `*` over `USING` or `NATURAL` lists the keys
+/// that the join merges first.
+struct Rules {
+    name: &'static str,
+    polyglot: DialectType,
+    schema: &'static str,
+    lowered: bool,
+    keys_first: bool,
 }
 
 impl Dialect {
@@ -24,19 +39,36 @@ impl Dialect {
             (cfg!(feature = "snowflake"), Dialect::Snowflake),
             (cfg!(feature = "tsql"), Dialect::Tsql),
             (cfg!(feature = "duckdb"), Dialect::Duckdb),
+            (cfg!(feature = "postgresql"), Dialect::Postgresql),
+            (cfg!(feature = "redshift"), Dialect::Redshift),
+            (cfg!(feature = "databricks"), Dialect::Databricks),
         ]
         .into_iter()
         .filter_map(|(built, dialect)| built.then_some(dialect))
         .collect()
     }
 
+    /// The row of this dialect's rules.
+    fn rules(self) -> Rules {
+        // Name, polyglot-sql's name, default schema, lowered, keys first.
+        let rules = |name, polyglot, schema, lowered, keys_first| Rules { name, polyglot, schema, lowered, keys_first };
+        match self {
+            Dialect::Snowflake => rules("snowflake", DialectType::Snowflake, "PUBLIC", false, true),
+            // SQL Server's default collation compares names ignoring case, delimited or not.
+            Dialect::Tsql => rules("tsql", DialectType::TSQL, "dbo", true, false),
+            Dialect::Duckdb => rules("duckdb", DialectType::DuckDB, "main", false, false),
+            Dialect::Postgresql => rules("postgresql", DialectType::PostgreSQL, "public", false, true),
+            // Names ignore case, with `enable_case_sensitive_identifier` off, as by default.
+            // Redshift's documentation says nothing of the order of a `*` over `USING`: the
+            // SQL standard's, for a joined table, puts the merged keys first, as PostgreSQL does.
+            Dialect::Redshift => rules("redshift", DialectType::Redshift, "public", true, true),
+            Dialect::Databricks => rules("databricks", DialectType::Databricks, "default", true, true),
+        }
+    }
+
     /// The dialect's name, as `--describe` spells it.
     pub fn name(self) -> &'static str {
-        match self {
-            Dialect::Snowflake => "snowflake",
-            Dialect::Tsql => "tsql",
-            Dialect::Duckdb => "duckdb",
-        }
+        self.rules().name
     }
 
     /// The dialect of this build that `--describe` spells `name`, or why there is none.
@@ -47,41 +79,34 @@ impl Dialect {
 
     /// The dialect as polyglot-sql names it.
     pub fn polyglot(self) -> DialectType {
-        match self {
-            Dialect::Snowflake => DialectType::Snowflake,
-            Dialect::Tsql => DialectType::TSQL,
-            Dialect::Duckdb => DialectType::DuckDB,
-        }
+        self.rules().polyglot
     }
 
-    /// The schema of a database given without one: SQL Server's `dbo`, Snowflake's
-    /// `PUBLIC`, DuckDB's `main`.
+    /// The schema of a database given without one.
     pub fn default_schema(self) -> &'static str {
-        match self {
-            Dialect::Tsql => "dbo",
-            Dialect::Snowflake => "PUBLIC",
-            Dialect::Duckdb => "main",
-        }
+        self.rules().schema
     }
 
-    /// The rule by which a name is normalised: polyglot-sql's for the dialect, but for
-    /// T-SQL, whose names ignore case whether delimited or not, as SQL Server's default
-    /// collation compares them.
+    /// The rule by which a name is normalised: case ignored where the dialect's text is
+    /// lowered, polyglot-sql's rule for the dialect elsewhere.
     pub fn strategy(self) -> NormalizationStrategy {
-        match self {
-            Dialect::Tsql => NormalizationStrategy::CaseInsensitive,
-            Dialect::Snowflake | Dialect::Duckdb => get_normalization_strategy(Some(self.polyglot())),
+        if self.rules().lowered {
+            NormalizationStrategy::CaseInsensitive
+        } else {
+            get_normalization_strategy(Some(self.polyglot()))
         }
     }
 
-    /// The text that polyglot-sql reads for `sql`: under T-SQL, `sql` lowered whole,
-    /// since polyglot-sql keeps a delimited name's case where the dialect ignores it, as
-    /// it ignores the case of keywords, and no edge depends on a literal's; under the
-    /// others, `sql` itself.
+    /// The text that polyglot-sql reads for `sql`: `sql` lowered whole where the dialect's
+    /// names ignore case, since polyglot-sql keeps a delimited name's case there, as it
+    /// ignores the case of keywords, and no edge depends on a literal's; elsewhere, `sql`
+    /// itself.
     pub fn polyglot_text(self, sql: &str) -> String {
-        match self {
-            Dialect::Tsql => sql.to_lowercase(),
-            Dialect::Snowflake | Dialect::Duckdb => sql.to_string(),
-        }
+        if self.rules().lowered { sql.to_lowercase() } else { sql.to_string() }
+    }
+
+    /// Whether a `*` over `USING` or `NATURAL` lists the keys that the join merges first.
+    pub fn keys_first(self) -> bool {
+        self.rules().keys_first
     }
 }

@@ -296,11 +296,14 @@ have. A reject scenario names an answer that must not be given.
 - means: the grammar, and the rules for quoting and case, under which every name and
   every write of one request is read. One per request, and one of the build's. T-SQL's
   rule for case is that of SQL Server's default collation: a name ignores case, whether
-  it is delimited or not; a database with another collation is not modelled.
+  it is delimited or not; a database with another collation is not modelled. Redshift's,
+  with `enable_case_sensitive_identifier` off as by default, and Databricks's are as
+  T-SQL's; a Redshift database with that setting on is not modelled. PostgreSQL's
+  lowers a name unless it is quoted, and a quoted name is exact.
 - not: the engine that parses it, polyglot-sql, which can be replaced behind the
   protocol. Not the warehouse product.
 - avoid: flavour, engine, adapter, database.
-- home: `Dialect`.
+- home: `Dialect`, `Rules`.
 - operations:
   - `Dialect::built`: the dialects that the build includes.
   - `Dialect::name`: the dialect's name, as `--describe` spells it.
@@ -309,6 +312,7 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
   - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
   - `Dialect::default_schema`: the schema of a database given without one.
+  - `Dialect::keys_first`: whether a `*` over `USING` or `NATURAL` lists the merged keys first.
 - accept `dialect.not-built`: a request in `bigquery`, to a build of `snowflake`,
   `tsql` and `duckdb`: refused as a whole, with exit status 2 and no response.
 - reject `dialect.generic-fallback`: a response to that request, read as generic SQL.
@@ -317,6 +321,21 @@ have. A reject scenario names an answer that must not be given.
   `[dbo].[Orders].[OrderId] -> t.orderid`, `copy`; no gap.
 - reject `dialect.tsql-delimited-as-exact`: for that request, a refusal, as if
   `[OrderId]` named only `OrderId` exactly.
+- accept `dialect.postgresql-lowers-unquoted`: dialect `postgresql`; catalog `"orders"`
+  with the column `"orderid"`; query `select OrderId from Orders`: the edge
+  `"orders"."orderid" -> t.OrderId`, `copy`; no gap.
+- reject `dialect.postgresql-unquoted-as-exact`: for that request, a refusal or an
+  `unknown_relation` gap, as if `Orders` named `"Orders"` or `"ORDERS"`.
+- accept `dialect.redshift-ignores-case`: dialect `redshift`; catalog `"Orders"` with
+  the column `"OrderId"`; query `select orderid from orders`: the edge
+  `"Orders"."OrderId" -> t.orderid`, `copy`; no gap.
+- reject `dialect.redshift-quoted-as-exact`: for that request, a refusal or an
+  `unknown_relation` gap, as if `"Orders"` named only `Orders` exactly.
+- accept `dialect.databricks-ignores-case`: dialect `databricks`; catalog `` `Orders` ``
+  with the column `` `OrderId` ``; query `select orderid from orders`: the edge
+  `` `Orders`.`OrderId` -> t.orderid ``, `copy`; no gap.
+- reject `dialect.databricks-quoted-as-exact`: for that request, a refusal or an
+  `unknown_relation` gap, as if `` `Orders` `` named only `Orders` exactly.
 
 ## Derived terms
 

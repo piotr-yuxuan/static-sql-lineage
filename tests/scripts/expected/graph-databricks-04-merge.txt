@@ -1,0 +1,4 @@
+tests/scripts/databricks/04-merge.sql:3:1 s <-
+tests/scripts/databricks/04-merge.sql:2:1 t <- s, t
+tests/scripts/databricks/04-merge.sql:1:1 v_top <- t
+skipped: 0

@@ -1,0 +1,10 @@
+use catalog sales;
+use mart;
+create view v_top as select id from v_base;
+create view sales.mart.v_base as select id from sales.raw.orders;
+use database stage;
+create view v_low as select id from sales.stage.v_src;
+create view v_src as select id from sales.raw.orders;
+use schema crm.core;
+create view v_crm as select id from crm.core.v_last;
+create view v_last as select id from sales.raw.orders;

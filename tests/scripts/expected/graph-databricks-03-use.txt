@@ -1,0 +1,7 @@
+tests/scripts/databricks/03-use.sql:4:1 sales.mart.v_base <- sales.raw.orders
+tests/scripts/databricks/03-use.sql:3:1 v_top <- v_base
+tests/scripts/databricks/03-use.sql:7:1 v_src <- sales.raw.orders
+tests/scripts/databricks/03-use.sql:6:1 v_low <- sales.stage.v_src
+tests/scripts/databricks/03-use.sql:10:1 v_last <- sales.raw.orders
+tests/scripts/databricks/03-use.sql:9:1 v_crm <- crm.core.v_last
+skipped: 0

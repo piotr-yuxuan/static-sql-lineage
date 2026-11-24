@@ -201,8 +201,9 @@ refused may come to be read. The request's fields and their meanings do not chan
 
 ## `graph`
 
-The writes of files of SQL, as SQL Server's tools, Snowflake and DuckDB write them, in
-the order to migrate them in. Which relations a write reads needs no catalog.
+The writes of files of SQL, as SQL Server's tools, Snowflake, DuckDB, PostgreSQL,
+Redshift and Databricks write them, in the order to migrate them in. Which relations a
+write reads needs no catalog.
 
 ```
 static-sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] [--json] <path>...
@@ -211,7 +212,8 @@ static-sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] 
 - `--dialect`: required; one of this build's, as `--describe` spells them.
 - `--database`, `--schema`: the defaults that complete a name of fewer than three parts,
   as a request's `defaults` do; a database given without a schema takes the dialect's
-  usual one, `dbo` in T-SQL, `PUBLIC` in Snowflake, `main` in DuckDB.
+  usual one, `dbo` in T-SQL, `PUBLIC` in Snowflake, `main` in DuckDB, `public` in
+  PostgreSQL and Redshift, `default` in Databricks.
 - `--json`: JSON rather than text.
 - a path: a file, whatever its name, or a directory, whose files ending `.sql`, at any
   depth, are read sorted by path; at least one, read in the order given.
@@ -225,7 +227,8 @@ Each file is a script, read in order:
 
 - A byte order mark chooses UTF-8, UTF-16 LE or UTF-16 BE; without one, UTF-8. A file
   that does not decode is a finding, `not_read`, and the others are read.
-- In Snowflake and DuckDB, a statement ends at each `;` outside parentheses. In T-SQL, a
+- In the dialects other than T-SQL, a statement ends at each `;` outside parentheses and
+  outside a dollar-quoted string, `$$ ... $$` or `$tag$ ... $tag$`. In T-SQL, a
   batch ends at a line that holds only `GO`, any case, with an optional count, and at a
   SQLCMD line, whose first token is `:`; a batch that starts `CREATE`, `CREATE OR ALTER`
   or `ALTER`, then `VIEW`, `PROC`, `PROCEDURE`, `FUNCTION` or `TRIGGER`, is one statement;
@@ -240,7 +243,10 @@ Each file is a script, read in order:
   characters.
 - `USE` sets the defaults for the rest of its file: T-SQL's `USE <db>`, Snowflake's
   `USE [DATABASE] <db>`, `USE <db>.<schema>` and `USE SCHEMA [<db>.]<schema>`, DuckDB's
-  `USE`; a database without a schema takes the usual one.
+  `USE`; Databricks's `USE [SCHEMA] [<catalog>.]<schema>` and `USE DATABASE <schema>`,
+  which set the schema, and `USE CATALOG <catalog>`, which sets the database and the
+  schema `default`; a database without a schema takes the usual one. PostgreSQL's and
+  Redshift's `SET search_path` is skipped.
 - SSMS's existence check, `EXEC sp_executesql` or `EXEC dbo.sp_executesql` with
   `@statement` a national string that parses as one statement, is read as that statement,
   at its `EXEC`'s place; any other dynamic SQL is a finding, `not_read`.
@@ -447,7 +453,7 @@ What this build is:
     "version": "0.14.3",
     "source": "registry+https://github.com/rust-lang/crates.io-index"
   },
-  "dialects": ["snowflake", "tsql", "duckdb"]
+  "dialects": ["snowflake", "tsql", "duckdb", "postgresql", "redshift", "databricks"]
 }
 ```
 

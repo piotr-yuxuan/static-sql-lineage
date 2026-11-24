@@ -248,7 +248,7 @@ impl Write {
                 });
                 let sources = vec![(*merge.this).clone(), (*merge.using).clone()];
                 let whens = whens(merge, &sources, with.as_ref(), &nulls).ok_or_else(not_a_write)?.into_iter();
-                let whens = whens.map(|(piece, named)| (Some(piece), Columns::Listed(named)));
+                let whens = whens.map(|(piece, columns)| (Some(piece), columns));
                 let on = synthetic(nulls, sources, Vec::new(), merge.on.as_deref().cloned(), with);
                 let pieces = std::iter::once((Some(on), Columns::Listed(Vec::new()))).chain(whens);
                 (Some(&**table), false, true, pieces.collect())
@@ -637,9 +637,10 @@ pub fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
 
 /// The columns of the sources of `select`, as [`named`] gives them, each with the places
 /// of the joins that merge it: a key that a join's `USING` names, or that its `NATURAL`
-/// finds on both its sides, once. Snowflake puts a join's keys first, in the order of its
-/// `USING` or, for `NATURAL`, of its left side, then its left side's other columns, then
-/// its right side's; DuckDB keeps each key at its first place, and T-SQL merges none.
+/// finds on both its sides, once. A dialect whose `*` lists the merged keys first, as
+/// Snowflake's, puts a join's keys first, in the order of its `USING` or, for `NATURAL`, of
+/// its left side, then its left side's other columns, then its right side's; DuckDB keeps
+/// each key at its first place, and T-SQL merges none.
 fn joined<'a>(
     select: &'a Select,
     ctes: &[&'a Cte],
@@ -671,7 +672,7 @@ fn joined<'a>(
             columns.iter().filter(|(_, joins)| joins.contains(&at)).map(|(column, _)| column).collect();
         let rest: Vec<Name> = right.iter().filter(|column| !merged.contains(column)).cloned().collect();
         columns.extend(rest.into_iter().map(|column| (column, Vec::new())));
-        if dialect == Dialect::Snowflake {
+        if dialect.keys_first() {
             columns.sort_by_key(|(column, joins)| (!joins.contains(&at), using.iter().position(|key| key == column)));
         }
     }
@@ -881,16 +882,18 @@ fn view_columns(
 }
 
 /// The `SELECT` of each `WHEN` clause of `merge`, its values over `sources`, under `with`,
-/// where its condition holds, with the columns that its `UPDATE SET` or its `INSERT` names;
+/// where its condition holds, with the columns that its `UPDATE SET` or its `INSERT` lists;
 /// none for an `INSERT` without a list, whose values follow the target's columns, or for a
-/// `DELETE`, whose values are `nulls`, one for each column of the target. None when a
-/// clause names a target that is not a column.
+/// `DELETE`, whose values are `nulls`, one for each column of the target. An action of
+/// another form, such as `UPDATE SET *` or `INSERT *`, whose columns would be the target's
+/// by name, is `nulls` over its sources, its columns refused. None when a clause names a
+/// target that is not a column.
 fn whens(
     merge: &Merge,
     sources: &[Expression],
     with: Option<&With>,
     nulls: &[Expression],
-) -> Option<Vec<(Expression, Vec<Identifier>)>> {
+) -> Option<Vec<(Expression, Columns)>> {
     let clauses = merge.whens.iter().flat_map(|whens| match whens.as_ref() {
         Expression::Whens(whens) => whens.expressions.as_slice(),
         _ => &[],
@@ -900,26 +903,30 @@ fn whens(
         let Expression::When(when) = clause else { continue };
         // polyglot gives an action as a tuple of its keyword and its lists, a `DELETE` as its
         // keyword alone.
-        let (values, named): (Vec<Expression>, Vec<Identifier>) = match when.then.as_ref() {
+        let (values, columns) = match when.then.as_ref() {
             Expression::Tuple(action) => match action.expressions.as_slice() {
                 [Expression::Var(keyword), Expression::Tuple(set)] if keyword.this.eq_ignore_ascii_case("update") => {
                     let pairs = set.expressions.iter().map(|pair| match pair {
                         Expression::Eq(pair) => Some((pair.right.clone(), assigned(&pair.left)?.clone())),
                         _ => None,
                     });
-                    pairs.collect::<Option<Vec<_>>>()?.into_iter().unzip()
+                    let (values, named) = pairs.collect::<Option<Vec<_>>>()?.into_iter().unzip();
+                    (values, Columns::Listed(named))
                 }
                 [_, Expression::Tuple(named), Expression::Tuple(values)] => {
                     let named = named.expressions.iter().map(|item| assigned(item).cloned());
-                    (values.expressions.clone(), named.collect::<Option<_>>()?)
+                    (values.expressions.clone(), Columns::Listed(named.collect::<Option<_>>()?))
                 }
-                [_, Expression::Tuple(values)] => (values.expressions.clone(), Vec::new()),
-                _ => continue,
+                [_, Expression::Tuple(values)] => (values.expressions.clone(), Columns::Listed(Vec::new())),
+                _ => {
+                    let detail = "a MERGE action of a form that the tool does not read".to_string();
+                    (nulls.to_vec(), Columns::Named(Err(Refusal { reason: RefusalReason::NotAQuery, detail })))
+                }
             },
-            _ => (nulls.to_vec(), Vec::new()),
+            _ => (nulls.to_vec(), Columns::Listed(Vec::new())),
         };
         let piece = synthetic(values, sources.to_vec(), Vec::new(), when.condition.as_deref().cloned(), with.cloned());
-        pieces.push((piece, named));
+        pieces.push((piece, columns));
     }
     Some(pieces)
 }
