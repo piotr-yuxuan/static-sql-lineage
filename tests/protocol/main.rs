@@ -137,6 +137,15 @@ fn traces(catalog: &[(&str, &[&str])], sql: &str, expected: &[&str]) {
     traces_in("snowflake", catalog, sql, expected);
 }
 
+/// Asserts that the answer to `sql` against `catalog` in Snowflake, its target `t`, gives
+/// the columns `columns` and the outline `expected`.
+#[track_caller]
+fn answered(catalog: &[(&str, &[&str])], sql: &str, columns: Value, expected: &[&str]) {
+    let answer = &respond(&request(catalog, &[("t", sql)]))[0];
+    assert_eq!(answer["columns"], columns, "{sql}");
+    assert_eq!(outline(answer), expected, "{sql}");
+}
+
 /// Asserts that no line of the outline `found` is `unwanted`, as a reject scenario says.
 #[track_caller]
 fn lacks(found: &[String], unwanted: impl Fn(&str) -> bool) {
