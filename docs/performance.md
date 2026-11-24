@@ -56,8 +56,8 @@ a child's peak starts from the memory of what it was copied from: with a fork, t
 moment, which is the floor of every peak; with a vfork, the runner's own peak, which
 grows over a run. So that the floor stays low, the runner reads a child's output only
 after the last run, and holds no output while it forks; so that a peak can be read
-against it, the runner records its own resident memory at each fork, from Linux's
-`/proc/self/status`, the largest as `floor_kib`. A peak near that floor says little of
+against it, the runner records at each fork its own anonymous resident memory, which a
+fork copies, `RssAnon` in Linux's `/proc/self/status`, the largest as `floor_kib`. A peak near that floor says little of
 the child. A child that exits with a status other than 0, or runs past 900 seconds, ends
 the run with status 2 and one line on standard error, and nothing is written.
 
@@ -71,7 +71,7 @@ Each object of the output has these fields:
 | `dialect` | the dialect |
 | `median_seconds` | the median wall time of its runs |
 | `peak_kib` | the largest peak of its runs |
-| `floor_kib` | the runner's largest resident memory at a fork of these runs; none without `/proc` |
+| `floor_kib` | the runner's largest anonymous resident memory at a fork of its runs; none without `/proc` |
 | `version` | the binary's, from `--describe` |
 | `writes`, `refusals`, `gaps` | for `protocol1`, from the response; gaps by reason |
 | `writes`, `findings`, `skipped` | for `graph`, from its JSON; findings by kind |

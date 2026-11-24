@@ -229,9 +229,9 @@ def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | Non
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
-            # Linux's word of this runner's resident memory, which a forked child starts from.
+            # This runner's anonymous resident memory, which a forked child starts from.
             if (proc := Path("/proc/self/status")).exists():
-                floor = max(floor, int(proc.read_text().split("VmRSS:")[1].split()[0]))
+                floor = max(floor, int(proc.read_text().split("RssAnon:")[1].split()[0]))
             start = time.perf_counter()
             # A child starts with the resident memory of what it was copied from: a vfork,
             # which Popen uses without a preexec_fn, would give it this runner's peak, a
