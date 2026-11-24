@@ -50,7 +50,11 @@ as its catalog. The last write is `last`, with a column `a`.
 ## Figures
 
 Each way in runs five times. A run's peak resident memory is that child's alone, from
-`os.wait4` on its pid: `ru_maxrss`, in KiB on Linux and bytes on macOS. A child that
+`os.wait4` on its pid: `ru_maxrss`, in KiB on Linux and bytes on macOS. The runner
+forks each child rather than letting Popen vfork it, since a child's peak starts from the
+memory of what it was copied from: with a fork, the runner's resident memory at that
+moment, about 15 MiB, which is the floor of every peak; with a vfork, the runner's own
+peak, which grows over a run. A child that
 exits with a status other than 0, or runs past 300 seconds, ends the run with status 2
 and one line on standard error, and nothing is written.
 

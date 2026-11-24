@@ -26,11 +26,11 @@ import json
 import os
 import random
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -228,13 +228,18 @@ def measure(label: dict, way: str, argv: list[str], cwd: Path, stdin: Path | Non
             tempfile.TemporaryFile() as err,
         ):
             start = time.perf_counter()
-            process = subprocess.Popen(argv, cwd=cwd, stdin=given, stdout=out, stderr=err)
-            timer = threading.Timer(TIMEOUT_SECONDS, process.kill)
-            timer.start()
+            # A child starts with the resident memory of what it was copied from: a vfork,
+            # which Popen uses without a preexec_fn, would give it this runner's peak, a
+            # fork only this runner's resident memory now.
+            process = subprocess.Popen(
+                argv, cwd=cwd, stdin=given, stdout=out, stderr=err, preexec_fn=os.getpid
+            )
+            signal.signal(signal.SIGALRM, lambda *_, pid=process.pid: os.kill(pid, signal.SIGKILL))
+            signal.alarm(TIMEOUT_SECONDS)
             # wait4 gives this child's usage alone; RUSAGE_CHILDREN keeps the largest so far.
             _, status, usage = os.wait4(process.pid, 0)
             seconds = time.perf_counter() - start
-            timer.cancel()
+            signal.alarm(0)
             process.returncode = code = os.waitstatus_to_exitcode(status)
             if code != 0:
                 err.seek(0)
