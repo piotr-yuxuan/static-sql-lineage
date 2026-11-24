@@ -22,6 +22,8 @@ clap_complete = "4"
 polyglot-sql = { version = "=0.14.3", default-features = false, features = ["semantic", "generate", "stacker"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
 
 [dev-dependencies]
 # The concept check parses the sources, so that comments and associated types

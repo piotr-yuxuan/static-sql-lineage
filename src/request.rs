@@ -62,6 +62,7 @@ impl Request {
     }
 
     /// The response to this request, or why it is refused as a whole.
+    #[tracing::instrument(level = "info", skip_all, fields(dialect = %self.dialect, writes = self.writes.len()))]
     pub fn respond(self) -> Result<Response, String> {
         let dialect = Dialect::named(&self.dialect)?;
         let defaults = self.defaults.read(dialect)?;

@@ -4,10 +4,11 @@
 use std::path::PathBuf;
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use clap_complete::Shell;
 use polyglot_sql::TokenType;
 use serde_json::json;
+use tracing::field::Empty;
 
 use crate::answer::Answer;
 use crate::catalog::Catalog;
@@ -24,8 +25,11 @@ use crate::script::{Script, Scripted};
 #[command(after_help = "With no argument, a request of protocol 1 on standard input, unless it is a terminal.")]
 pub struct Cli {
     /// Print what this build is, as JSON.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "verbose")]
     pub describe: bool,
+    /// Log on standard error: -v info, -vv debug, -vvv trace.
+    #[arg(short, action = ArgAction::Count, global = true)]
+    pub verbose: u8,
     #[command(subcommand)]
     pub verb: Option<Verb>,
 }
@@ -128,6 +132,7 @@ impl Command {
     /// their writes and the catalog of their declarations; then `graph` prints the graph,
     /// `trace` and `uses` the walk from the argument's column, upstream or downstream, over the
     /// lineage of the writes, and `outline` the argument's write in brief.
+    #[tracing::instrument(level = "info", skip_all, fields(dialect = %self.dialect.name(), files = Empty, writes = Empty))]
     pub fn run(&self) -> Result<String, String> {
         let (argument, options) = self.verb.parts();
         let unread = |path: &PathBuf, error: std::io::Error| format!("{} does not read: {error}", path.display());
@@ -157,7 +162,9 @@ impl Command {
                 scripts.push(script);
             }
         }
+        tracing::Span::current().record("files", scripts.len());
         let graph = Graph::of(scripts);
+        tracing::Span::current().record("writes", graph.writes.len());
         match self.verb {
             Verb::Graph(_) => Ok(graph.printed(options.json)),
             Verb::Outline { .. } => {

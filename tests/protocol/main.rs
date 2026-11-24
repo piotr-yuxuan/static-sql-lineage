@@ -11,6 +11,7 @@ mod cases;
 mod catalogue;
 mod commands;
 mod edges;
+mod logging;
 mod requests;
 mod scenarios;
 mod stars;
@@ -24,9 +25,11 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 
-/// The command that runs the built binary.
+/// The command that runs the built binary, deaf to the caller's variables of logging.
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_static-sql-lineage"))
+    let mut binary = Command::new(env!("CARGO_BIN_EXE_static-sql-lineage"));
+    binary.env_remove("RUST_LOG").env_remove("STATIC_SQL_LINEAGE_LOG");
+    binary
 }
 
 fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
