@@ -244,6 +244,13 @@ cases! {
         assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: static-sql-lineage"), "{arguments:?}");
     };
     help_names_describe: assert!(String::from_utf8_lossy(&run(&["--help"]).stdout).contains("--describe"));
+    dash_reads_a_request_as_no_argument_does: {
+        let request = request(&[("s", &["a"])], &[("t", "select a from s")]).to_string();
+        let output = piped(&["-"], request.as_bytes());
+        assert_succeeded(&output);
+        assert_eq!(output.stdout, answers(request.as_bytes()).stdout);
+    };
+    refuses_dash_with_another_argument: assert_usage_error(&run(&["-", "--describe"]), "--describe");
     version_names_the_tool: for flag in ["--version", "-V"] {
         let output = run(&[flag]);
         assert_succeeded(&output);

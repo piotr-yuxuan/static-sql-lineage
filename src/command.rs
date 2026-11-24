@@ -19,6 +19,7 @@ use crate::script::{Script, Scripted};
 /// The command line: `--describe`, or a command; with neither, a request on standard input.
 #[derive(Parser)]
 #[command(version, about, args_conflicts_with_subcommands = true)]
+#[command(after_help = "With no argument, a request of protocol 1 on standard input, unless it is a terminal.")]
 pub struct Cli {
     /// Print what this build is, as JSON.
     #[arg(long)]
@@ -74,6 +75,9 @@ pub enum Verb {
         #[command(flatten)]
         options: Options,
     },
+    /// A request of protocol 1 on standard input, read even from a terminal.
+    #[command(name = "-")]
+    Request,
 }
 
 impl Verb {
@@ -84,6 +88,7 @@ impl Verb {
             Verb::Trace { argument, options }
             | Verb::Uses { argument, options }
             | Verb::Outline { argument, options } => (argument, options),
+            Verb::Request => unreachable!("main reads a request"),
         }
     }
 }
@@ -166,6 +171,7 @@ impl Command {
                 let walk = lineage.walk(&from, matches!(self.verb, Verb::Trace { .. }));
                 Ok(walk.ok_or_else(|| format!("no script knows the column {from}"))?.printed(options.json))
             }
+            Verb::Request => unreachable!("main reads a request"),
         }
     }
 

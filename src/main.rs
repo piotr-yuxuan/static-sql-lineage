@@ -15,10 +15,12 @@ mod request;
 mod script;
 mod write;
 
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use clap::Parser;
-use command::{Cli, Command};
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser};
+use command::{Cli, Command, Verb};
 use describe::Description;
 use request::Request;
 
@@ -31,10 +33,14 @@ fn main() -> ExitCode {
     let output = match Cli::parse() {
         Cli { describe: true, .. } => Ok(serde_json::to_string(&Description::of_build(include_str!("../Cargo.lock")))
             .expect("a description serialises")),
-        Cli { verb: Some(verb), .. } => Command::read(verb).and_then(|command| command.run()),
-        Cli { verb: None, .. } => Request::read(std::io::stdin().lock(), LIMIT)
+        Cli { verb: None, .. } if std::io::stdin().is_terminal() => {
+            let reason = "standard input is a terminal: give a request on it, `-` to read one from it, or a command";
+            Cli::command().error(ErrorKind::MissingSubcommand, reason).exit()
+        }
+        Cli { verb: None | Some(Verb::Request), .. } => Request::read(std::io::stdin().lock(), LIMIT)
             .and_then(Request::respond)
             .map(|response| serde_json::to_string(&response).expect("a response serialises")),
+        Cli { verb: Some(verb), .. } => Command::read(verb).and_then(|command| command.run()),
     };
     match output {
         Ok(output) => {

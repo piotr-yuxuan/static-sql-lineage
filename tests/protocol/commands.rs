@@ -51,6 +51,10 @@ cases! {
         assert_usage_error(&graph(&["--dialect", "tsql", "--verbose", "tests/scripts/tsql"]), "--verbose");
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
     };
+    double_dash_ends_the_options: assert_eq!(
+        stdout(&["graph", "--dialect", "duckdb", "--", "examples/tpch"]),
+        stdout(&["graph", "--dialect", "duckdb", "examples/tpch"])
+    );
     a_path_that_does_not_exist_is_refused: {
         let path = "tests/scripts/tsql/none.sql";
         assert_refused(&graph(&["--dialect", "tsql", path]), path);
