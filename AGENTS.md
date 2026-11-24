@@ -46,6 +46,24 @@ Reuses: <operations and types at the base that the steps call or extend>
   `docs/decisions.md`, drawn with the skill `diagram-design:diagram-design`; a plan
   that changes what one shows redraws it.
 - Tracked SQL is synthetic.
+- A budget per plan: while a plan is drafted, three estimators, on the same models each
+  round (Opus, Sonnet, Opus), read the plan and the documents at its base, never the
+  code, and estimate the lines it adds to `src/` and `tests/`. A budget is a ceiling,
+  never a target: fewer lines are better, and no line is written to reach it. It is the
+  estimators' median scaled by the ratio of our code to their median whole at the last
+  check, so that it is in our own density, and its ceiling is that figure plus 20% or
+  plus 50 lines, whichever is more. `NNN-checks.sh` prints the count and fails above
+  the ceiling; only the owner raises a budget.
+- The check of every three plans: three blind estimators of the whole feature set give
+  its median. The ratio of our count to that median, for `src/` and for `tests/`, rises
+  by no more than 0.05 from one check to the next, the noise between rounds (0.746 and
+  0.814 at plan 012; later ratios in the chain's index of their check). A ratio that
+  rises more makes the next plan a consolidation that brings it back down. The ratios
+  found are the next budgets' scale.
+- `make size` gives the counts, so that no count is taken by hand.
+- Step 5's findings are recorded with `coordinator:instrument` in
+  `docs/work/findings/NNN.json`, and its summary is quoted in the pre-merge summary.
+- A new dependency is named in its plan's *Decisions*.
 
 ## Reuse before repetition
 
@@ -86,6 +104,11 @@ overnight:
   branch began and fails otherwise, and the review of the plan's draft checks that it
   does. A plan that needs more, such as a type that serves no existing concept, stops
   and leaves its branch.
+
+Beyond homes and operations, such a plan may change `docs/concepts.md` only by a text
+that the owner approved for it, or by retiring names that the owner named, written as
+approved; its checks then compare the file with that text instead of running
+`make kernel-unchanged`.
 
 When such a chain ends, an agent whose only task is to find behaviour repeated across
 `src/` and `tests/`, rather than in one diff, writes what it finds to
