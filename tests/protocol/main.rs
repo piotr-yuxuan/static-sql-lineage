@@ -2,6 +2,20 @@
 //! The binary run as a caller runs it, as `docs/protocol.md` gives its uses: here
 //! `--describe` and the arguments it refuses, and the helpers of the modules.
 
+/// One test per row, `name: body;`, named after the case: a scenario's identifier, `.`
+/// and `-` becoming `_`. The row's attributes, such as `ignore`, pass through.
+macro_rules! cases {
+    ($($(#[$attribute:meta])* $name:ident: $body:expr;)*) => {
+        $(
+            #[test]
+            $(#[$attribute])*
+            fn $name() {
+                $body;
+            }
+        )*
+    };
+}
+
 mod agreement;
 mod answers;
 mod cases;
