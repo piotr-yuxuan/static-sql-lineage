@@ -201,8 +201,9 @@ refused may come to be read. The request's fields and their meanings do not chan
 
 ## `graph`
 
-The writes of files of SQL, as SQL Server's tools, Snowflake, DuckDB, PostgreSQL, Redshift
-and Databricks write them, in the order to migrate them in. Which relations a write reads needs no catalog.
+The writes of files of SQL, as SQL Server's tools, Snowflake, DuckDB, PostgreSQL,
+Redshift and Databricks write them, in the order to migrate them in. Which relations a
+write reads needs no catalog.
 
 ```
 static-sql-lineage graph --dialect <name> [--database <name>] [--schema <name>] [--json] <path>...
