@@ -7,8 +7,10 @@ use polyglot_sql::validation::ValidationSchema;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::answer::Answer;
 use crate::dialect::Dialect;
 use crate::relation::{Name, RelationName, repeated};
+use crate::write::Write;
 
 /// The request's form of a relation of its catalog: its name and its columns.
 #[derive(Deserialize)]
@@ -83,5 +85,13 @@ impl Catalog {
         if let Some(columns) = columns {
             self.relations.insert(target, columns);
         }
+    }
+
+    /// The answer to `write`, whose target is `target`, against the catalog as it stands
+    /// just before it, once what the write makes of its target is recorded.
+    pub fn answer(&mut self, write: &Write, target: RelationName, dialect: Dialect, defaults: &[Name]) -> Answer {
+        let (answer, replaces) = Answer::of(write, &target, self, dialect, defaults);
+        self.record(target, replaces, answer.columns.clone());
+        answer
     }
 }

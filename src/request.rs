@@ -73,11 +73,7 @@ impl Request {
             return Err(format!("two writes have the id {id:?}"));
         }
         let answers = (self.writes.iter().zip(targets))
-            .map(|(write, target)| {
-                let (answer, replaces) = Answer::of(write, &target, &catalog, dialect, &defaults);
-                catalog.record(target, replaces, answer.columns.clone());
-                answer
-            })
+            .map(|(write, target)| catalog.answer(write, target, dialect, &defaults))
             .collect();
         Ok(Response { protocol: self.protocol, answers })
     }
