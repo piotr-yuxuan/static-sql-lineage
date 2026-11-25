@@ -72,6 +72,7 @@ cases! {
         assert!(!tsql(&["tests/scripts/tsql/02-views.sql"]).is_empty());
     };
     // `go`, `GO 2` and `GO` end batches; `GO` in a comment or a string, and `[GO]`, do not.
+    // The `INSERT` grows over the line of its `SELECT`, which starts a line.
     tsql_batches_end_at_go: prints("graph-05-load");
     tsql_sqlcmd_lines_end_a_batch: prints("graph-06-sqlpackage");
     // `COMMIT` and `WAITFOR` start statements: the `INSERT`s before them end there.
@@ -90,7 +91,7 @@ cases! {
     // does not parse; `DECLARE` and a procedure's `EXEC` skipped.
     other_dynamic_sql_is_not_read: prints("graph-04-dynamic");
     // A UTF-8 BOM, UTF-16 LE and UTF-16 BE, each with CRLF: one text, one place for each
-    // token, in characters, the BOM not counted.
+    // token, in characters past an accented letter and before CRLF, the BOM not counted.
     a_bom_and_utf16_are_decoded: {
         prints("graph-11-utf8-bom");
         prints("graph-12-utf16le");
@@ -179,18 +180,6 @@ fn statements_split_at_semicolons() {
 }
 
 #[test]
-fn tsql_statements_without_semicolons_are_split() {
-    // The `INSERT` grows over the line of its `SELECT`, which starts a line.
-    let path = "tests/scripts/tsql/05-load.sql";
-    let expected = [
-        format!("{path}:5:1 dbo.Fact <- dbo.Stage"),
-        format!("{path}:7:1 dbo.Fact <- dbo.Fact"),
-        format!("{path}:8:3 dbo.Fact <- dbo.Fact"),
-    ];
-    assert_eq!(tsql(&[path])[..3], expected);
-}
-
-#[test]
 fn a_refused_write_is_reported_with_its_place() {
     // SSMS's `INSERT` without `INTO`, refused, is reported; its `SELECT`, read alone, the `IF`
     // and the `DROP VIEW` on one line, and a refused `ALTER TABLE`, which is no write, are
@@ -209,12 +198,10 @@ fn a_refused_write_is_reported_with_its_place() {
 #[test]
 fn write_ids_are_their_places() {
     // The path as given, then the line and the column of the write's first token, from 1:
-    // past an indent, and in characters, past an accented letter, before CRLF.
+    // past an indent.
     let path = "./tests/scripts/tsql/05-load.sql";
     let places = ["5:1", "7:1", "8:3", "11:1", "15:1"].map(|place| format!("{path}:{place}"));
     assert_eq!(ids(&tsql(&[path])), places);
-    let path = "tests/scripts/tsql/11-utf8-bom.sql";
-    assert_eq!(ids(&tsql(&[path])), [format!("{path}:1:1"), format!("{path}:5:11")]);
 }
 
 #[cfg(unix)]
