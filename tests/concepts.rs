@@ -348,11 +348,16 @@ cases! {
         Undeclared { types: names(&["Hidden"]), ..Undeclared::default() });
 }
 
-#[test]
-fn every_type_has_a_home() {
+/// What the check finds wrong in the repository, of which a source file was read.
+fn checked() -> Undeclared {
     let (sources, concepts) = repository();
     assert!(!sources.is_empty(), "no source file was read");
-    let found = undeclared(&sources, &concepts);
+    undeclared(&sources, &concepts)
+}
+
+#[test]
+fn every_type_has_a_home() {
+    let found = checked();
     assert!(found.types.is_empty(), "types with no home in docs/concepts.md: {:?}", found.types);
     assert!(found.duplicates.is_empty(), "type names defined twice: {:?}", found.duplicates);
 }
