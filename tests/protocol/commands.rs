@@ -368,9 +368,9 @@ fn walked(name: &str, argument: &str, paths: &[&str]) -> Vec<String> {
     lines(&[&[name, "--dialect", "tsql", argument], paths].concat())
 }
 
-/// What `trace` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
-fn traced(column: &str, paths: &[&str]) -> Value {
-    printed_json(&[&["trace", "--dialect", "tsql", "--json", column], paths].concat())
+/// What the command `name` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
+fn traced(name: &str, column: &str, paths: &[&str]) -> Value {
+    printed_json(&[&[name, "--dialect", "tsql", "--json", column], paths].concat())
 }
 
 /// The scripts of a load and its views: three tables, four loads of `dbo.Fact`, the last
@@ -390,7 +390,7 @@ fn view(line: usize) -> String {
 #[test]
 fn trace_unites_the_edges_of_several_writes() {
     // The first load copies `Amount`, the second derives it: one edge, a copy, of both (R12).
-    let found = traced("dbo.Fact.Amount", &[LINEAGE]);
+    let found = traced("trace", "dbo.Fact.Amount", &[LINEAGE]);
     let edge = json!({
         "parent": {"relation": "dbo.Stage", "column": "Amount"},
         "child": {"relation": "dbo.Fact", "column": "[Amount]"},
@@ -404,7 +404,7 @@ fn trace_unites_the_edges_of_several_writes() {
 #[test]
 fn trace_meets_a_declaration_spelled_otherwise() {
     // The view reads `[dbo].[Fact]`, as declared; the loads write `dbo.Fact`: one relation.
-    let found = traced("dbo.vBase.Total", &[LINEAGE]);
+    let found = traced("trace", "dbo.vBase.Total", &[LINEAGE]);
     assert_eq!(found["edges"][0]["parent"], json!({"relation": "[dbo].[Fact]", "column": "[Amount]"}));
     assert_eq!(found["edges"][1]["child"], json!({"relation": "dbo.Fact", "column": "[Amount]"}));
     assert_eq!(found["edges"][1]["depth"], 2);
