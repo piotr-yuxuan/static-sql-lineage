@@ -248,20 +248,20 @@ fn a_database_option_without_a_schema_takes_the_usual_one() {
     }
 }
 
-#[test]
-fn use_changes_the_defaults() {
-    // After `USE [Sales]`, `dbo.vBase` is the view that `vTop` reads, written before it.
+/// Asserts that `graph` orders the write at line `earlier` of the script of `USE` before
+/// the one at line `later`.
+#[track_caller]
+fn used_before(earlier: usize, later: usize) {
     let path = "tests/scripts/tsql/09-use.sql";
     let found = ordered("tsql", &[], &[path]);
-    assert!(place(&found, &format!("{path}:9:1")) < place(&found, &format!("{path}:3:1")), "{found:?}");
+    assert!(place(&found, &format!("{path}:{earlier}:1")) < place(&found, &format!("{path}:{later}:1")), "{found:?}");
 }
 
-#[test]
-fn use_without_a_schema_takes_the_usual_one() {
+cases! {
+    // After `USE [Sales]`, `dbo.vBase` is the view that `vTop` reads, written before it.
+    use_changes_the_defaults: used_before(9, 3);
     // After `USE [Sales]`, `vPlain` is `Sales.dbo.vPlain`, which `vBare` reads.
-    let path = "tests/scripts/tsql/09-use.sql";
-    let found = ordered("tsql", &[], &[path]);
-    assert!(place(&found, &format!("{path}:11:1")) < place(&found, &format!("{path}:5:1")), "{found:?}");
+    use_without_a_schema_takes_the_usual_one: used_before(11, 5);
 }
 
 /// The path of the migration script `name`.
