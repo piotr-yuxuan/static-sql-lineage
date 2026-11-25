@@ -138,6 +138,7 @@ have. A reject scenario names an answer that must not be given.
   - `Write::holders`: where each subquery of the write's query sits in the `SELECT` that holds it.
   - `Write::keys`: the keys that the query's joins merge, `USING`'s or `NATURAL`'s, in each `SELECT`.
   - `Reach::of`: where the clauses of one write's query reach.
+  - `Reach::with_lineage`: the engine's lineage of each output column, through the query's steps, when the rules take it.
   - `Reach::rows`: the output columns whose rows a use of a column decides.
   - `Reach::kind`: the kind with which a projection's reference reaches its output column, by the lineage.
   - `Write::clauses`: the words and the offset of each clause of a statement, its location part.
