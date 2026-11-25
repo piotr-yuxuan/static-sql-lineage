@@ -151,31 +151,7 @@ impl RelationName {
     }
 }
 
-impl PartialEq for RelationName {
-    fn eq(&self, other: &RelationName) -> bool {
-        self.parts == other.parts
-    }
-}
-
-impl Eq for RelationName {}
-
-impl Hash for RelationName {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.parts.hash(state);
-    }
-}
-
-impl fmt::Display for RelationName {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(&self.spelling)
-    }
-}
-
-impl Serialize for RelationName {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
+spelled!(RelationName, parts);
 
 /// The request's default database and schema, as it gives them.
 #[derive(Clone, Default, Deserialize)]
