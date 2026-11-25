@@ -89,6 +89,13 @@ cases! {
     // `EXEC` of a string or a variable, `sp_executesql` of a variable or of a string that
     // does not parse; `DECLARE` and a procedure's `EXEC` skipped.
     other_dynamic_sql_is_not_read: prints("graph-04-dynamic");
+    // A UTF-8 BOM, UTF-16 LE and UTF-16 BE, each with CRLF: one text, one place for each
+    // token, in characters, the BOM not counted.
+    a_bom_and_utf16_are_decoded: {
+        prints("graph-11-utf8-bom");
+        prints("graph-12-utf16le");
+        prints("graph-13-utf16be");
+    };
     // Windows-1252, with no BOM, is not UTF-8: reported by its path, and the others read.
     a_file_that_does_not_decode_is_reported: prints("graph-14-cp1252-02-views");
     // Its files ending `.sql`, in any case, at any depth, sorted by path; `notes.txt` is not
@@ -134,18 +141,13 @@ cases! {
     // SSMS's table script: two `SET`s, `ALTER TABLE` and an extended property's `EXEC`; its
     // `USE` sets the defaults, and its `CREATE TABLE` declares. Counted across files.
     graph_counts_skipped_statements: {
-        let (tables, views) = ("tests/scripts/tsql/01-tables.sql", "tests/scripts/tsql/02-views.sql");
-        assert_eq!(tsql(&[tables]), ["skipped: 4"]);
-        let both = [format!("{views}:12:1 [dbo].[vCustomer] <- [dbo].[Customer]"), "skipped: 8".to_string()];
-        assert_eq!(tsql(&[tables, views]), both);
+        prints("graph-01-tables");
+        prints("graph-01-tables-02-views");
     };
     // The view's `*` reads the declared columns, the column `sparse` and `[Blob]` among them.
     declarations_feed_the_catalog: {
-        let path = "tests/scripts/tsql/18-storage.sql";
-        let sparse = format!("[dbo].[Doc].sparse -> dbo.vDoc.sparse copy {path}:16:1");
-        assert_eq!(walked("trace", "dbo.vDoc.sparse", &[path]), [sparse]);
-        let blob = format!("[dbo].[Doc].[Blob] -> dbo.vDoc.[Blob] copy {path}:16:1");
-        assert_eq!(walked("trace", "dbo.vDoc.Blob", &[path]), [blob]);
+        prints("trace-18-storage-vDoc-sparse");
+        prints("trace-18-storage-vDoc-Blob");
     };
     // No declaration, edge or output names these; nor does an argument with no relation.
     an_unknown_column_is_refused: {
@@ -173,10 +175,7 @@ fn statements_split_at_semicolons() {
     assert!(snowflake[3].starts_with(&format!("refused: {path}:12:1 ")), "{snowflake:?}");
     assert_eq!(snowflake[4..], ["skipped: 1"]);
     // The declaration of `raw_orders` is not skipped; its `INSERT ... VALUES` is.
-    let duckdb = printed(&["--dialect", "duckdb", "tests/scripts/duckdb/01-fixture.sql"]);
-    let path = "tests/scripts/duckdb/01-fixture.sql";
-    let writes = [format!("{path}:3:1 stg_orders <- raw_orders"), format!("{path}:4:1 orders <- stg_orders")];
-    assert_eq!(duckdb, [writes.as_slice(), &["skipped: 1".to_string()]].concat());
+    prints("graph-duckdb-01-fixture");
 }
 
 #[test]
@@ -205,21 +204,6 @@ fn a_refused_write_is_reported_with_its_place() {
     // At the place in the file of `dbo`, where polyglot stops, not its place in the statement.
     assert!(found[2].ends_with(", at 2:8") && !found[2].contains("line 1"), "{found:?}");
     assert_eq!(found[3..], ["skipped: 4"]);
-}
-
-#[test]
-fn a_bom_and_utf16_are_decoded() {
-    // A UTF-8 BOM, UTF-16 LE and UTF-16 BE, each with CRLF: one text, one place for each
-    // token, in characters, the BOM not counted.
-    for name in ["11-utf8-bom", "12-utf16le", "13-utf16be"] {
-        let path = format!("tests/scripts/tsql/{name}.sql");
-        let expected = [
-            format!("{path}:1:1 [dbo].[vCafé] <- [dbo].[Thé]"),
-            format!("{path}:5:11 [dbo].[Tarte] <- [dbo].[vCafé]"),
-            "skipped: 0".to_string(),
-        ];
-        assert_eq!(tsql(&[&path]), expected);
-    }
 }
 
 #[test]
@@ -475,18 +459,7 @@ fn trace_reads_its_argument_under_the_dialect() {
 #[test]
 fn outline_gives_a_write_in_brief() {
     // A replace write and its answer; a contribute write, refused, its detail text for a person.
-    let expected = [
-        format!("id: {}", view(3)),
-        "target: dbo.vBase".to_string(),
-        "mode: replace".to_string(),
-        "place: 3:1".to_string(),
-        "columns: id, Total".to_string(),
-        "edge: [dbo].[Fact].[Id] -> dbo.vBase.id copy".to_string(),
-        "edge: [dbo].[Fact].[Amount] -> dbo.vBase.Total copy".to_string(),
-        "clause: SELECT 3:26".to_string(),
-        "clause: FROM 3:53".to_string(),
-    ];
-    assert_eq!(walked("outline", &view(3), &[LINEAGE]), expected);
+    prints("outline-lineage-vBase");
     let refused = walked("outline", &load(4), &[LINEAGE]);
     let fields = [format!("id: {}", load(4)), "target: dbo.Fact".to_string(), "mode: contribute".to_string()];
     assert_eq!(refused[..3], fields);
@@ -580,11 +553,9 @@ fn uses_reports_the_scripts_refused_writes() {
 fn walks_report_dynamic_sql_not_read() {
     // The `EXEC` of a string may read `dbo.O` or write `dbo.vO`: both walks list it after their
     // edges, and the JSON in `not_read`.
+    prints("uses-24-dynamic-writer-O-Id");
+    prints("trace-24-dynamic-writer-vO-Id");
     let path = "tests/scripts/tsql/24-dynamic-writer.sql";
-    let edge = format!("dbo.O.Id -> dbo.vO.Id copy {path}:3:1");
-    let expected = [edge, format!("not_read: {path}:2:1 dynamic SQL")];
-    assert_eq!(walked("uses", "dbo.O.Id", &[path]), expected);
-    assert_eq!(walked("trace", "dbo.vO.Id", &[path]), expected);
     let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
     assert_eq!(walk["not_read"], json!([{"place": format!("{path}:2:1"), "detail": "dynamic SQL"}]));
     assert_eq!(walk["refusals"], json!([]));

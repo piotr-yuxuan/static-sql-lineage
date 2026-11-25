@@ -1,0 +1,2 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/01-tables.sql
+skipped: 4
