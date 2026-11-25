@@ -529,7 +529,7 @@ fn uses_reports_the_scripts_refused_writes() {
         let found = walked(name, "dbo.O.Id", &[path]);
         assert!(matches!(found.as_slice(), [line] if line.starts_with(&format!("refused: {path}:2:1 "))), "{found:?}");
     }
-    let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
+    let walk = traced("uses", "dbo.O.Id", &[path]);
     let refused = &walk["refusals"][0];
     assert_eq!((&walk["edges"], &refused["place"]), (&json!([]), &json!(format!("{path}:2:1"))));
     assert!(refused["detail"].is_string() && refused.get("write").is_none(), "{walk}");
@@ -543,7 +543,7 @@ fn walks_report_dynamic_sql_not_read() {
     prints("uses-24-dynamic-writer-O-Id");
     prints("trace-24-dynamic-writer-vO-Id");
     let path = "tests/scripts/tsql/24-dynamic-writer.sql";
-    let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
+    let walk = traced("uses", "dbo.O.Id", &[path]);
     assert_eq!(walk["not_read"], json!([{"place": format!("{path}:2:1"), "detail": "dynamic SQL"}]));
     assert_eq!(walk["refusals"], json!([]));
 }
