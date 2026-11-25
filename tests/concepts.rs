@@ -50,16 +50,16 @@ impl Definitions {
 }
 
 impl<'ast> Visit<'ast> for Definitions {
-    fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
-        self.record(&item.attrs, &item.ident);
-    }
-
-    fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
-        self.record(&item.attrs, &item.ident);
-    }
-
-    fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
-        self.record(&item.attrs, &item.ident);
+    /// A struct, an enum, a union or a type alias is recorded and not descended into; any
+    /// other item is visited as usual.
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        match item {
+            syn::Item::Struct(syn::ItemStruct { attrs, ident, .. })
+            | syn::Item::Enum(syn::ItemEnum { attrs, ident, .. })
+            | syn::Item::Union(syn::ItemUnion { attrs, ident, .. })
+            | syn::Item::Type(syn::ItemType { attrs, ident, .. }) => self.record(attrs, ident),
+            _ => syn::visit::visit_item(self, item),
+        }
     }
 
     fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
@@ -70,10 +70,6 @@ impl<'ast> Visit<'ast> for Definitions {
             _ => None,
         });
         self.functions.extend(methods.map(|method| format!("{}::{method}", item.ident)));
-    }
-
-    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
-        self.record(&item.attrs, &item.ident);
     }
 
     fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
