@@ -190,15 +190,21 @@ cases! {
         traces(&[("users", &["id", "name"])], "select * ilike '%name%' from users", &["refused unparsed"]);
 }
 
+/// For each join that merges `s` and `u` on `k`, the edges of `s.k` and `u.k` to the column
+/// `column` of `t`, a transformed key.
+fn joins(column: &str) -> [(&'static str, [String; 2]); 4] {
+    let edges = |s: &str, u: &str| [format!("s.k -> t.{column} {s}"), format!("u.k -> t.{column} {u}")];
+    [
+        ("inner", edges("derive", "derive")),
+        ("left", edges("derive", "rows")),
+        ("right", edges("rows", "derive")),
+        ("full", edges("derive", "derive")),
+    ]
+}
+
 #[test]
 fn a_transformed_key_through_a_cte_derives() {
-    let joins = [
-        ("inner", ["s.k -> t.x derive", "u.k -> t.x derive"]),
-        ("left", ["s.k -> t.x derive", "u.k -> t.x rows"]),
-        ("right", ["s.k -> t.x rows", "u.k -> t.x derive"]),
-        ("full", ["s.k -> t.x derive", "u.k -> t.x derive"]),
-    ];
-    for (join, expected) in joins {
+    for (join, expected) in joins("x") {
         let merged = format!("select k from s {join} join u using (k)");
         for sql in [
             format!("with c as ({merged}) select upper(k) as x from c"),
@@ -211,13 +217,7 @@ fn a_transformed_key_through_a_cte_derives() {
 
 #[test]
 fn a_key_transformed_where_it_is_merged_keeps_its_sides() {
-    let joins = [
-        ("inner", ["s.k -> t.j derive", "u.k -> t.j derive"]),
-        ("left", ["s.k -> t.j derive", "u.k -> t.j rows"]),
-        ("right", ["s.k -> t.j rows", "u.k -> t.j derive"]),
-        ("full", ["s.k -> t.j derive", "u.k -> t.j derive"]),
-    ];
-    for (join, expected) in joins {
+    for (join, expected) in joins("j") {
         for computed in ["upper(k) j", "cast(k as varchar) as j"] {
             let outermost = format!("select {computed} from s {join} join u using (k)");
             let cte = format!("with f as ({outermost}) select j from f");
