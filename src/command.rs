@@ -74,19 +74,10 @@ pub enum Verb {
     /// A column's edges upstream, through the writes that fill its relation.
     Trace(Argument),
     /// A column's edges downstream, through the writes that read it.
-    Uses {
-        #[arg(value_name = "RELATION.COLUMN")]
-        argument: String,
-        #[command(flatten)]
-        options: Options,
-    },
+    Uses(Argument),
     /// One write in brief, by its id as `graph` prints it.
-    Outline {
-        #[arg(value_name = "ID")]
-        argument: String,
-        #[command(flatten)]
-        options: Options,
-    },
+    #[command(mut_args(|arg| if arg.get_id() == "argument" { arg.value_name("ID") } else { arg }))]
+    Outline(Argument),
     /// A script that completes the command line in a shell.
     Completions {
         #[arg(value_parser = PossibleValuesParser::new(["bash", "zsh", "fish"]).try_map(|name: String| name.parse::<Shell>()))]
@@ -102,8 +93,7 @@ impl Verb {
     fn parts(&self) -> (&str, &Options) {
         match self {
             Verb::Graph(options) => ("", options),
-            Verb::Trace(given) => (&given.argument, &given.options),
-            Verb::Uses { argument, options } | Verb::Outline { argument, options } => (argument, options),
+            Verb::Trace(given) | Verb::Uses(given) | Verb::Outline(given) => (&given.argument, &given.options),
             Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),
         }
     }
@@ -170,13 +160,13 @@ impl Command {
         tracing::Span::current().record("writes", graph.writes.len());
         match self.verb {
             Verb::Graph(_) => Ok(graph.printed(options.json)),
-            Verb::Outline { .. } => {
+            Verb::Outline(_) => {
                 let at = graph.writes.iter().position(|write| write.id == argument);
                 let at = at.ok_or_else(|| format!("no script has the write {argument}"))?;
                 let lineage = Lineage::of(&graph, catalog, self.dialect);
                 Ok(self.outline(&graph.writes[at], &lineage.answers[at]))
             }
-            Verb::Trace(_) | Verb::Uses { .. } => {
+            Verb::Trace(_) | Verb::Uses(_) => {
                 // The argument's last part is its column, the rest its relation.
                 let tokens = self.dialect.tokens(argument).unwrap_or_default();
                 let dot = tokens.iter().rposition(|token| token.token_type == TokenType::Dot);
