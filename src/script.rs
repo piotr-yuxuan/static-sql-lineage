@@ -151,10 +151,7 @@ impl Script {
             .or_else(|| utf16([0xFE, 0xFF], u16::from_be_bytes))
             .unwrap_or_else(utf8);
         let text = text.ok_or_else(|| "not UTF-8, nor UTF-16 after a byte order mark".to_string());
-        let tokenize = |text: String| {
-            let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(&text);
-            Ok((tokens.map_err(|error| error.to_string())?, text))
-        };
+        let tokenize = |text: String| Ok((dialect.tokens(&text).map_err(|error| error.to_string())?, text));
         let (tokens, text) = match text.and_then(tokenize) {
             Ok(read) => read,
             Err(detail) => {
@@ -408,7 +405,7 @@ impl Script {
 /// options. Words in strings and quoted names are no clauses' words; comments, newlines and
 /// every place are kept.
 fn parse(text: &str, dialect: Dialect) -> Result<Expression, polyglot_sql::Error> {
-    let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(text).unwrap_or_default();
+    let tokens = dialect.tokens(text).unwrap_or_default();
     let word = |token: &Token| word(token).map_or_else(String::new, str::to_uppercase);
     // Each token's depth outside its own parentheses.
     let mut depth = 0;
