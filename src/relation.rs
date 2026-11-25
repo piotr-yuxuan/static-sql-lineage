@@ -60,31 +60,39 @@ impl Name {
     }
 }
 
-impl PartialEq for Name {
-    fn eq(&self, other: &Name) -> bool {
-        self.normalised == other.normalised
-    }
+/// Equality and hashing of `$type` on its field `$key`, and its display and serialisation
+/// as its spelling.
+macro_rules! spelled {
+    ($type:ident, $key:ident) => {
+        impl PartialEq for $type {
+            fn eq(&self, other: &$type) -> bool {
+                self.$key == other.$key
+            }
+        }
+
+        impl Eq for $type {}
+
+        impl Hash for $type {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.$key.hash(state);
+            }
+        }
+
+        impl fmt::Display for $type {
+            fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(&self.spelling)
+            }
+        }
+
+        impl Serialize for $type {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.collect_str(self)
+            }
+        }
+    };
 }
 
-impl Eq for Name {}
-
-impl Hash for Name {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.normalised.hash(state);
-    }
-}
-
-impl fmt::Display for Name {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(&self.spelling)
-    }
-}
-
-impl Serialize for Name {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
+spelled!(Name, normalised);
 
 /// The name of a relation, of one to three parts: its spelling, its parts as written,
 /// and its parts completed by the request's defaults, on which equality is.
