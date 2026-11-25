@@ -18,6 +18,13 @@ fn prints(name: &str, line: &str) {
     assert_eq!(stdout(&line.split_whitespace().collect::<Vec<_>>()), expected, "{line}");
 }
 
+/// The command of the transcript `text`, the arguments after `$ static-sql-lineage ` on its
+/// first line, and what follows that line; none for a text whose first line is no command.
+fn transcript(text: &str) -> Option<(&str, &str)> {
+    let (first, printed) = text.split_once('\n')?;
+    Some((first.strip_prefix("$ static-sql-lineage ")?, printed))
+}
+
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
 fn graph(arguments: &[&str]) -> Output {
     command(&[&["graph"], arguments].concat())
@@ -613,12 +620,10 @@ fn readme_shows_what_the_binary_prints() {
     let readme = read("README.md");
     let mut shown = Vec::new();
     for block in readme.split("```console\n").skip(1) {
-        let mut block = block.split("```").next().expect("a console block ends").lines();
-        let Some(command) = block.next().and_then(|line| line.strip_prefix("$ static-sql-lineage ")) else {
-            continue;
-        };
+        let block = block.split("```").next().expect("a console block ends");
+        let Some((command, printed)) = transcript(block) else { continue };
         let arguments: Vec<&str> = command.split_whitespace().collect();
-        assert_eq!(lines(&arguments), block.collect::<Vec<_>>(), "{command}");
+        assert_eq!(lines(&arguments), printed.lines().collect::<Vec<_>>(), "{command}");
         shown.extend(arguments.first().copied());
     }
     for verb in ["graph", "trace", "uses", "outline"] {
