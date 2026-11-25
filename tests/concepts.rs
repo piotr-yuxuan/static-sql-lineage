@@ -362,12 +362,20 @@ fn every_type_has_a_home() {
     assert!(found.duplicates.is_empty(), "type names defined twice: {:?}", found.duplicates);
 }
 
-#[test]
-fn every_home_names_a_type() {
-    let (sources, concepts) = repository();
-    assert!(!sources.is_empty(), "no source file was read");
-    let found = undeclared(&sources, &concepts);
-    assert!(found.homes.is_empty(), "homes in docs/concepts.md that name no type: {:?}", found.homes);
+cases! {
+    every_home_names_a_type: {
+        let found = checked();
+        assert!(found.homes.is_empty(), "homes in docs/concepts.md that name no type: {:?}", found.homes);
+    };
+    every_operation_names_a_function: {
+        let found = checked();
+        assert!(found.operations.is_empty(),
+            "operations in docs/concepts.md that name no function: {:?}", found.operations);
+    };
+    every_filling_has_its_shape: {
+        let found = checked();
+        assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
+    };
 }
 
 /// A file of concepts for the tests of `kernel_changes`.
@@ -505,24 +513,6 @@ fn concepts_report_a_malformed_filling() {
         "    And it decides the dialect.",
     ]);
     assert_eq!(found.malformed, malformed);
-}
-
-#[test]
-fn every_operation_names_a_function() {
-    let (sources, concepts) = repository();
-    let found = undeclared(&sources, &concepts);
-    assert!(
-        found.operations.is_empty(),
-        "operations in docs/concepts.md that name no function: {:?}",
-        found.operations
-    );
-}
-
-#[test]
-fn every_filling_has_its_shape() {
-    let (sources, concepts) = repository();
-    let found = undeclared(&sources, &concepts);
-    assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
 }
 
 #[test]
