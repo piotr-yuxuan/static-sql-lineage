@@ -37,7 +37,7 @@ fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
 }
 
 /// The binary's output for the command line `arguments`, run from the repository's root.
-fn command(arguments: &[&str]) -> Output {
+fn command<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
     binary().current_dir(env!("CARGO_MANIFEST_DIR")).args(arguments).output().expect("the binary runs")
 }
 
