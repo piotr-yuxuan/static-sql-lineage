@@ -11,7 +11,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::{read, respond};
+use super::respond;
 
 /// The edges by their ends, `parent relation, column, child relation, column`, each with
 /// its kind.
@@ -81,32 +81,26 @@ fn assert_agrees(directory: &Path) {
     assert!(unused.is_empty(), "explains nothing:\n{}", unused.join("\n"));
 }
 
-#[test]
-fn agrees_with_dbt_on_the_fixture() {
-    assert_agrees(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agreement/fixture"));
-}
-
-#[test]
-fn agrees_with_dbt_on_the_probes() {
-    assert_agrees(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agreement/probes"));
+cases! {
+    agrees_with_dbt_on_the_fixture: assert_agrees(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agreement/fixture"));
+    agrees_with_dbt_on_the_probes: assert_agrees(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agreement/probes"));
 }
 
 #[test]
 fn an_unexplained_difference_fails() {
-    let request: Value = serde_json::from_str(&read("tests/agreement/fixture/request.json")).expect("JSON");
+    let (request, dbt, explain) = project(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agreement/fixture"));
     let made_up = "\"shop\".\"main\".\"raw_orders\"\tstatus\t\"shop\".\"main\".\"stg_orders\"\torder_id\trows";
-    let dbt = format!("{}{made_up}\n", read("tests/agreement/fixture/dbt.tsv"));
-    let (differences, unused) = unexplained(&request, &dbt, &read("tests/agreement/fixture/explain.tsv"));
+    let (differences, unused) = unexplained(&request, &format!("{dbt}{made_up}\n"), &explain);
     assert_eq!(differences, [format!("{made_up}\t-")]);
     assert!(unused.is_empty(), "{unused:?}");
 }
 
 #[test]
 fn an_explanation_that_explains_nothing_fails() {
-    let request: Value = serde_json::from_str(&read("tests/agreement/fixture/request.json")).expect("JSON");
+    let (request, dbt, _) = project(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/agreement/fixture"));
     let made_up =
         "\"shop\".\"main\".\"raw_orders\"\tstatus\t\"shop\".\"main\".\"stg_orders\"\torder_id\trows\t-\tmeaning\tnone";
-    let (differences, unused) = unexplained(&request, &read("tests/agreement/fixture/dbt.tsv"), made_up);
+    let (differences, unused) = unexplained(&request, &dbt, made_up);
     assert!(differences.is_empty(), "{differences:?}");
     assert_eq!(unused, [made_up]);
 }
