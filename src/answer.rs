@@ -11,9 +11,9 @@ use serde::Serialize;
 
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use crate::edge::{Edge, End, Reach};
+use crate::edge::{Edge, End};
 use crate::relation::{Name, RelationName, one_line};
-use crate::write::{Outputs, Piece, Write};
+use crate::write::{Outputs, Piece, Reach, Write};
 
 /// The answer to one write.
 #[derive(Serialize)]
@@ -169,7 +169,8 @@ impl Answer {
             Ok(query) => query,
             Err(refusal) => return answer.refused(refusal),
         };
-        let relations = &Write::relations(sql, &query, dialect, defaults);
+        let reach = Reach::of(sql, &query, catalog, dialect, defaults);
+        let relations = &reach.relations;
         let (known, unknown): (Vec<_>, Vec<_>) = relations.iter().partition(|relation| catalog.get(relation).is_some());
         let mut gaps: Vec<Gap> = unknown.into_iter().map(Gap::unknown).collect();
         let schema = catalog.schema(relations);
@@ -243,12 +244,9 @@ impl Answer {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
         let children = End::of_columns(target, &outputs);
-        let holders = Write::holders(sql, &query, dialect);
-        let keys = Write::keys(sql, &query, catalog, dialect, defaults);
-        let steps = Write::steps(&text, &query, &holders, keys.as_deref(), &order, &schema, dialect);
-        let reach = Reach::of(sql, &query, outputs.len(), holders, keys, steps, dialect);
+        let reach = reach.with_lineage(&text, &order, &schema, dialect);
         let own = piece.own.then_some(found);
-        let (edges, found) = Edge::of_analysis(&analysis, &order, &reach, &children, relations, catalog, own);
+        let (edges, found) = Edge::of_analysis(&analysis, &reach, &children, catalog, own);
         gaps.extend(found);
         Answer { edges, ..answer }.ended(gaps)
     }

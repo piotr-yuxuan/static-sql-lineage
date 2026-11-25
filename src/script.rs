@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
 use crate::relation::{Defaults, Name, RelationName, listing, one_line};
-use crate::write::{Place, Write, nesting, word};
+use crate::write::{Place, Reach, Write, nesting, word};
 
 /// The first words of T-SQL's statements, before which a window may end; not `WITH`, which
 /// also starts a table hint.
@@ -321,8 +321,9 @@ impl Script {
             // `Alias` that a `MERGE`'s tree holds for its target and its source.
             let pieces = read.pieces.iter().map(|(piece, _)| Write::text(piece.as_ref(), text, dialect));
             let reads = pieces.flatten().flat_map(|piece| {
-                let query = Write::query(&piece, dialect).ok();
-                query.map(|query| Write::relations(&piece, &query, dialect, &defaults)).unwrap_or_default()
+                Write::query(&piece, dialect)
+                    .map(|query| Reach::of(&piece, &query, &self.catalog, dialect, &defaults).relations)
+                    .unwrap_or_default()
             });
             let mut seen = HashSet::new();
             let reads = reads.filter(|relation| seen.insert(relation.clone())).collect();

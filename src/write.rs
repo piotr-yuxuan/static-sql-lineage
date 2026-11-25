@@ -12,12 +12,15 @@ use polyglot_sql::expressions::{
 use polyglot_sql::scope::{Scope, SourceKind, build_scope, walk_in_scope};
 use polyglot_sql::traversal::{ExpressionWalk, get_merge_target};
 use polyglot_sql::validation::{ValidationSchema, mapping_schema_from_validation_schema_with_dialect};
-use polyglot_sql::{ColumnUseContext, LineageNode, Token, TokenType, generate, lineage_at_with_schema, parse_one};
+use polyglot_sql::{
+    ColumnUseContext, LineageNode, SetOperator, Token, TokenType, generate, lineage_at_with_schema, parse_one,
+};
 use serde::Deserialize;
 
 use crate::answer::{Refusal, RefusalReason};
 use crate::catalog::Catalog;
 use crate::dialect::Dialect;
+use crate::edge::{End, Kind};
 use crate::relation::{Name, RelationName, names_cte, repeated};
 
 /// The words that open a clause of a statement, but `WITH`, `GROUP BY`, `ORDER BY` and a join.
@@ -63,13 +66,13 @@ pub enum Holder {
 /// around the key computes the column; the kind of the join; and the relation or CTE that
 /// the join joins, when it joins one.
 pub struct Key {
-    pub owner: Option<Name>,
-    pub placed: bool,
-    pub column: Name,
-    pub read: Name,
-    pub computed: bool,
-    pub join: JoinKind,
-    pub right: Option<RelationName>,
+    owner: Option<Name>,
+    placed: bool,
+    column: Name,
+    read: Name,
+    computed: bool,
+    join: JoinKind,
+    right: Option<RelationName>,
 }
 
 /// One `SELECT` that a write is read into, as text; the target's columns onto which its
@@ -298,25 +301,28 @@ impl Write {
         }
     }
 
-    /// The relations that `query`, parsed from `sql`, reads: its table references that
-    /// name no CTE in scope, as the engine scopes them and as the dialect compares names,
-    /// and those that Snowflake's `IDENTIFIER` names by its one string literal in a `FROM`
-    /// or a join, ordered by their spelling.
-    pub fn relations(sql: &str, query: &Expression, dialect: Dialect, defaults: &[Name]) -> Vec<RelationName> {
-        let sql: Vec<char> = sql.chars().collect();
-        let root = build_scope(query);
+    /// The relations that `query`, parsed from `sql`, whose scopes `all` lists, reads: its
+    /// table references that name no CTE in scope, as the engine scopes them and as the
+    /// dialect compares names, and those that Snowflake's `IDENTIFIER` names by its one
+    /// string literal in a `FROM` or a join, ordered by their spelling.
+    pub fn relations(
+        all: &[(String, &Scope, Option<Name>)],
+        sql: &[char],
+        query: &Expression,
+        dialect: Dialect,
+        defaults: &[Name],
+    ) -> Vec<RelationName> {
         // The engine's scopes match a CTE's name ignoring ASCII case alone.
         let cte = |scope: &Scope, table: &TableRef| {
             scope.cte_sources.values().any(|source| {
-                matches!(&source.expression, Expression::Cte(cte) if names_cte(table, &cte.alias, &sql, dialect))
+                matches!(&source.expression, Expression::Cte(cte) if names_cte(table, &cte.alias, sql, dialect))
             })
         };
-        let scoped = (scopes(&root, &sql, dialect).into_iter())
-            .flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (scope, source)));
+        let scoped = all.iter().flat_map(|(_, scope, _)| scope.sources.values().map(move |source| (*scope, source)));
         let mut relations: Vec<RelationName> =
             (scoped.filter_map(|(scope, source)| match (&source.kind, &source.expression) {
                 (SourceKind::Table, Expression::Table(table)) if !cte(scope, table) => {
-                    RelationName::of(table, &sql, dialect, defaults)
+                    RelationName::of(table, sql, dialect, defaults)
                 }
                 _ => None,
             }))
@@ -380,18 +386,19 @@ impl Write {
         Ok(Outputs::Named(names))
     }
 
-    /// Each subquery of `query`, parsed from `sql`, that no subquery holds, by the scope
-    /// path that the engine gives it, with its holder; none for one that the engine numbers
-    /// otherwise, or that follows a `*` in its select list, where its place would count the
-    /// `*` as one. The engine numbers the subqueries of a `SELECT` by its
-    /// `collect_subqueries`: the fields that hold them, in the order of its struct, each
-    /// walked by `walk_in_scope`, finding a `Subquery` with no alias, the query of `EXISTS`
-    /// and of `IN`, and that of `ANY` and `ALL` twice, as a quantifier's and as a
-    /// `Subquery`.
-    pub fn holders(sql: &str, query: &Expression, dialect: Dialect) -> Vec<(String, Option<Holder>)> {
-        let sql: Vec<char> = sql.chars().collect();
-        let root = build_scope(query);
-        let all = scopes(&root, &sql, dialect);
+    /// Each subquery of the query whose scopes `all` lists, parsed from `sql`, that no
+    /// subquery holds, by the scope path that the engine gives it, with its holder; none
+    /// for one that the engine numbers otherwise, or that follows a `*` in its select
+    /// list, where its place would count the `*` as one. The engine numbers the subqueries
+    /// of a `SELECT` by its `collect_subqueries`: the fields that hold them, in the order
+    /// of its struct, each walked by `walk_in_scope`, finding a `Subquery` with no alias,
+    /// the query of `EXISTS` and of `IN`, and that of `ANY` and `ALL` twice, as a
+    /// quantifier's and as a `Subquery`.
+    pub fn holders(
+        all: &[(String, &Scope, Option<Name>)],
+        sql: &[char],
+        dialect: Dialect,
+    ) -> Vec<(String, Option<Holder>)> {
         // A branch that filters an `INTERSECT` or an `EXCEPT`, or a branch of one, decides
         // rows by its select list.
         let filters = |path: &str| {
@@ -400,7 +407,7 @@ impl Write {
             scope_steps(path).filter(|&(_, kind, at)| (kind, at) == ("branches", 1)).any(|(prefix, ..)| set(prefix))
         };
         let mut found = Vec::new();
-        for (path, scope, owner) in &all {
+        for (path, scope, owner) in all {
             let Expression::Select(select) = query_of(scope) else { continue };
             if scope_steps(path).any(|(_, kind, _)| ["subqueries", "udtfs"].contains(&kind)) {
                 continue;
@@ -415,7 +422,7 @@ impl Write {
                     return (clause(ColumnUseContext::SetOperationFilter), expression);
                 }
                 let holder = owner.as_ref().map_or(Some(Holder::Output(at)), |owner| {
-                    Some(Holder::Column(owner.clone(), name(expression, &sql, dialect)?))
+                    Some(Holder::Column(owner.clone(), name(expression, sql, dialect)?))
                 });
                 (holder.filter(|_| star.is_none_or(|star| at < star)), expression)
             });
@@ -457,41 +464,35 @@ impl Write {
         found
     }
 
-    /// The keys that the joins of `query`, parsed from `sql`, merge in each of its
-    /// `SELECT`s, selected bare, aliased or not, through a `*`, or read bare by an
-    /// expression of its select list; none when a join merges a key among sources whose
-    /// columns are unknown, where its keys are not told.
+    /// The keys that the joins of the query whose scopes `all` lists, parsed from `sql`,
+    /// under `ctes`, those of its outermost `WITH`, merge in each of its `SELECT`s,
+    /// selected bare, aliased or not, through a `*`, or read bare by an expression of its
+    /// select list; none when a join merges a key among sources whose columns are
+    /// unknown, where its keys are not told.
     pub fn keys(
-        sql: &str,
-        query: &Expression,
+        all: &[(String, &Scope, Option<Name>)],
+        ctes: &[&Cte],
+        sql: &[char],
         catalog: &Catalog,
         dialect: Dialect,
         defaults: &[Name],
     ) -> Option<Vec<Key>> {
-        let sql: Vec<char> = sql.chars().collect();
-        let root = build_scope(query);
-        let ctes: Vec<&Cte> = (root.cte_scopes.iter())
-            .filter_map(|cte| match &cte.expression {
-                Expression::Cte(cte) => Some(&**cte),
-                _ => None,
-            })
-            .collect();
         let bare = |expression: &Expression| match expression {
-            Expression::Column(column) if column.table.is_none() => Name::of(&column.name, &sql, dialect),
+            Expression::Column(column) if column.table.is_none() => Name::of(&column.name, sql, dialect),
             _ => None,
         };
         let right = |join: &Join| match &join.this {
-            Expression::Table(table) => RelationName::of(table, &sql, dialect, defaults),
+            Expression::Table(table) => RelationName::of(table, sql, dialect, defaults),
             _ => None,
         };
         let mut keys = Vec::new();
-        for (path, scope, owner) in scopes(&root, &sql, dialect) {
+        for (path, scope, owner) in all {
             let Expression::Select(select) = query_of(scope) else { continue };
             if !select.joins.iter().any(|join| !join.using.is_empty() || natural(join)) {
                 continue;
             }
-            let placed = !scope_steps(&path).any(|(_, kind, _)| ["subqueries", "udtfs", "branches"].contains(&kind));
-            let columns = joined(select, &ctes, &sql, catalog, dialect, defaults).ok()?;
+            let placed = !scope_steps(path).any(|(_, kind, _)| ["subqueries", "udtfs", "branches"].contains(&kind));
+            let columns = joined(select, ctes, sql, catalog, dialect, defaults).ok()?;
             // Each column of the list with each column of the sources that it reads bare, and
             // whether an expression around it computes the column.
             let listed = select_list(select).flat_map(|expression| match expression {
@@ -499,12 +500,12 @@ impl Write {
                     columns.iter().map(|(column, _)| (column.clone(), column.clone(), false)).collect()
                 }
                 Expression::Alias(alias) => {
-                    let named = name(expression, &sql, dialect);
+                    let named = name(expression, sql, dialect);
                     let computed = bare(&alias.this).is_none();
                     let read = walk_in_scope(&alias.this, false).filter_map(bare);
                     read.filter_map(|read| Some((named.clone()?, read, computed))).collect()
                 }
-                column => name(column, &sql, dialect)
+                column => name(column, sql, dialect)
                     .zip(bare(column))
                     .map(|(named, read)| (named, read, false))
                     .into_iter()
@@ -527,36 +528,6 @@ impl Write {
             }
         }
         Some(keys)
-    }
-
-    /// The engine's lineage of each output column of `query`, the engine's projection
-    /// that `order` gives for it, against `schema`, read from `text`, the text that the
-    /// engine reads for `query`; none where the engine gives none; for a write that holds
-    /// an `INTERSECT` or an `EXCEPT`, a key that a join merges, as `keys` says, or a
-    /// subquery in a CTE's or a derived table's select list, as `holders` says, and for no
-    /// other.
-    pub fn steps(
-        text: &str,
-        query: &Expression,
-        holders: &[(String, Option<Holder>)],
-        keys: Option<&[Key]>,
-        order: &[usize],
-        schema: &ValidationSchema,
-        dialect: Dialect,
-    ) -> Vec<Option<LineageNode>> {
-        let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
-        let held = holders.iter().any(|(_, holder)| matches!(holder, Some(Holder::Column(..))));
-        if !(filtering || held || keys.is_some_and(|keys| !keys.is_empty())) {
-            return Vec::new();
-        }
-        let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
-        let read = Write::query(text, dialect).ok();
-        let lineage = |place| {
-            tracing::trace_span!("lineage_at_with_schema").in_scope(|| {
-                lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok()
-            })
-        };
-        order.iter().map(|&at| lineage(at)).collect()
     }
 
     /// The clauses of the statement that `sql` holds, each its words and the offset of its
@@ -587,6 +558,245 @@ impl Write {
             }
         }
         found
+    }
+}
+
+/// One reading of the query of a piece of a write, from the engine's scopes, built once:
+/// the relations that it reads; whether a `SELECT` of it keeps rows by their order,
+/// whether its outermost query does, and whether it holds an `INTERSECT` or an `EXCEPT`;
+/// which CTEs of its outermost `WITH` that query reads, directly or through others of that
+/// `WITH`; the holders of its subqueries; the keys that its joins merge, if their sides are
+/// told; and, once [`Reach::with_lineage`] gives them, the places of its output columns and
+/// the engine's lineage of each, where the write needs it.
+pub struct Reach {
+    pub relations: Vec<RelationName>,
+    limited: bool,
+    outermost: bool,
+    filtering: bool,
+    read: Vec<usize>,
+    pub order: Vec<usize>,
+    holders: Vec<(String, Option<Holder>)>,
+    keys: Option<Vec<Key>>,
+    lineage: Vec<Option<LineageNode>>,
+}
+
+impl Reach {
+    /// The reach of the clauses of `query`, parsed from `sql`, before its output columns
+    /// are known: its relations, as [`Write::relations`] finds them, the holders of its
+    /// subqueries, as [`Write::holders`] finds them, and the keys that its joins merge
+    /// against `catalog`, as [`Write::keys`] finds them, all three from the one reading of
+    /// its scopes. A CTE is matched by its name under the dialect.
+    pub fn of<'q>(sql: &str, query: &'q Expression, catalog: &Catalog, dialect: Dialect, defaults: &[Name]) -> Reach {
+        let sql: Vec<char> = sql.chars().collect();
+        let root = build_scope(query);
+        let all = scopes(&root, &sql, dialect);
+        let relations = Write::relations(&all, &sql, query, dialect, defaults);
+        let limited = |select: &Select| {
+            select.limit.is_some() || select.offset.is_some() || select.fetch.is_some() || select.top.is_some()
+        };
+        let (with, outermost) = match query {
+            Expression::Select(select) => (select.with.as_ref(), limited(select)),
+            Expression::Union(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
+            Expression::Intersect(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
+            Expression::Except(set) => (set.with.as_ref(), set.limit.is_some() || set.offset.is_some()),
+            _ => (None, false),
+        };
+        // The CTEs of the outermost `WITH`, in its order, which the engine's scopes number.
+        let ctes: Vec<&Cte> = with.iter().flat_map(|with| &with.ctes).collect();
+        let holders = Write::holders(&all, &sql, dialect);
+        let keys = Write::keys(&all, &ctes, &sql, catalog, dialect, defaults);
+        let filtering = query.dfs().any(|node| matches!(node, Expression::Intersect(_) | Expression::Except(_)));
+        let named = |tree: &'q Expression| -> Vec<&'q TableRef> {
+            let one_part = |node: &'q Expression| match node {
+                Expression::Table(table) if table.schema.is_none() && table.catalog.is_none() => Some(&**table),
+                _ => None,
+            };
+            tree.dfs().filter_map(one_part).collect()
+        };
+        // What the outermost query reads outside its CTEs' bodies, then what each CTE
+        // that it reads reads.
+        let mut pending = named(query);
+        for name in ctes.iter().flat_map(|cte| named(&cte.this)) {
+            if let Some(at) = pending.iter().position(|other| Name::same(&other.name, &name.name, &sql, dialect)) {
+                pending.swap_remove(at);
+            }
+        }
+        let mut read = Vec::new();
+        while let Some(name) = pending.pop() {
+            let cte = ctes.iter().position(|cte| names_cte(name, &cte.alias, &sql, dialect));
+            if let Some(at) = cte.filter(|at| !read.contains(at)) {
+                read.push(at);
+                pending.extend(named(&ctes[at].this));
+            }
+        }
+        let limited = query.dfs().any(|node| matches!(node, Expression::Select(select) if limited(select)));
+        let (order, lineage) = (Vec::new(), Vec::new());
+        Reach { relations, limited: limited || outermost, outermost, filtering, read, order, holders, keys, lineage }
+    }
+
+    /// This reach with the places of the output columns, whose projections `order`
+    /// gives, and the engine's lineage of each against `schema`, read from `text`, the
+    /// text that the engine reads for the piece; none where the engine gives none; for a
+    /// query that holds an `INTERSECT` or an `EXCEPT`, a key that a join merges, or a
+    /// subquery in a CTE's or a derived table's select list, as its holders say, and for
+    /// no other.
+    pub fn with_lineage(mut self, text: &str, order: &[usize], schema: &ValidationSchema, dialect: Dialect) -> Reach {
+        self.order = order.to_vec();
+        let held = self.holders.iter().any(|(_, holder)| matches!(holder, Some(Holder::Column(..))));
+        if !(self.filtering || held || self.keys.as_ref().is_some_and(|keys| !keys.is_empty())) {
+            return self;
+        }
+        let schema = mapping_schema_from_validation_schema_with_dialect(schema, dialect.polyglot());
+        let read = Write::query(text, dialect).ok();
+        let lineage = |place| {
+            tracing::trace_span!("lineage_at_with_schema").in_scope(|| {
+                lineage_at_with_schema(place, read.as_ref()?, Some(&schema), Some(dialect.polyglot()), false).ok()
+            })
+        };
+        self.lineage = order.iter().map(|&at| lineage(at)).collect();
+        self
+    }
+
+    /// The places of the output columns whose rows a use of `context` in the scope at
+    /// `path` decides; none when where it reaches cannot be placed. A clause reaches
+    /// every output column from the outermost query, its derived tables and its
+    /// branches, and from a CTE of its outermost `WITH` that it reads; not from a table
+    /// function or another CTE, nor when a tuple's `IN` in it leaves out columns that it
+    /// reads. A use in a subquery reaches what the subquery's holder does.
+    pub fn rows(&self, path: &str, context: ColumnUseContext) -> Option<Vec<usize>> {
+        let tuple = |(subquery, holder): &(String, Option<Holder>)| {
+            scope_steps(subquery).last().is_some_and(|(parent, ..)| parent == path)
+                && matches!(holder, Some(Holder::Tuple(tuple)) if *tuple == context)
+        };
+        // A step of a CTE that the outermost query reads first, then of derived tables and branches.
+        let placed = !self.holders.iter().any(tuple)
+            && scope_steps(path).enumerate().all(|(at, step)| match step {
+                (_, "ctes", cte) => at == 0 && self.read.contains(&cte),
+                (_, kind, _) => ["derived", "branches"].contains(&kind),
+            });
+        // What a subquery at the path `subquery`, in the scope at `parent`, reaches: what a
+        // use of its clause there does; the output column at its place in the select list
+        // of the outermost query or a branch; the output columns whose lineage passes
+        // through its column in the select list of a CTE or a derived table.
+        let held = |step @ (parent, ..): (&str, &str, usize)| -> Option<Vec<usize>> {
+            let (_, holder) = self.holders.iter().find(|(path, _)| scope_steps(path).last() == Some(step))?;
+            match holder.as_ref()? {
+                Holder::Clause(context) => self.rows(parent, *context),
+                Holder::Tuple(_) => None,
+                Holder::Output(place) => Some(vec![*place]),
+                Holder::Column(source, column) => (0..self.order.len())
+                    .map(|place| {
+                        let mut nodes = self.lineage.get(place)?.as_ref()?.walk();
+                        Some(nodes.any(|node| source.reported_as(&node.source_name) && column.reported_as(&node.name)))
+                            .map(|passes| passes.then_some(place))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|places| places.into_iter().flatten().collect()),
+            }
+        };
+        match context {
+            // The engine counts these in the upstream of the projection that holds them.
+            ColumnUseContext::WindowPartition
+            | ColumnUseContext::WindowOrder
+            | ColumnUseContext::WindowFrame
+            | ColumnUseContext::AggregateOrder => Some(Vec::new()),
+            ColumnUseContext::Order if !self.limited => Some(Vec::new()),
+            ColumnUseContext::Order => (self.outermost && path == "root").then(|| (0..self.order.len()).collect()),
+            _ => match scope_steps(path).find(|(_, kind, _)| *kind == "subqueries") {
+                Some(step) => held(step),
+                None => placed.then(|| (0..self.order.len()).collect()),
+            },
+        }
+    }
+
+    /// The kind with which a projection's reference of `kind`, from `parent`, reaches the
+    /// output column at `place`, by the engine's lineage of that column where the write
+    /// needs it: the weaker of its own and that of its path, rows through the filtering
+    /// branch of an `INTERSECT` or an `EXCEPT`. For a key that a join merges, in the
+    /// outermost `SELECT` or the CTE or derived table whose step the lineage names, the
+    /// path gives the kind of the side that it comes through, and its steps' own
+    /// expressions stand for the reference's kind, which the engine takes from the merge's
+    /// `COALESCE`. None where the lineage does not say, such as for a key merged across
+    /// more than two sources, or whose right side the lineage does not tell from its left.
+    pub fn kind(&self, place: usize, parent: &End, kind: Kind, catalog: &Catalog) -> Option<Kind> {
+        let keys = self.keys.as_ref()?;
+        let Some(step) = self.lineage.get(place) else { return Some(kind) };
+        let step = step.as_ref()?;
+        let leaf = |node: &LineageNode| match (&node.source_kind, &node.expression) {
+            (SourceKind::Table, Expression::Column(column)) => {
+                End::of(&node.source_name, &column.name.name, &self.relations, catalog).ok().flatten()
+            }
+            _ => None,
+        };
+        // A step copies when its own expression is a column, aliased or not.
+        let expressed = |node: &LineageNode| {
+            let mut expression = &node.expression;
+            loop {
+                expression = match expression {
+                    Expression::Alias(alias) => &alias.this,
+                    Expression::Paren(paren) => &paren.this,
+                    Expression::Annotated(annotated) => &annotated.this,
+                    Expression::Column(_) => return Kind::Copy,
+                    _ => return Kind::Derive,
+                };
+            }
+        };
+        // The kinds of the left and right sides of the key merged into the column of
+        // `node`, with the right's relation or CTE: the outermost `SELECT`'s, at the root,
+        // or those of the CTE or derived table that its step names; none for no key, and
+        // none at all where the lineage does not tell the sides, nor which step is the
+        // merge of a key in a branch or a subquery, which any step of its name may be.
+        // The column that a step stands for: a leaf's, or that of a CTE or derived table.
+        let stands = |next: &LineageNode| match &next.expression {
+            Expression::Column(column) => column.name.name.clone(),
+            _ => next.name.clone(),
+        };
+        let sides = |node: &LineageNode, root: bool| {
+            let step = matches!(node.source_kind, SourceKind::Cte | SourceKind::DerivedTable);
+            let owns = |key: &&Key| match &key.owner {
+                _ if !key.placed => true,
+                None => root,
+                Some(owner) => step && owner.reported_as(&node.source_name),
+            };
+            let merged: Vec<&Key> = keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect();
+            let names = |key: &Key, right: &RelationName| {
+                let sides = node.downstream.iter().filter(|next| key.read.reported_as(&stands(next)));
+                sides.filter(|next| right.reported_as(&next.source_name)).count()
+            };
+            match merged.as_slice() {
+                [] => Some(None),
+                [key @ Key { placed: true, right: Some(right), .. }] if names(key, right) == 1 => {
+                    Some(Some((Kind::sides(key.join)?, right, *key)))
+                }
+                _ => None,
+            }
+        };
+        // Each step with the kind that its path gives, if any, the kind of the steps' own
+        // expressions down to it, and whether the path crosses a merge.
+        let mut pending = vec![(step, None, Kind::Copy, false, true)];
+        let mut reached = Vec::new();
+        while let Some((node, through, own, crossed, root)) = pending.pop() {
+            let filtering =
+                node.set_branch.filter(|branch| branch.ordinal == 1 && branch.operator != SetOperator::Union);
+            let through = through.max(filtering.map(|_| Kind::Rows));
+            let sides = sides(node, root)?;
+            // A merge's own expression holds its `COALESCE`, which its sides' kinds replace;
+            // an expression around the key derives.
+            let own = sides
+                .map_or(own.max(expressed(node)), |(_, _, key)| if key.computed { own.max(Kind::Derive) } else { own });
+            if leaf(node).as_ref() == Some(parent) {
+                let reference = if crossed { own } else { kind };
+                reached.push(through.map_or(reference, |through| through.max(reference)));
+            }
+            // A merge's sides are the steps that stand for its key.
+            pending.extend(node.downstream.iter().map(|next| {
+                let side = sides
+                    .filter(|(_, _, key)| key.read.reported_as(&stands(next)))
+                    .map(|((left, right), joined, _)| if joined.reported_as(&next.source_name) { right } else { left });
+                (next, through.max(side), own, crossed || side.is_some(), false)
+            }));
+        }
+        Some(reached.into_iter().min().unwrap_or(kind))
     }
 }
 
@@ -630,7 +840,7 @@ fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &
 
 /// The steps of `path`, a scope's path as [`scopes`] writes it, each its kind and its
 /// index, after the path up to it.
-pub fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
+fn scope_steps(path: &str) -> impl Iterator<Item = (&str, &str, usize)> {
     let steps = path.match_indices('.').map(move |(at, _)| (&path[..at], path[at + 1..].split(['[', ']'])));
     steps.filter_map(|(prefix, mut step)| Some((prefix, step.next()?, step.next()?.parse().ok()?)))
 }
