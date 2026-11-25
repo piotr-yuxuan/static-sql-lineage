@@ -8,7 +8,7 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, assert_usage_error, command, lacks, lines, printed_json, read, run, stdout};
+use super::{assert_refused, assert_usage_error, command, lacks, lines, printed_json, read, stdout};
 
 /// Asserts that the command line `line`, its arguments split at spaces, prints from the
 /// repository's root the file `name` of `tests/scripts/expected/`, byte for byte.
@@ -48,7 +48,7 @@ cases! {
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
     };
     an_unknown_command_is_refused:
-        assert_usage_error(&run(&["migrate", "--dialect", "tsql", "tests/scripts/tsql"]), "migrate");
+        assert_usage_error(&command(&["migrate", "--dialect", "tsql", "tests/scripts/tsql"]), "migrate");
     an_unknown_option_is_refused: {
         assert_usage_error(&graph(&["--dialect", "tsql", "--verbose", "tests/scripts/tsql"]), "--verbose");
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
