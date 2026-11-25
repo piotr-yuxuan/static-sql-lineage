@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect postgresql tests/scripts/postgresql/01-dollar.sql
 tests/scripts/postgresql/01-dollar.sql:10:1 v <- s
 tests/scripts/postgresql/01-dollar.sql:12:1 w <- v
 skipped: 3

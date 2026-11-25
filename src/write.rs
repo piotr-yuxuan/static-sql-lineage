@@ -535,7 +535,7 @@ impl Write {
     /// `AS`, `GROUP BY`, `ORDER BY`, a join from its first word to its `JOIN` or `APPLY`, and
     /// each word of [`CLAUSES`]. Words in strings and quoted names are none.
     pub fn clauses(sql: &str, dialect: Dialect) -> Vec<(String, usize)> {
-        let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(sql).unwrap_or_default();
+        let tokens = dialect.tokens(sql).unwrap_or_default();
         let word = |at: usize| tokens.get(at).and_then(word).map_or_else(String::new, str::to_uppercase);
         let (mut depth, mut cases, mut found) = (0, 0, Vec::new());
         for (at, token) in tokens.iter().enumerate() {
@@ -1070,8 +1070,7 @@ fn view_columns(
     if columns.is_empty() {
         return Ok(None);
     }
-    let tokens = polyglot_sql::Dialect::get(dialect.polyglot()).tokenize(sql);
-    let tokens = tokens.map_err(|error| refused(error.to_string()))?;
+    let tokens = dialect.tokens(sql).map_err(|error| refused(error.to_string()))?;
     let chars: Vec<char> = sql.chars().collect();
     let after = view.name.span.map_or(0, |span| span.end);
     let (mut depth, mut opens, mut names) = (0, false, Vec::new());

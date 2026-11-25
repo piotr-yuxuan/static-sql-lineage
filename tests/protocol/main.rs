@@ -32,12 +32,8 @@ fn binary() -> Command {
     binary
 }
 
-fn run<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
-    binary().args(arguments).output().expect("the binary runs")
-}
-
 /// The binary's output for the command line `arguments`, run from the repository's root.
-fn command(arguments: &[&str]) -> Output {
+fn command<S: AsRef<OsStr>>(arguments: &[S]) -> Output {
     binary().current_dir(env!("CARGO_MANIFEST_DIR")).args(arguments).output().expect("the binary runs")
 }
 
@@ -61,12 +57,7 @@ fn printed_json(arguments: &[&str]) -> Value {
 
 /// The binary's output for `input` on its standard input.
 fn answers(input: &[u8]) -> Output {
-    piped(&[], input)
-}
-
-/// The binary's output for the command line `arguments` and `input` on its standard input.
-fn piped(arguments: &[&str], input: &[u8]) -> Output {
-    fed(binary().args(arguments), input)
+    fed(&mut binary(), input)
 }
 
 /// The output of `command`, run with `input` on its standard input.
@@ -163,12 +154,6 @@ fn read(path: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).expect("a file of the repository reads")
 }
 
-fn description() -> Value {
-    let output = run(&["--describe"]);
-    assert_succeeded(&output);
-    serde_json::from_slice(&output.stdout).expect("the description is JSON")
-}
-
 /// The paths of every key in `value`, such as `engine.name`.
 fn keys(value: &Value, prefix: &str, into: &mut BTreeSet<String>) {
     if let Value::Object(fields) = value {
@@ -181,6 +166,7 @@ fn keys(value: &Value, prefix: &str, into: &mut BTreeSet<String>) {
 }
 
 /// A use that succeeds: status 0, and nothing on standard error.
+#[track_caller]
 fn assert_succeeded(output: &Output) {
     assert_eq!((output.status.code(), &*String::from_utf8_lossy(&output.stderr)), (Some(0), ""));
 }
@@ -209,7 +195,7 @@ fn assert_usage_error(output: &Output, naming: &str) {
 
 #[test]
 fn describe_names_the_build() {
-    let description = description();
+    let description = printed_json(&["--describe"]);
     assert_eq!(description["tool"], "static-sql-lineage");
     assert_eq!(description["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(description["protocols"], json!([1]));
@@ -233,48 +219,42 @@ fn describe_follows_the_protocol_document() {
     let example = section.split("```json").nth(1).and_then(|rest| rest.split("```").next()).expect("an example");
     let (mut documented, mut described) = (BTreeSet::new(), BTreeSet::new());
     keys(&serde_json::from_str(example).expect("the example is JSON"), "", &mut documented);
-    keys(&description(), "", &mut described);
+    keys(&printed_json(&["--describe"]), "", &mut described);
     assert_eq!(documented, described);
 }
 
 cases! {
-    refuses_an_argument_other_than_describe: assert_usage_error(&run(&["--explain"]), "--explain");
-    refuses_describe_with_another_argument: assert_usage_error(&run(&["--describe", "--explain"]), "--explain");
+    refuses_an_argument_other_than_describe: assert_usage_error(&command(&["--explain"]), "--explain");
+    refuses_describe_with_another_argument: assert_usage_error(&command(&["--describe", "--explain"]), "--explain");
     #[cfg(unix)]
     refuses_an_argument_that_is_not_unicode: {
         use std::os::unix::ffi::OsStrExt;
-        assert_usage_error(&run(&[OsStr::from_bytes(b"\xff")]), "'\u{FFFD}'");
+        assert_usage_error(&command(&[OsStr::from_bytes(b"\xff")]), "'\u{FFFD}'");
     };
     help_prints_a_usage: for arguments in [&["--help"][..], &["-h"], &["help", "trace"]] {
-        let output = run(arguments);
-        assert_succeeded(&output);
-        assert!(String::from_utf8_lossy(&output.stdout).contains("Usage: static-sql-lineage"), "{arguments:?}");
+        assert!(stdout(arguments).contains("Usage: static-sql-lineage"), "{arguments:?}");
     };
     help_names_describe_and_completions: {
-        let help = String::from_utf8_lossy(&run(&["--help"]).stdout).into_owned();
+        let help = String::from_utf8_lossy(&command(&["--help"]).stdout).into_owned();
         assert!(help.contains("--describe") && help.contains("completions"), "{help}");
     };
     completions_name_the_commands_and_dialects: for shell in ["bash", "zsh", "fish"] {
-        let output = run(&["completions", shell]);
-        assert_succeeded(&output);
-        let script = String::from_utf8_lossy(&output.stdout);
+        let script = stdout(&["completions", shell]);
         for word in ["graph", "trace", "uses", "outline", "completions", "dialect", "database", "schema", "json", "snowflake", "tsql", "duckdb", "postgresql", "redshift", "databricks"] {
             assert!(script.contains(word), "{shell} lacks {word}");
         }
     };
     dash_reads_a_request_as_no_argument_does: {
         let request = request(&[("s", &["a"])], &[("t", "select a from s")]).to_string();
-        let output = piped(&["-"], request.as_bytes());
+        let output = fed(binary().arg("-"), request.as_bytes());
         assert_succeeded(&output);
         assert_eq!(output.stdout, answers(request.as_bytes()).stdout);
     };
-    refuses_dash_with_another_argument: assert_usage_error(&run(&["-", "--describe"]), "--describe");
+    refuses_dash_with_another_argument: assert_usage_error(&command(&["-", "--describe"]), "--describe");
     refuses_describe_with_a_command:
         assert_usage_error(&command(&["--describe", "graph", "--dialect", "duckdb", "examples/tpch"]), "'graph'");
-    refuses_describe_with_dash: assert_usage_error(&run(&["--describe", "-"]), "'-'");
+    refuses_describe_with_dash: assert_usage_error(&command(&["--describe", "-"]), "'-'");
     version_names_the_tool: for flag in ["--version", "-V"] {
-        let output = run(&[flag]);
-        assert_succeeded(&output);
-        assert_eq!(String::from_utf8_lossy(&output.stdout), format!("static-sql-lineage {}\n", env!("CARGO_PKG_VERSION")));
+        assert_eq!(stdout(&[flag]), format!("static-sql-lineage {}\n", env!("CARGO_PKG_VERSION")));
     };
 }

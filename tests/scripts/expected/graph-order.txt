@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/order
 tests/scripts/tsql/order/a/c.sql:1:1 dbo.vC <- dbo.Orders
 tests/scripts/tsql/order/a.sql:1:1 dbo.vA <- dbo.Orders
 tests/scripts/tsql/order/b.sql:1:1 dbo.vB <- dbo.Orders

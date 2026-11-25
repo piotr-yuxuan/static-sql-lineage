@@ -56,6 +56,15 @@ pub struct Options {
     paths: Vec<PathBuf>,
 }
 
+/// A command's argument, a column or a write, then its options and its paths.
+#[derive(Args)]
+pub struct Argument {
+    #[arg(value_name = "RELATION.COLUMN")]
+    argument: String,
+    #[command(flatten)]
+    options: Options,
+}
+
 /// What follows `static-sql-lineage`: a command, with its argument, its options and its
 /// paths; `completions` and its shell; or `-`.
 #[derive(Subcommand)]
@@ -63,26 +72,12 @@ pub enum Verb {
     /// The writes of the scripts, in the order to migrate them in.
     Graph(Options),
     /// A column's edges upstream, through the writes that fill its relation.
-    Trace {
-        #[arg(value_name = "RELATION.COLUMN")]
-        argument: String,
-        #[command(flatten)]
-        options: Options,
-    },
+    Trace(Argument),
     /// A column's edges downstream, through the writes that read it.
-    Uses {
-        #[arg(value_name = "RELATION.COLUMN")]
-        argument: String,
-        #[command(flatten)]
-        options: Options,
-    },
+    Uses(Argument),
     /// One write in brief, by its id as `graph` prints it.
-    Outline {
-        #[arg(value_name = "ID")]
-        argument: String,
-        #[command(flatten)]
-        options: Options,
-    },
+    #[command(mut_args(|arg| if arg.get_id() == "argument" { arg.value_name("ID") } else { arg }))]
+    Outline(Argument),
     /// A script that completes the command line in a shell.
     Completions {
         #[arg(value_parser = PossibleValuesParser::new(["bash", "zsh", "fish"]).try_map(|name: String| name.parse::<Shell>()))]
@@ -98,9 +93,7 @@ impl Verb {
     fn parts(&self) -> (&str, &Options) {
         match self {
             Verb::Graph(options) => ("", options),
-            Verb::Trace { argument, options }
-            | Verb::Uses { argument, options }
-            | Verb::Outline { argument, options } => (argument, options),
+            Verb::Trace(given) | Verb::Uses(given) | Verb::Outline(given) => (&given.argument, &given.options),
             Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),
         }
     }
@@ -167,15 +160,15 @@ impl Command {
         tracing::Span::current().record("writes", graph.writes.len());
         match self.verb {
             Verb::Graph(_) => Ok(graph.printed(options.json)),
-            Verb::Outline { .. } => {
+            Verb::Outline(_) => {
                 let at = graph.writes.iter().position(|write| write.id == argument);
                 let at = at.ok_or_else(|| format!("no script has the write {argument}"))?;
                 let lineage = Lineage::of(&graph, catalog, self.dialect);
                 Ok(self.outline(&graph.writes[at], &lineage.answers[at]))
             }
-            Verb::Trace { .. } | Verb::Uses { .. } => {
+            Verb::Trace(_) | Verb::Uses(_) => {
                 // The argument's last part is its column, the rest its relation.
-                let tokens = polyglot_sql::Dialect::get(self.dialect.polyglot()).tokenize(argument).unwrap_or_default();
+                let tokens = self.dialect.tokens(argument).unwrap_or_default();
                 let dot = tokens.iter().rposition(|token| token.token_type == TokenType::Dot);
                 let dot = dot.ok_or_else(|| format!("{argument:?} is not <relation>.<column>"))?;
                 let chars: Vec<char> = argument.chars().collect();
@@ -184,7 +177,7 @@ impl Command {
                 let relation = RelationName::read(&relation.iter().collect::<String>(), self.dialect, &defaults)?;
                 let from = End { relation, column: Name::read(&column.iter().collect::<String>(), self.dialect)? };
                 let lineage = Lineage::of(&graph, catalog, self.dialect);
-                let walk = lineage.walk(&from, matches!(self.verb, Verb::Trace { .. }));
+                let walk = lineage.walk(&from, matches!(self.verb, Verb::Trace(_)));
                 Ok(walk.ok_or_else(|| format!("no script knows the column {from}"))?.printed(options.json))
             }
             Verb::Completions { .. } | Verb::Request => unreachable!("main prints completions and reads a request"),

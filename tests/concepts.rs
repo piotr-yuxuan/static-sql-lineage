@@ -50,16 +50,16 @@ impl Definitions {
 }
 
 impl<'ast> Visit<'ast> for Definitions {
-    fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
-        self.record(&item.attrs, &item.ident);
-    }
-
-    fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
-        self.record(&item.attrs, &item.ident);
-    }
-
-    fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
-        self.record(&item.attrs, &item.ident);
+    /// A struct, an enum, a union or a type alias is recorded and not descended into; any
+    /// other item is visited as usual.
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        match item {
+            syn::Item::Struct(syn::ItemStruct { attrs, ident, .. })
+            | syn::Item::Enum(syn::ItemEnum { attrs, ident, .. })
+            | syn::Item::Union(syn::ItemUnion { attrs, ident, .. })
+            | syn::Item::Type(syn::ItemType { attrs, ident, .. }) => self.record(attrs, ident),
+            _ => syn::visit::visit_item(self, item),
+        }
     }
 
     fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
@@ -70,10 +70,6 @@ impl<'ast> Visit<'ast> for Definitions {
             _ => None,
         });
         self.functions.extend(methods.map(|method| format!("{}::{method}", item.ident)));
-    }
-
-    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
-        self.record(&item.attrs, &item.ident);
     }
 
     fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
@@ -348,21 +344,34 @@ cases! {
         Undeclared { types: names(&["Hidden"]), ..Undeclared::default() });
 }
 
-#[test]
-fn every_type_has_a_home() {
+/// What the check finds wrong in the repository, of which a source file was read.
+fn checked() -> Undeclared {
     let (sources, concepts) = repository();
     assert!(!sources.is_empty(), "no source file was read");
-    let found = undeclared(&sources, &concepts);
+    undeclared(&sources, &concepts)
+}
+
+#[test]
+fn every_type_has_a_home() {
+    let found = checked();
     assert!(found.types.is_empty(), "types with no home in docs/concepts.md: {:?}", found.types);
     assert!(found.duplicates.is_empty(), "type names defined twice: {:?}", found.duplicates);
 }
 
-#[test]
-fn every_home_names_a_type() {
-    let (sources, concepts) = repository();
-    assert!(!sources.is_empty(), "no source file was read");
-    let found = undeclared(&sources, &concepts);
-    assert!(found.homes.is_empty(), "homes in docs/concepts.md that name no type: {:?}", found.homes);
+cases! {
+    every_home_names_a_type: {
+        let found = checked();
+        assert!(found.homes.is_empty(), "homes in docs/concepts.md that name no type: {:?}", found.homes);
+    };
+    every_operation_names_a_function: {
+        let found = checked();
+        assert!(found.operations.is_empty(),
+            "operations in docs/concepts.md that name no function: {:?}", found.operations);
+    };
+    every_filling_has_its_shape: {
+        let found = checked();
+        assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
+    };
 }
 
 /// A file of concepts for the tests of `kernel_changes`.
@@ -500,24 +509,6 @@ fn concepts_report_a_malformed_filling() {
         "    And it decides the dialect.",
     ]);
     assert_eq!(found.malformed, malformed);
-}
-
-#[test]
-fn every_operation_names_a_function() {
-    let (sources, concepts) = repository();
-    let found = undeclared(&sources, &concepts);
-    assert!(
-        found.operations.is_empty(),
-        "operations in docs/concepts.md that name no function: {:?}",
-        found.operations
-    );
-}
-
-#[test]
-fn every_filling_has_its_shape() {
-    let (sources, concepts) = repository();
-    let found = undeclared(&sources, &concepts);
-    assert!(found.malformed.is_empty(), "lines of docs/concepts.md out of their shape: {:?}", found.malformed);
 }
 
 #[test]

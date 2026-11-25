@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/15-transaction.sql
 tests/scripts/tsql/15-transaction.sql:2:1 dbo.w <- dbo.u
 tests/scripts/tsql/15-transaction.sql:5:1 dbo.x <- dbo.w
 tests/scripts/tsql/15-transaction.sql:7:1 dbo.q <- dbo.x

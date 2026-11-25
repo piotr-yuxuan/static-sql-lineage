@@ -1,3 +1,4 @@
+$ static-sql-lineage uses --dialect tsql dbo.Stage.Amount tests/scripts/tsql/lineage
 dbo.Stage.Amount -> dbo.Fact.[Amount] copy tests/scripts/tsql/lineage/2-load.sql:1:1, tests/scripts/tsql/lineage/2-load.sql:2:1
   [dbo].[Fact].[Amount] -> dbo.vBase.Total copy tests/scripts/tsql/lineage/3-views.sql:3:1
     dbo.vBase.Total -> dbo.vTop.Total copy tests/scripts/tsql/lineage/3-views.sql:1:1

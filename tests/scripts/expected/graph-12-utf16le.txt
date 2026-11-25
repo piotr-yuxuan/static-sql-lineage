@@ -1,0 +1,4 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/12-utf16le.sql
+tests/scripts/tsql/12-utf16le.sql:1:1 [dbo].[vCafé] <- [dbo].[Thé]
+tests/scripts/tsql/12-utf16le.sql:5:11 [dbo].[Tarte] <- [dbo].[vCafé]
+skipped: 0

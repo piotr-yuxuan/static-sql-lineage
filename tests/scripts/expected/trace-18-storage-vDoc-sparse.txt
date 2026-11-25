@@ -1,0 +1,2 @@
+$ static-sql-lineage trace --dialect tsql dbo.vDoc.sparse tests/scripts/tsql/18-storage.sql
+[dbo].[Doc].sparse -> dbo.vDoc.sparse copy tests/scripts/tsql/18-storage.sql:16:1

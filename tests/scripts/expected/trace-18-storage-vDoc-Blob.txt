@@ -1,0 +1,2 @@
+$ static-sql-lineage trace --dialect tsql dbo.vDoc.Blob tests/scripts/tsql/18-storage.sql
+[dbo].[Doc].[Blob] -> dbo.vDoc.[Blob] copy tests/scripts/tsql/18-storage.sql:16:1

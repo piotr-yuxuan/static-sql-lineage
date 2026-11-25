@@ -1,0 +1,10 @@
+$ static-sql-lineage outline --dialect tsql tests/scripts/tsql/lineage/3-views.sql:3:1 tests/scripts/tsql/lineage
+id: tests/scripts/tsql/lineage/3-views.sql:3:1
+target: dbo.vBase
+mode: replace
+place: 3:1
+columns: id, Total
+edge: [dbo].[Fact].[Id] -> dbo.vBase.id copy
+edge: [dbo].[Fact].[Amount] -> dbo.vBase.Total copy
+clause: SELECT 3:26
+clause: FROM 3:53

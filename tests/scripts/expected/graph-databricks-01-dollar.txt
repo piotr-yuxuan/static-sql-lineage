@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect databricks tests/scripts/databricks/01-dollar.sql
 tests/scripts/databricks/01-dollar.sql:5:1 v <- s
 tests/scripts/databricks/01-dollar.sql:7:1 w <- v
 skipped: 1

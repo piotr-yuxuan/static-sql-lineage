@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect redshift tests/scripts/redshift/01-dollar.sql
 tests/scripts/redshift/01-dollar.sql:8:1 v <- s
 tests/scripts/redshift/01-dollar.sql:10:1 w <- v
 skipped: 2

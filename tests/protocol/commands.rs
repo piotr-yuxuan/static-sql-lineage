@@ -8,14 +8,23 @@ use std::process::Output;
 
 use serde_json::{Value, json};
 
-use super::{assert_refused, assert_usage_error, command, lacks, lines, printed_json, read, run, stdout};
+use super::{assert_refused, assert_usage_error, command, lacks, lines, printed_json, read, stdout};
 
-/// Asserts that the command line `line`, its arguments split at spaces, prints from the
-/// repository's root the file `name` of `tests/scripts/expected/`, byte for byte.
+/// Asserts that the command of the transcript `name` of `tests/scripts/expected/`, its
+/// arguments split at spaces, prints from the repository's root what follows it there, byte
+/// for byte.
 #[track_caller]
-fn prints(name: &str, line: &str) {
-    let expected = read(&format!("tests/scripts/expected/{name}.txt"));
-    assert_eq!(stdout(&line.split_whitespace().collect::<Vec<_>>()), expected, "{line}");
+fn prints(name: &str) {
+    let file = read(&format!("tests/scripts/expected/{name}.txt"));
+    let (command, expected) = transcript(&file).expect("the file is a transcript");
+    assert_eq!(stdout(&command.split_whitespace().collect::<Vec<_>>()), expected, "{command}");
+}
+
+/// The command of the transcript `text`, the arguments after `$ static-sql-lineage ` on its
+/// first line, and what follows that line; none for a text whose first line is no command.
+fn transcript(text: &str) -> Option<(&str, &str)> {
+    let (first, printed) = text.split_once('\n')?;
+    Some((first.strip_prefix("$ static-sql-lineage ")?, printed))
 }
 
 /// The binary's output for `graph` and `arguments`, run from the repository's root.
@@ -48,7 +57,7 @@ cases! {
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
     };
     an_unknown_command_is_refused:
-        assert_usage_error(&run(&["migrate", "--dialect", "tsql", "tests/scripts/tsql"]), "migrate");
+        assert_usage_error(&command(&["migrate", "--dialect", "tsql", "tests/scripts/tsql"]), "migrate");
     an_unknown_option_is_refused: {
         assert_usage_error(&graph(&["--dialect", "tsql", "--verbose", "tests/scripts/tsql"]), "--verbose");
         assert!(!tsql(&["tests/scripts/tsql"]).is_empty());
@@ -63,105 +72,83 @@ cases! {
         assert!(!tsql(&["tests/scripts/tsql/02-views.sql"]).is_empty());
     };
     // `go`, `GO 2` and `GO` end batches; `GO` in a comment or a string, and `[GO]`, do not.
-    tsql_batches_end_at_go: prints("graph-05-load", "graph --dialect tsql tests/scripts/tsql/05-load.sql");
-    tsql_sqlcmd_lines_end_a_batch:
-        prints("graph-06-sqlpackage", "graph --dialect tsql tests/scripts/tsql/06-sqlpackage.sql");
+    // The `INSERT` grows over the line of its `SELECT`, which starts a line.
+    tsql_batches_end_at_go: prints("graph-05-load");
+    tsql_sqlcmd_lines_end_a_batch: prints("graph-06-sqlpackage");
     // `COMMIT` and `WAITFOR` start statements: the `INSERT`s before them end there.
-    tsql_transaction_words_end_a_statement:
-        prints("graph-15-transaction", "graph --dialect tsql tests/scripts/tsql/15-transaction.sql");
+    tsql_transaction_words_end_a_statement: prints("graph-15-transaction");
     // polyglot stops after the `IF`'s condition, at `INSERT` or `ROLLBACK`: each a statement of
     // its own, the conditions and the `ROLLBACK` skipped. The `INSERT` of `dbo.t` reads `dbo.d`.
-    tsql_a_statement_after_an_if_on_its_line_is_read:
-        prints("graph-16-if-on-a-line", "graph --dialect tsql tests/scripts/tsql/16-if-on-a-line.sql");
+    tsql_a_statement_after_an_if_on_its_line_is_read: prints("graph-16-if-on-a-line");
     // So is a procedure, whose `INSERT` is no write of the script.
-    tsql_a_view_is_read_whole: prints("graph-07-routines", "graph --dialect tsql tests/scripts/tsql/07-routines.sql");
+    tsql_a_view_is_read_whole: prints("graph-07-routines");
     // `USE`, two `SET`s, the existence test and its `DROP VIEW`: four statements skipped, and
     // `USE`, which sets the defaults.
-    tsql_preamble_is_skipped: prints("graph-02-views", "graph --dialect tsql tests/scripts/tsql/02-views.sql");
+    tsql_preamble_is_skipped: prints("graph-02-views");
     // The write is named by its `EXEC`'s place.
-    tsql_existence_check_is_read:
-        prints("graph-03-existence-check", "graph --dialect tsql tests/scripts/tsql/03-existence-check.sql");
+    tsql_existence_check_is_read: prints("graph-03-existence-check");
     // `EXEC` of a string or a variable, `sp_executesql` of a variable or of a string that
     // does not parse; `DECLARE` and a procedure's `EXEC` skipped.
-    other_dynamic_sql_is_not_read: prints("graph-04-dynamic", "graph --dialect tsql tests/scripts/tsql/04-dynamic.sql");
+    other_dynamic_sql_is_not_read: prints("graph-04-dynamic");
+    // A UTF-8 BOM, UTF-16 LE and UTF-16 BE, each with CRLF: one text, one place for each
+    // token, in characters past an accented letter and before CRLF, the BOM not counted.
+    a_bom_and_utf16_are_decoded: {
+        prints("graph-11-utf8-bom");
+        prints("graph-12-utf16le");
+        prints("graph-13-utf16be");
+    };
     // Windows-1252, with no BOM, is not UTF-8: reported by its path, and the others read.
-    a_file_that_does_not_decode_is_reported:
-        prints("graph-14-cp1252-02-views", "graph --dialect tsql tests/scripts/tsql/14-cp1252.sql \
-            tests/scripts/tsql/02-views.sql");
+    a_file_that_does_not_decode_is_reported: prints("graph-14-cp1252-02-views");
     // Its files ending `.sql`, in any case, at any depth, sorted by path; `notes.txt` is not
     // read.
-    a_directory_is_read_in_path_order: prints("graph-order", "graph --dialect tsql tests/scripts/tsql/order");
+    a_directory_is_read_in_path_order: prints("graph-order");
     // `USE SCHEMA SALES.MART` sets both defaults; `USE SCHEMA STAGE` keeps the database.
-    snowflake_use_of_a_qualified_schema:
-        prints("graph-snowflake-02-use", "graph --dialect snowflake tests/scripts/snowflake/02-use.sql");
+    snowflake_use_of_a_qualified_schema: prints("graph-snowflake-02-use");
     // A routine's dollar-quoted body holds `;` and splits nothing; it, `DO` and `SET` are skipped.
-    postgresql_dollar_quotes_split_nothing:
-        prints("graph-postgresql-01-dollar", "graph --dialect postgresql tests/scripts/postgresql/01-dollar.sql");
-    redshift_dollar_quotes_split_nothing:
-        prints("graph-redshift-01-dollar", "graph --dialect redshift tests/scripts/redshift/01-dollar.sql");
-    databricks_dollar_quotes_split_nothing:
-        prints("graph-databricks-01-dollar", "graph --dialect databricks tests/scripts/databricks/01-dollar.sql");
+    postgresql_dollar_quotes_split_nothing: prints("graph-postgresql-01-dollar");
+    redshift_dollar_quotes_split_nothing: prints("graph-redshift-01-dollar");
+    databricks_dollar_quotes_split_nothing: prints("graph-databricks-01-dollar");
     // `USE CATALOG sales` sets the schema `default`; `USE mart` and `USE DATABASE stage` set
     // the schema; `USE SCHEMA crm.core` sets both.
-    databricks_use_sets_the_schema:
-        prints("graph-databricks-03-use", "graph --dialect databricks tests/scripts/databricks/03-use.sql");
+    databricks_use_sets_the_schema: prints("graph-databricks-03-use");
     // A `MERGE` of `*`, which answers refuse, still reads its sources and writes its target.
-    graph_orders_a_merge_of_a_star:
-        prints("graph-databricks-04-merge", "graph --dialect databricks tests/scripts/databricks/04-merge.sql");
+    graph_orders_a_merge_of_a_star: prints("graph-databricks-04-merge");
     // Given in the order b, a, c, d: the writes of `dbo.Fact`, the cycle, the two writes of
     // `vA`, then `vB`, which reads `vA`, then `vC`, which reads `dbo.Fact` and `vB`.
-    graph_orders_writes_after_what_they_read:
-        prints("graph-migration-b-a-c-d", "graph --dialect tsql tests/scripts/tsql/migration/b-views.sql \
-            tests/scripts/tsql/migration/a-load.sql tests/scripts/tsql/migration/c-base.sql \
-            tests/scripts/tsql/migration/d-redefine.sql");
+    graph_orders_writes_after_what_they_read: prints("graph-migration-b-a-c-d");
     // No catalog knows `dbo.Fact`: the `DELETE` still reads `vGone` in its condition.
-    graph_orders_a_contribute_write_to_an_undeclared_target:
-        prints("graph-migration-g-undeclared", "graph --dialect tsql tests/scripts/tsql/migration/g-undeclared.sql");
+    graph_orders_a_contribute_write_to_an_undeclared_target: prints("graph-migration-g-undeclared");
     // `vY` and `vZ` are free first: `vY`, the earlier, comes first, then `vZ`, then `vX`.
-    graph_keeps_reading_order_where_free:
-        prints("graph-migration-e-free", "graph --dialect tsql tests/scripts/tsql/migration/e-free.sql");
+    graph_keeps_reading_order_where_free: prints("graph-migration-e-free");
     // The `UPDATE` reads its own target and waits only on the `SELECT ... INTO` before it;
     // the `INSERT` waits on both; the view that reads `dbo.Fact`, on all three.
-    graph_puts_a_write_of_its_own_target_after_earlier_ones:
-        prints("graph-migration-f-own", "graph --dialect tsql tests/scripts/tsql/migration/f-own.sql");
+    graph_puts_a_write_of_its_own_target_after_earlier_ones: prints("graph-migration-f-own");
     // `vA` is created, then created or altered: reported, and `vB` comes after both.
-    graph_reports_a_target_replaced_twice:
-        prints("graph-migration-b-c-d", "graph --dialect tsql tests/scripts/tsql/migration/b-views.sql \
-            tests/scripts/tsql/migration/c-base.sql tests/scripts/tsql/migration/d-redefine.sql");
+    graph_reports_a_target_replaced_twice: prints("graph-migration-b-c-d");
     // From the view to the table that the loads fill, then to the tables that they read, which
     // no write fills; the refused load of the table is met on the way.
-    trace_follows_edges_to_base_relations:
-        prints("trace-lineage-vBase-Total", "trace --dialect tsql dbo.vBase.Total tests/scripts/tsql/lineage");
+    trace_follows_edges_to_base_relations: prints("trace-lineage-vBase-Total");
     // Each load reads the other's target: the walk comes back to its column, and stops.
-    trace_stops_at_a_cycle:
-        prints("trace-19-cycle", "trace --dialect tsql dbo.Loop1.Id tests/scripts/tsql/19-cycle.sql");
+    trace_stops_at_a_cycle: prints("trace-19-cycle");
     // `vShared` is reached through `vLeft` and through `vRight`; what it reads is listed once,
     // and no cycle.
-    trace_lists_a_shared_column_once:
-        prints("trace-20-diamond", "trace --dialect tsql dbo.vTop.Id tests/scripts/tsql/20-diamond.sql");
+    trace_lists_a_shared_column_once: prints("trace-20-diamond");
     // From a table that a load reads to the table that it fills, then to the views over it;
     // the refused load reads the table too.
-    uses_follows_edges_downstream:
-        prints("uses-lineage-Stage-Amount", "uses --dialect tsql dbo.Stage.Amount tests/scripts/tsql/lineage");
+    uses_follows_edges_downstream: prints("uses-lineage-Stage-Amount");
     // No write fills `dbo.Stage2`: its column is no answer's output and no edge's child, only
     // the parent of its readers' edges.
-    uses_of_a_base_column_known_only_by_its_readers:
-        prints("uses-lineage-Stage2-Amount", "uses --dialect tsql dbo.Stage2.Amount tests/scripts/tsql/lineage");
+    uses_of_a_base_column_known_only_by_its_readers: prints("uses-lineage-Stage2-Amount");
     // SSMS's table script: two `SET`s, `ALTER TABLE` and an extended property's `EXEC`; its
     // `USE` sets the defaults, and its `CREATE TABLE` declares. Counted across files.
     graph_counts_skipped_statements: {
-        let (tables, views) = ("tests/scripts/tsql/01-tables.sql", "tests/scripts/tsql/02-views.sql");
-        assert_eq!(tsql(&[tables]), ["skipped: 4"]);
-        let both = [format!("{views}:12:1 [dbo].[vCustomer] <- [dbo].[Customer]"), "skipped: 8".to_string()];
-        assert_eq!(tsql(&[tables, views]), both);
+        prints("graph-01-tables");
+        prints("graph-01-tables-02-views");
     };
     // The view's `*` reads the declared columns, the column `sparse` and `[Blob]` among them.
     declarations_feed_the_catalog: {
-        let path = "tests/scripts/tsql/18-storage.sql";
-        let sparse = format!("[dbo].[Doc].sparse -> dbo.vDoc.sparse copy {path}:16:1");
-        assert_eq!(walked("trace", "dbo.vDoc.sparse", &[path]), [sparse]);
-        let blob = format!("[dbo].[Doc].[Blob] -> dbo.vDoc.[Blob] copy {path}:16:1");
-        assert_eq!(walked("trace", "dbo.vDoc.Blob", &[path]), [blob]);
+        prints("trace-18-storage-vDoc-sparse");
+        prints("trace-18-storage-vDoc-Blob");
     };
     // No declaration, edge or output names these; nor does an argument with no relation.
     an_unknown_column_is_refused: {
@@ -189,22 +176,7 @@ fn statements_split_at_semicolons() {
     assert!(snowflake[3].starts_with(&format!("refused: {path}:12:1 ")), "{snowflake:?}");
     assert_eq!(snowflake[4..], ["skipped: 1"]);
     // The declaration of `raw_orders` is not skipped; its `INSERT ... VALUES` is.
-    let duckdb = printed(&["--dialect", "duckdb", "tests/scripts/duckdb/01-fixture.sql"]);
-    let path = "tests/scripts/duckdb/01-fixture.sql";
-    let writes = [format!("{path}:3:1 stg_orders <- raw_orders"), format!("{path}:4:1 orders <- stg_orders")];
-    assert_eq!(duckdb, [writes.as_slice(), &["skipped: 1".to_string()]].concat());
-}
-
-#[test]
-fn tsql_statements_without_semicolons_are_split() {
-    // The `INSERT` grows over the line of its `SELECT`, which starts a line.
-    let path = "tests/scripts/tsql/05-load.sql";
-    let expected = [
-        format!("{path}:5:1 dbo.Fact <- dbo.Stage"),
-        format!("{path}:7:1 dbo.Fact <- dbo.Fact"),
-        format!("{path}:8:3 dbo.Fact <- dbo.Fact"),
-    ];
-    assert_eq!(tsql(&[path])[..3], expected);
+    prints("graph-duckdb-01-fixture");
 }
 
 #[test]
@@ -224,29 +196,12 @@ fn a_refused_write_is_reported_with_its_place() {
 }
 
 #[test]
-fn a_bom_and_utf16_are_decoded() {
-    // A UTF-8 BOM, UTF-16 LE and UTF-16 BE, each with CRLF: one text, one place for each
-    // token, in characters, the BOM not counted.
-    for name in ["11-utf8-bom", "12-utf16le", "13-utf16be"] {
-        let path = format!("tests/scripts/tsql/{name}.sql");
-        let expected = [
-            format!("{path}:1:1 [dbo].[vCafé] <- [dbo].[Thé]"),
-            format!("{path}:5:11 [dbo].[Tarte] <- [dbo].[vCafé]"),
-            "skipped: 0".to_string(),
-        ];
-        assert_eq!(tsql(&[&path]), expected);
-    }
-}
-
-#[test]
 fn write_ids_are_their_places() {
     // The path as given, then the line and the column of the write's first token, from 1:
-    // past an indent, and in characters, past an accented letter, before CRLF.
+    // past an indent.
     let path = "./tests/scripts/tsql/05-load.sql";
     let places = ["5:1", "7:1", "8:3", "11:1", "15:1"].map(|place| format!("{path}:{place}"));
     assert_eq!(ids(&tsql(&[path])), places);
-    let path = "tests/scripts/tsql/11-utf8-bom.sql";
-    assert_eq!(ids(&tsql(&[path])), [format!("{path}:1:1"), format!("{path}:5:11")]);
 }
 
 #[cfg(unix)]
@@ -293,20 +248,20 @@ fn a_database_option_without_a_schema_takes_the_usual_one() {
     }
 }
 
-#[test]
-fn use_changes_the_defaults() {
-    // After `USE [Sales]`, `dbo.vBase` is the view that `vTop` reads, written before it.
+/// Asserts that `graph` orders the write at line `earlier` of the script of `USE` before
+/// the one at line `later`.
+#[track_caller]
+fn used_before(earlier: usize, later: usize) {
     let path = "tests/scripts/tsql/09-use.sql";
     let found = ordered("tsql", &[], &[path]);
-    assert!(place(&found, &format!("{path}:9:1")) < place(&found, &format!("{path}:3:1")), "{found:?}");
+    assert!(place(&found, &format!("{path}:{earlier}:1")) < place(&found, &format!("{path}:{later}:1")), "{found:?}");
 }
 
-#[test]
-fn use_without_a_schema_takes_the_usual_one() {
+cases! {
+    // After `USE [Sales]`, `dbo.vBase` is the view that `vTop` reads, written before it.
+    use_changes_the_defaults: used_before(9, 3);
     // After `USE [Sales]`, `vPlain` is `Sales.dbo.vPlain`, which `vBare` reads.
-    let path = "tests/scripts/tsql/09-use.sql";
-    let found = ordered("tsql", &[], &[path]);
-    assert!(place(&found, &format!("{path}:11:1")) < place(&found, &format!("{path}:5:1")), "{found:?}");
+    use_without_a_schema_takes_the_usual_one: used_before(11, 5);
 }
 
 /// The path of the migration script `name`.
@@ -413,9 +368,9 @@ fn walked(name: &str, argument: &str, paths: &[&str]) -> Vec<String> {
     lines(&[&[name, "--dialect", "tsql", argument], paths].concat())
 }
 
-/// What `trace` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
-fn traced(column: &str, paths: &[&str]) -> Value {
-    printed_json(&[&["trace", "--dialect", "tsql", "--json", column], paths].concat())
+/// What the command `name` gives for `column` in the scripts at `paths` in T-SQL, as JSON.
+fn traced(name: &str, column: &str, paths: &[&str]) -> Value {
+    printed_json(&[&[name, "--dialect", "tsql", "--json", column], paths].concat())
 }
 
 /// The scripts of a load and its views: three tables, four loads of `dbo.Fact`, the last
@@ -435,7 +390,7 @@ fn view(line: usize) -> String {
 #[test]
 fn trace_unites_the_edges_of_several_writes() {
     // The first load copies `Amount`, the second derives it: one edge, a copy, of both (R12).
-    let found = traced("dbo.Fact.Amount", &[LINEAGE]);
+    let found = traced("trace", "dbo.Fact.Amount", &[LINEAGE]);
     let edge = json!({
         "parent": {"relation": "dbo.Stage", "column": "Amount"},
         "child": {"relation": "dbo.Fact", "column": "[Amount]"},
@@ -449,7 +404,7 @@ fn trace_unites_the_edges_of_several_writes() {
 #[test]
 fn trace_meets_a_declaration_spelled_otherwise() {
     // The view reads `[dbo].[Fact]`, as declared; the loads write `dbo.Fact`: one relation.
-    let found = traced("dbo.vBase.Total", &[LINEAGE]);
+    let found = traced("trace", "dbo.vBase.Total", &[LINEAGE]);
     assert_eq!(found["edges"][0]["parent"], json!({"relation": "[dbo].[Fact]", "column": "[Amount]"}));
     assert_eq!(found["edges"][1]["child"], json!({"relation": "dbo.Fact", "column": "[Amount]"}));
     assert_eq!(found["edges"][1]["depth"], 2);
@@ -491,18 +446,7 @@ fn trace_reads_its_argument_under_the_dialect() {
 #[test]
 fn outline_gives_a_write_in_brief() {
     // A replace write and its answer; a contribute write, refused, its detail text for a person.
-    let expected = [
-        format!("id: {}", view(3)),
-        "target: dbo.vBase".to_string(),
-        "mode: replace".to_string(),
-        "place: 3:1".to_string(),
-        "columns: id, Total".to_string(),
-        "edge: [dbo].[Fact].[Id] -> dbo.vBase.id copy".to_string(),
-        "edge: [dbo].[Fact].[Amount] -> dbo.vBase.Total copy".to_string(),
-        "clause: SELECT 3:26".to_string(),
-        "clause: FROM 3:53".to_string(),
-    ];
-    assert_eq!(walked("outline", &view(3), &[LINEAGE]), expected);
+    prints("outline-lineage-vBase");
     let refused = walked("outline", &load(4), &[LINEAGE]);
     let fields = [format!("id: {}", load(4)), "target: dbo.Fact".to_string(), "mode: contribute".to_string()];
     assert_eq!(refused[..3], fields);
@@ -585,7 +529,7 @@ fn uses_reports_the_scripts_refused_writes() {
         let found = walked(name, "dbo.O.Id", &[path]);
         assert!(matches!(found.as_slice(), [line] if line.starts_with(&format!("refused: {path}:2:1 "))), "{found:?}");
     }
-    let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
+    let walk = traced("uses", "dbo.O.Id", &[path]);
     let refused = &walk["refusals"][0];
     assert_eq!((&walk["edges"], &refused["place"]), (&json!([]), &json!(format!("{path}:2:1"))));
     assert!(refused["detail"].is_string() && refused.get("write").is_none(), "{walk}");
@@ -596,12 +540,10 @@ fn uses_reports_the_scripts_refused_writes() {
 fn walks_report_dynamic_sql_not_read() {
     // The `EXEC` of a string may read `dbo.O` or write `dbo.vO`: both walks list it after their
     // edges, and the JSON in `not_read`.
+    prints("uses-24-dynamic-writer-O-Id");
+    prints("trace-24-dynamic-writer-vO-Id");
     let path = "tests/scripts/tsql/24-dynamic-writer.sql";
-    let edge = format!("dbo.O.Id -> dbo.vO.Id copy {path}:3:1");
-    let expected = [edge, format!("not_read: {path}:2:1 dynamic SQL")];
-    assert_eq!(walked("uses", "dbo.O.Id", &[path]), expected);
-    assert_eq!(walked("trace", "dbo.vO.Id", &[path]), expected);
-    let walk = printed_json(&["uses", "--dialect", "tsql", "--json", "dbo.O.Id", path]);
+    let walk = traced("uses", "dbo.O.Id", &[path]);
     assert_eq!(walk["not_read"], json!([{"place": format!("{path}:2:1"), "detail": "dynamic SQL"}]));
     assert_eq!(walk["refusals"], json!([]));
 }
@@ -613,12 +555,10 @@ fn readme_shows_what_the_binary_prints() {
     let readme = read("README.md");
     let mut shown = Vec::new();
     for block in readme.split("```console\n").skip(1) {
-        let mut block = block.split("```").next().expect("a console block ends").lines();
-        let Some(command) = block.next().and_then(|line| line.strip_prefix("$ static-sql-lineage ")) else {
-            continue;
-        };
+        let block = block.split("```").next().expect("a console block ends");
+        let Some((command, printed)) = transcript(block) else { continue };
         let arguments: Vec<&str> = command.split_whitespace().collect();
-        assert_eq!(lines(&arguments), block.collect::<Vec<_>>(), "{command}");
+        assert_eq!(lines(&arguments), printed.lines().collect::<Vec<_>>(), "{command}");
         shown.extend(arguments.first().copied());
     }
     for verb in ["graph", "trace", "uses", "outline"] {

@@ -1,0 +1,4 @@
+$ static-sql-lineage graph --dialect duckdb tests/scripts/duckdb/01-fixture.sql
+tests/scripts/duckdb/01-fixture.sql:3:1 stg_orders <- raw_orders
+tests/scripts/duckdb/01-fixture.sql:4:1 orders <- stg_orders
+skipped: 1

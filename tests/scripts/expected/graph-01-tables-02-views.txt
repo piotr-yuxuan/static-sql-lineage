@@ -1,0 +1,3 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/01-tables.sql tests/scripts/tsql/02-views.sql
+tests/scripts/tsql/02-views.sql:12:1 [dbo].[vCustomer] <- [dbo].[Customer]
+skipped: 8

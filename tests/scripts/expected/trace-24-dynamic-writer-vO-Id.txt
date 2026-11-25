@@ -1,0 +1,3 @@
+$ static-sql-lineage trace --dialect tsql dbo.vO.Id tests/scripts/tsql/24-dynamic-writer.sql
+dbo.O.Id -> dbo.vO.Id copy tests/scripts/tsql/24-dynamic-writer.sql:3:1
+not_read: tests/scripts/tsql/24-dynamic-writer.sql:2:1 dynamic SQL
