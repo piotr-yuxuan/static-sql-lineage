@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/migration/f-own.sql
 tests/scripts/tsql/migration/f-own.sql:3:1 dbo.Fact <- dbo.Stage
 tests/scripts/tsql/migration/f-own.sql:4:1 dbo.Fact <- dbo.Fact
 tests/scripts/tsql/migration/f-own.sql:5:1 dbo.Fact <- dbo.Stage2

@@ -1,2 +1,3 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/03-existence-check.sql
 tests/scripts/tsql/03-existence-check.sql:9:1 [dbo].[vOpen] <- [dbo].[Orders]
 skipped: 3

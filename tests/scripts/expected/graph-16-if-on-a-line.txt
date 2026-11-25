@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect tsql tests/scripts/tsql/16-if-on-a-line.sql
 tests/scripts/tsql/16-if-on-a-line.sql:2:1 dbo.a <- dbo.a
 tests/scripts/tsql/16-if-on-a-line.sql:4:1 dbo.c <- dbo.a
 tests/scripts/tsql/16-if-on-a-line.sql:5:1 dbo.d <- dbo.c

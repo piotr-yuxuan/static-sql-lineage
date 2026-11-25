@@ -1,3 +1,4 @@
+$ static-sql-lineage graph --dialect databricks tests/scripts/databricks/03-use.sql
 tests/scripts/databricks/03-use.sql:4:1 sales.mart.v_base <- sales.raw.orders
 tests/scripts/databricks/03-use.sql:3:1 v_top <- v_base
 tests/scripts/databricks/03-use.sql:7:1 v_src <- sales.raw.orders

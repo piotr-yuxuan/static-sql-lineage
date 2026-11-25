@@ -10,12 +10,14 @@ use serde_json::{Value, json};
 
 use super::{assert_refused, assert_usage_error, command, lacks, lines, printed_json, read, stdout};
 
-/// Asserts that the command line `line`, its arguments split at spaces, prints from the
-/// repository's root the file `name` of `tests/scripts/expected/`, byte for byte.
+/// Asserts that the command of the transcript `name` of `tests/scripts/expected/`, its
+/// arguments split at spaces, prints from the repository's root what follows it there, byte
+/// for byte.
 #[track_caller]
-fn prints(name: &str, line: &str) {
-    let expected = read(&format!("tests/scripts/expected/{name}.txt"));
-    assert_eq!(stdout(&line.split_whitespace().collect::<Vec<_>>()), expected, "{line}");
+fn prints(name: &str) {
+    let file = read(&format!("tests/scripts/expected/{name}.txt"));
+    let (command, expected) = transcript(&file).expect("the file is a transcript");
+    assert_eq!(stdout(&command.split_whitespace().collect::<Vec<_>>()), expected, "{command}");
 }
 
 /// The command of the transcript `text`, the arguments after `$ static-sql-lineage ` on its
@@ -70,90 +72,65 @@ cases! {
         assert!(!tsql(&["tests/scripts/tsql/02-views.sql"]).is_empty());
     };
     // `go`, `GO 2` and `GO` end batches; `GO` in a comment or a string, and `[GO]`, do not.
-    tsql_batches_end_at_go: prints("graph-05-load", "graph --dialect tsql tests/scripts/tsql/05-load.sql");
-    tsql_sqlcmd_lines_end_a_batch:
-        prints("graph-06-sqlpackage", "graph --dialect tsql tests/scripts/tsql/06-sqlpackage.sql");
+    tsql_batches_end_at_go: prints("graph-05-load");
+    tsql_sqlcmd_lines_end_a_batch: prints("graph-06-sqlpackage");
     // `COMMIT` and `WAITFOR` start statements: the `INSERT`s before them end there.
-    tsql_transaction_words_end_a_statement:
-        prints("graph-15-transaction", "graph --dialect tsql tests/scripts/tsql/15-transaction.sql");
+    tsql_transaction_words_end_a_statement: prints("graph-15-transaction");
     // polyglot stops after the `IF`'s condition, at `INSERT` or `ROLLBACK`: each a statement of
     // its own, the conditions and the `ROLLBACK` skipped. The `INSERT` of `dbo.t` reads `dbo.d`.
-    tsql_a_statement_after_an_if_on_its_line_is_read:
-        prints("graph-16-if-on-a-line", "graph --dialect tsql tests/scripts/tsql/16-if-on-a-line.sql");
+    tsql_a_statement_after_an_if_on_its_line_is_read: prints("graph-16-if-on-a-line");
     // So is a procedure, whose `INSERT` is no write of the script.
-    tsql_a_view_is_read_whole: prints("graph-07-routines", "graph --dialect tsql tests/scripts/tsql/07-routines.sql");
+    tsql_a_view_is_read_whole: prints("graph-07-routines");
     // `USE`, two `SET`s, the existence test and its `DROP VIEW`: four statements skipped, and
     // `USE`, which sets the defaults.
-    tsql_preamble_is_skipped: prints("graph-02-views", "graph --dialect tsql tests/scripts/tsql/02-views.sql");
+    tsql_preamble_is_skipped: prints("graph-02-views");
     // The write is named by its `EXEC`'s place.
-    tsql_existence_check_is_read:
-        prints("graph-03-existence-check", "graph --dialect tsql tests/scripts/tsql/03-existence-check.sql");
+    tsql_existence_check_is_read: prints("graph-03-existence-check");
     // `EXEC` of a string or a variable, `sp_executesql` of a variable or of a string that
     // does not parse; `DECLARE` and a procedure's `EXEC` skipped.
-    other_dynamic_sql_is_not_read: prints("graph-04-dynamic", "graph --dialect tsql tests/scripts/tsql/04-dynamic.sql");
+    other_dynamic_sql_is_not_read: prints("graph-04-dynamic");
     // Windows-1252, with no BOM, is not UTF-8: reported by its path, and the others read.
-    a_file_that_does_not_decode_is_reported:
-        prints("graph-14-cp1252-02-views", "graph --dialect tsql tests/scripts/tsql/14-cp1252.sql \
-            tests/scripts/tsql/02-views.sql");
+    a_file_that_does_not_decode_is_reported: prints("graph-14-cp1252-02-views");
     // Its files ending `.sql`, in any case, at any depth, sorted by path; `notes.txt` is not
     // read.
-    a_directory_is_read_in_path_order: prints("graph-order", "graph --dialect tsql tests/scripts/tsql/order");
+    a_directory_is_read_in_path_order: prints("graph-order");
     // `USE SCHEMA SALES.MART` sets both defaults; `USE SCHEMA STAGE` keeps the database.
-    snowflake_use_of_a_qualified_schema:
-        prints("graph-snowflake-02-use", "graph --dialect snowflake tests/scripts/snowflake/02-use.sql");
+    snowflake_use_of_a_qualified_schema: prints("graph-snowflake-02-use");
     // A routine's dollar-quoted body holds `;` and splits nothing; it, `DO` and `SET` are skipped.
-    postgresql_dollar_quotes_split_nothing:
-        prints("graph-postgresql-01-dollar", "graph --dialect postgresql tests/scripts/postgresql/01-dollar.sql");
-    redshift_dollar_quotes_split_nothing:
-        prints("graph-redshift-01-dollar", "graph --dialect redshift tests/scripts/redshift/01-dollar.sql");
-    databricks_dollar_quotes_split_nothing:
-        prints("graph-databricks-01-dollar", "graph --dialect databricks tests/scripts/databricks/01-dollar.sql");
+    postgresql_dollar_quotes_split_nothing: prints("graph-postgresql-01-dollar");
+    redshift_dollar_quotes_split_nothing: prints("graph-redshift-01-dollar");
+    databricks_dollar_quotes_split_nothing: prints("graph-databricks-01-dollar");
     // `USE CATALOG sales` sets the schema `default`; `USE mart` and `USE DATABASE stage` set
     // the schema; `USE SCHEMA crm.core` sets both.
-    databricks_use_sets_the_schema:
-        prints("graph-databricks-03-use", "graph --dialect databricks tests/scripts/databricks/03-use.sql");
+    databricks_use_sets_the_schema: prints("graph-databricks-03-use");
     // A `MERGE` of `*`, which answers refuse, still reads its sources and writes its target.
-    graph_orders_a_merge_of_a_star:
-        prints("graph-databricks-04-merge", "graph --dialect databricks tests/scripts/databricks/04-merge.sql");
+    graph_orders_a_merge_of_a_star: prints("graph-databricks-04-merge");
     // Given in the order b, a, c, d: the writes of `dbo.Fact`, the cycle, the two writes of
     // `vA`, then `vB`, which reads `vA`, then `vC`, which reads `dbo.Fact` and `vB`.
-    graph_orders_writes_after_what_they_read:
-        prints("graph-migration-b-a-c-d", "graph --dialect tsql tests/scripts/tsql/migration/b-views.sql \
-            tests/scripts/tsql/migration/a-load.sql tests/scripts/tsql/migration/c-base.sql \
-            tests/scripts/tsql/migration/d-redefine.sql");
+    graph_orders_writes_after_what_they_read: prints("graph-migration-b-a-c-d");
     // No catalog knows `dbo.Fact`: the `DELETE` still reads `vGone` in its condition.
-    graph_orders_a_contribute_write_to_an_undeclared_target:
-        prints("graph-migration-g-undeclared", "graph --dialect tsql tests/scripts/tsql/migration/g-undeclared.sql");
+    graph_orders_a_contribute_write_to_an_undeclared_target: prints("graph-migration-g-undeclared");
     // `vY` and `vZ` are free first: `vY`, the earlier, comes first, then `vZ`, then `vX`.
-    graph_keeps_reading_order_where_free:
-        prints("graph-migration-e-free", "graph --dialect tsql tests/scripts/tsql/migration/e-free.sql");
+    graph_keeps_reading_order_where_free: prints("graph-migration-e-free");
     // The `UPDATE` reads its own target and waits only on the `SELECT ... INTO` before it;
     // the `INSERT` waits on both; the view that reads `dbo.Fact`, on all three.
-    graph_puts_a_write_of_its_own_target_after_earlier_ones:
-        prints("graph-migration-f-own", "graph --dialect tsql tests/scripts/tsql/migration/f-own.sql");
+    graph_puts_a_write_of_its_own_target_after_earlier_ones: prints("graph-migration-f-own");
     // `vA` is created, then created or altered: reported, and `vB` comes after both.
-    graph_reports_a_target_replaced_twice:
-        prints("graph-migration-b-c-d", "graph --dialect tsql tests/scripts/tsql/migration/b-views.sql \
-            tests/scripts/tsql/migration/c-base.sql tests/scripts/tsql/migration/d-redefine.sql");
+    graph_reports_a_target_replaced_twice: prints("graph-migration-b-c-d");
     // From the view to the table that the loads fill, then to the tables that they read, which
     // no write fills; the refused load of the table is met on the way.
-    trace_follows_edges_to_base_relations:
-        prints("trace-lineage-vBase-Total", "trace --dialect tsql dbo.vBase.Total tests/scripts/tsql/lineage");
+    trace_follows_edges_to_base_relations: prints("trace-lineage-vBase-Total");
     // Each load reads the other's target: the walk comes back to its column, and stops.
-    trace_stops_at_a_cycle:
-        prints("trace-19-cycle", "trace --dialect tsql dbo.Loop1.Id tests/scripts/tsql/19-cycle.sql");
+    trace_stops_at_a_cycle: prints("trace-19-cycle");
     // `vShared` is reached through `vLeft` and through `vRight`; what it reads is listed once,
     // and no cycle.
-    trace_lists_a_shared_column_once:
-        prints("trace-20-diamond", "trace --dialect tsql dbo.vTop.Id tests/scripts/tsql/20-diamond.sql");
+    trace_lists_a_shared_column_once: prints("trace-20-diamond");
     // From a table that a load reads to the table that it fills, then to the views over it;
     // the refused load reads the table too.
-    uses_follows_edges_downstream:
-        prints("uses-lineage-Stage-Amount", "uses --dialect tsql dbo.Stage.Amount tests/scripts/tsql/lineage");
+    uses_follows_edges_downstream: prints("uses-lineage-Stage-Amount");
     // No write fills `dbo.Stage2`: its column is no answer's output and no edge's child, only
     // the parent of its readers' edges.
-    uses_of_a_base_column_known_only_by_its_readers:
-        prints("uses-lineage-Stage2-Amount", "uses --dialect tsql dbo.Stage2.Amount tests/scripts/tsql/lineage");
+    uses_of_a_base_column_known_only_by_its_readers: prints("uses-lineage-Stage2-Amount");
     // SSMS's table script: two `SET`s, `ALTER TABLE` and an extended property's `EXEC`; its
     // `USE` sets the defaults, and its `CREATE TABLE` declares. Counted across files.
     graph_counts_skipped_statements: {

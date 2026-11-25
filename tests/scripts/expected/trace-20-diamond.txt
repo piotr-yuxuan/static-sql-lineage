@@ -1,3 +1,4 @@
+$ static-sql-lineage trace --dialect tsql dbo.vTop.Id tests/scripts/tsql/20-diamond.sql
 dbo.vLeft.Id -> dbo.vTop.Id copy tests/scripts/tsql/20-diamond.sql:9:1
 dbo.vRight.Id -> dbo.vTop.Id rows tests/scripts/tsql/20-diamond.sql:9:1
   dbo.vShared.Id -> dbo.vLeft.Id copy tests/scripts/tsql/20-diamond.sql:5:1
