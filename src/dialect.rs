@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: EUPL-1.2
 //! The dialects of this build.
 
-use polyglot_sql::DialectType;
 use polyglot_sql::optimizer::normalize_identifiers::{NormalizationStrategy, get_normalization_strategy};
+use polyglot_sql::{DialectType, Token};
 use serde::Serialize;
 
 /// A dialect of this build: the grammar, and the rules for quoting and case, under
@@ -80,6 +80,11 @@ impl Dialect {
     /// The dialect as polyglot-sql names it.
     pub fn polyglot(self) -> DialectType {
         self.rules().polyglot
+    }
+
+    /// polyglot-sql's tokens of `text` under the dialect.
+    pub fn tokens(self, text: &str) -> Result<Vec<Token>, polyglot_sql::Error> {
+        polyglot_sql::Dialect::get(self.polyglot()).tokenize(text)
     }
 
     /// The schema of a database given without one.

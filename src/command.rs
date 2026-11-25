@@ -175,7 +175,7 @@ impl Command {
             }
             Verb::Trace { .. } | Verb::Uses { .. } => {
                 // The argument's last part is its column, the rest its relation.
-                let tokens = polyglot_sql::Dialect::get(self.dialect.polyglot()).tokenize(argument).unwrap_or_default();
+                let tokens = self.dialect.tokens(argument).unwrap_or_default();
                 let dot = tokens.iter().rposition(|token| token.token_type == TokenType::Dot);
                 let dot = dot.ok_or_else(|| format!("{argument:?} is not <relation>.<column>"))?;
                 let chars: Vec<char> = argument.chars().collect();

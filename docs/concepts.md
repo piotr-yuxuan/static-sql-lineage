@@ -308,6 +308,7 @@ have. A reject scenario names an answer that must not be given.
   - `Dialect::name`: the dialect's name, as `--describe` spells it.
   - `Dialect::named`: a dialect of the build by its name.
   - `Dialect::polyglot`: the dialect as polyglot-sql names it.
+  - `Dialect::tokens`: polyglot-sql's tokens of a text under the dialect.
   - `Dialect::strategy`: the rule by which the dialect normalises a name for comparison.
   - `Dialect::polyglot_text`: the text that polyglot-sql reads for a piece's, lowered whole where the dialect ignores case.
   - `Dialect::default_schema`: the schema of a database given without one.
