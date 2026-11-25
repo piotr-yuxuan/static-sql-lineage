@@ -52,7 +52,7 @@ pub enum Outputs {
 /// outermost query or of one of its branches, at an output column's place; or in that of
 /// a CTE or a derived table, whose name it gives with the column's.
 #[derive(Clone)]
-enum Holder {
+pub enum Holder {
     Clause(ColumnUseContext),
     Tuple(ColumnUseContext),
     Output(usize),
@@ -65,7 +65,7 @@ enum Holder {
 /// column that its list names, the key that the column reads, and whether an expression
 /// around the key computes the column; the kind of the join; and the relation or CTE that
 /// the join joins, when it joins one.
-struct Key {
+pub struct Key {
     owner: Option<Name>,
     placed: bool,
     column: Name,
@@ -305,7 +305,7 @@ impl Write {
     /// table references that name no CTE in scope, as the engine scopes them and as the
     /// dialect compares names, and those that Snowflake's `IDENTIFIER` names by its one
     /// string literal in a `FROM` or a join, ordered by their spelling.
-    fn relations(
+    pub fn relations(
         all: &[(String, &Scope, Option<Name>)],
         sql: &[char],
         query: &Expression,
@@ -394,7 +394,7 @@ impl Write {
     /// of its struct, each walked by `walk_in_scope`, finding a `Subquery` with no alias,
     /// the query of `EXISTS` and of `IN`, and that of `ANY` and `ALL` twice, as a
     /// quantifier's and as a `Subquery`.
-    fn holders(
+    pub fn holders(
         all: &[(String, &Scope, Option<Name>)],
         sql: &[char],
         dialect: Dialect,
@@ -469,7 +469,7 @@ impl Write {
     /// selected bare, aliased or not, through a `*`, or read bare by an expression of its
     /// select list; none when a join merges a key among sources whose columns are
     /// unknown, where its keys are not told.
-    fn keys(
+    pub fn keys(
         all: &[(String, &Scope, Option<Name>)],
         ctes: &[&Cte],
         sql: &[char],
