@@ -49,7 +49,9 @@ impl Name {
     }
 
     /// Whether this name's text matches `pattern` as the engine matches a `*`'s `ILIKE`: `%`
-    /// any text, `_` one character, `\` the next one as it is, case ignored.
+    /// any text, `_` one character, `\` the next one as it is, case ignored. It follows
+    /// `star_ilike_matches` of polyglot-sql 0.14.4 (MIT), private there, which an upgrade
+    /// of the engine reads again.
     pub fn ilike(&self, pattern: &str) -> bool {
         let text: Vec<char> = self.text.to_lowercase().chars().collect();
         // Whether the pattern read so far matches the first `at` characters, for each `at`.
@@ -246,4 +248,18 @@ pub fn one_line(text: &str) -> String {
 /// name of one part, the CTE's under the dialect.
 pub fn names_cte(table: &TableRef, alias: &Identifier, sql: &[char], dialect: Dialect) -> bool {
     table.schema.is_none() && table.catalog.is_none() && Name::same(alias, &table.name, sql, dialect)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ilike_matches_as_the_engine_does() {
+        let name = Name::read("name", Dialect::Snowflake).expect("one identifier");
+        let patterns = [("N_ME", true), ("%a%e", true), ("n%", true), ("N_E", false), ("I%", false), ("n\\_me", false)];
+        for (pattern, matches) in patterns {
+            assert_eq!(name.ilike(pattern), matches, "{pattern}");
+        }
+    }
 }

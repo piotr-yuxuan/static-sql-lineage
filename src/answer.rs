@@ -243,7 +243,10 @@ impl Answer {
         // `count(*)` holds no `*`.
         let starred = |node: &&Expression| matches!(node, Expression::Function(function) if function.args.iter().any(|arg| matches!(arg, Expression::Star(_))));
         let list = query.as_select().map_or(&[][..], |select| &select.expressions[..]);
-        let alone = |item: &Expression| matches!(item, Expression::Alias(alias) if matches!(&alias.this, Expression::Function(function) if matches!(function.args.as_slice(), [Expression::Star(_)])));
+        let alone = |item: &Expression| {
+            matches!(item, Expression::Alias(alias) if matches!(&alias.this,
+                Expression::Function(function) if matches!(function.args.as_slice(), [Expression::Star(_)])))
+        };
         let traced = |&(at, item): &(usize, &Expression)| {
             alone(item)
                 && !list[..at].iter().any(|before| matches!(before, Expression::Star(_)))
