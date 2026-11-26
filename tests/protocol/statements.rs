@@ -282,9 +282,9 @@ fn set_with_a_qualified_target_is_read() {
 
 #[test]
 fn tsql_a_quote_in_a_national_string_is_refused_once_generated() {
-    // polyglot-sql 0.14.3 generates `N'it''s'` as `N'it's'`, which does not parse again: a
-    // statement, generated into its piece, is refused; the same query, not generated, is not.
-    // A defect of the code, in `docs/differences.md`.
+    // polyglot-sql generates `N'it''s'` as `N'it's'` (`polyglot_581`), which does not parse
+    // again: a statement, generated into its piece, is refused; the same query, not
+    // generated, is not. A defect of the code, in `docs/differences.md`.
     let condition = "where flag <> N'it''s'";
     assert_eq!(trace("tsql", &format!("create view t as select k from s {condition}")), ["refused unparsed"]);
     assert_eq!(trace("tsql", &format!("select k from s {condition}")), ["s.flag -> t.k rows", "s.k -> t.k copy"]);

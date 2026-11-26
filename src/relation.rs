@@ -48,6 +48,33 @@ impl Name {
         self.text.to_lowercase() == text.to_lowercase()
     }
 
+    /// Whether this name's text matches `pattern` as the engine matches a `*`'s `ILIKE`: `%`
+    /// any text, `_` one character, `\` the next one as it is, case ignored. It follows
+    /// `star_ilike_matches` of polyglot-sql 0.14.4 (MIT), private there, which an upgrade
+    /// of the engine reads again.
+    pub fn ilike(&self, pattern: &str) -> bool {
+        let text: Vec<char> = self.text.to_lowercase().chars().collect();
+        // Whether the pattern read so far matches the first `at` characters, for each `at`.
+        let mut matches: Vec<bool> = (0..=text.len()).map(|at| at == 0).collect();
+        let mut pattern = pattern.to_lowercase().chars().collect::<Vec<_>>().into_iter();
+        while let Some(token) = pattern.next() {
+            if token == '%' {
+                (1..matches.len()).for_each(|at| matches[at] |= matches[at - 1]);
+                continue;
+            }
+            let literal = match token {
+                '\\' => pattern.next().or(Some(token)),
+                '_' => None,
+                token => Some(token),
+            };
+            for at in (1..matches.len()).rev() {
+                matches[at] = matches[at - 1] && literal.is_none_or(|literal| literal == text[at - 1]);
+            }
+            matches[0] = false;
+        }
+        matches[text.len()]
+    }
+
     /// Whether `one` and `other`, two identifiers parsed from `sql`, are one name under the
     /// dialect; never when either is one that the parser made rather than read.
     pub fn same(one: &Identifier, other: &Identifier, sql: &[char], dialect: Dialect) -> bool {
@@ -221,4 +248,20 @@ pub fn one_line(text: &str) -> String {
 /// name of one part, the CTE's under the dialect.
 pub fn names_cte(table: &TableRef, alias: &Identifier, sql: &[char], dialect: Dialect) -> bool {
     table.schema.is_none() && table.catalog.is_none() && Name::same(alias, &table.name, sql, dialect)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ilike_matches_as_the_engine_does() {
+        let name = Name::read("name", Dialect::Snowflake).expect("one identifier");
+        let patterns = [("N_ME", true), ("%a%e", true), ("n%", true), ("N_E", false), ("I%", false), ("n\\_me", false)];
+        for (pattern, matches) in patterns {
+            assert_eq!(name.ilike(pattern), matches, "{pattern}");
+        }
+        // An escaped `_` is the character itself, which `n_me` has and `name` has not.
+        assert!(Name::read("n_me", Dialect::Snowflake).expect("one identifier").ilike("n\\_me"));
+    }
 }

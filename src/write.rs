@@ -758,7 +758,11 @@ impl Reach {
                 None => root,
                 Some(owner) => step && owner.reported_as(&node.source_name),
             };
-            let merged: Vec<&Key> = keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect();
+            // A key that the lineage gives one side of, as an outer join's, is that side's column.
+            let both =
+                |key: &&Key| node.downstream.iter().filter(|next| key.read.reported_as(&stands(next))).count() > 1;
+            let merged: Vec<&Key> =
+                keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).filter(both).collect();
             let names = |key: &Key, right: &RelationName| {
                 let sides = node.downstream.iter().filter(|next| key.read.reported_as(&stands(next)));
                 sides.filter(|next| right.reported_as(&next.source_name)).count()
@@ -801,8 +805,8 @@ impl Reach {
 }
 
 /// Every scope of `root`, the engine's scopes of a query, with its path as the engine
-/// writes it, such as `root.ctes[0].subqueries[1]`, and the name of the CTE or derived
-/// table that it is, or is a branch of.
+/// writes it without its steps `expressions[<n>]`, such as `root.ctes[0].subqueries[1]`,
+/// and the name of the CTE or derived table that it is, or is a branch of.
 fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &'a Scope, Option<Name>)> {
     let (mut pending, mut found) = (vec![("root".to_string(), root, None)], Vec::new());
     while let Some((path, scope, owner)) = pending.pop() {
@@ -972,7 +976,10 @@ fn listed<'a>(
         }
         let excluded: Vec<Option<Name>> =
             star.except.iter().flatten().map(|identifier| Name::of(identifier, sql, dialect)).collect();
-        columns.retain(|column| !excluded.contains(column));
+        columns.retain(|column| {
+            !excluded.contains(column)
+                && star.ilike.as_ref().is_none_or(|pattern| column.as_ref().is_some_and(|column| column.ilike(pattern)))
+        });
         for (old, new) in star.rename.iter().flatten() {
             let old = Name::of(old, sql, dialect);
             columns

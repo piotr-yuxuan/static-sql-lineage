@@ -450,7 +450,7 @@ What this build is:
   "protocols": [1],
   "engine": {
     "name": "polyglot-sql",
-    "version": "0.14.3",
+    "version": "0.14.4",
     "source": "registry+https://github.com/rust-lang/crates.io-index"
   },
   "dialects": ["snowflake", "tsql", "duckdb", "postgresql", "redshift", "databricks"]

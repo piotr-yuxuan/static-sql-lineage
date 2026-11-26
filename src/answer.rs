@@ -202,8 +202,8 @@ impl Answer {
         if !alike.is_empty() {
             return answer.ended(gaps.into_iter().chain(alike).collect());
         }
-        // polyglot gives a pivot's grouping column no use, and `UNPIVOT`'s name column a copy
-        // of the columns it unpivots (#559, #560).
+        // A pivot's sources and the names of its output columns are not read yet, so a write
+        // that holds a `PIVOT` or an `UNPIVOT` is not traced.
         if query.dfs().any(|node| matches!(node, Expression::Pivot(_) | Expression::Unpivot(_))) {
             gaps.push(Gap::of(GapReason::AnalysisFailed, None, "the engine does not trace PIVOT and UNPIVOT"));
             return answer.ended(gaps);
@@ -237,10 +237,22 @@ impl Answer {
             gaps.push(Gap::of(GapReason::AnalysisFailed, None, "the analysis names other output columns"));
             return answer.ended(gaps);
         };
-        // polyglot leaves an output column that a `*` as a function's argument feeds with no
-        // upstream (#556); `count(*)` holds no `*`.
-        let starred = |node: &Expression| matches!(node, Expression::Function(function) if function.args.iter().any(|arg| matches!(arg, Expression::Star(_))));
-        if query.dfs().any(starred) {
+        // polyglot gives a `*` as a function's argument no upstream (#556), but where the
+        // function of `*` alone is a column of the outermost select list, as Snowflake's
+        // `object_construct(*)`, and its projection reads the columns that the `*` reads;
+        // `count(*)` holds no `*`.
+        let starred = |node: &&Expression| matches!(node, Expression::Function(function) if function.args.iter().any(|arg| matches!(arg, Expression::Star(_))));
+        let list = query.as_select().map_or(&[][..], |select| &select.expressions[..]);
+        let alone = |item: &Expression| {
+            matches!(item, Expression::Alias(alias) if matches!(&alias.this,
+                Expression::Function(function) if matches!(function.args.as_slice(), [Expression::Star(_)])))
+        };
+        let traced = |&(at, item): &(usize, &Expression)| {
+            alone(item)
+                && !list[..at].iter().any(|before| matches!(before, Expression::Star(_)))
+                && analysis.projections.get(at).is_some_and(|projection| !projection.upstream.is_empty())
+        };
+        if query.dfs().filter(starred).count() > list.iter().enumerate().filter(traced).count() {
             gaps.push(Gap::of(GapReason::Wildcard, None, "the engine does not trace a * as a function's argument"));
         }
         let children = End::of_columns(target, &outputs);

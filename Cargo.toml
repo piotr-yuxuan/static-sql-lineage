@@ -22,7 +22,7 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 # semantic: lineage, validation, analysis; generate: analyze_query needs it;
 # stacker: deep expressions do not overflow the stack.
-polyglot-sql = { version = "=0.14.3", default-features = false, features = ["semantic", "generate", "stacker"] }
+polyglot-sql = { version = "=0.14.4", default-features = false, features = ["semantic", "generate", "stacker"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
