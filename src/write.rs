@@ -801,8 +801,8 @@ impl Reach {
 }
 
 /// Every scope of `root`, the engine's scopes of a query, with its path as the engine
-/// writes it, such as `root.ctes[0].subqueries[1]`, and the name of the CTE or derived
-/// table that it is, or is a branch of.
+/// writes it without its steps `expressions[<n>]`, such as `root.ctes[0].subqueries[1]`,
+/// and the name of the CTE or derived table that it is, or is a branch of.
 fn scopes<'a>(root: &'a Scope, sql: &[char], dialect: Dialect) -> Vec<(String, &'a Scope, Option<Name>)> {
     let (mut pending, mut found) = (vec![("root".to_string(), root, None)], Vec::new());
     while let Some((path, scope, owner)) = pending.pop() {

@@ -150,8 +150,11 @@ impl Edge {
             })
             .collect();
         for use_ in &analysis.column_uses {
-            let Some(places) = reach.rows(&use_.scope_path, use_.context) else {
-                let detail = format!("{:?} at {}: {}", use_.context, use_.scope_path, use_.expression_sql);
+            // The engine names the projection that holds a subquery in its path; `scopes` does not.
+            let steps = use_.scope_path.split('.').filter(|step| !step.starts_with("expressions["));
+            let path = steps.collect::<Vec<_>>().join(".");
+            let Some(places) = reach.rows(&path, use_.context) else {
+                let detail = format!("{:?} at {}: {}", use_.context, path, use_.expression_sql);
                 gaps.push(Gap::of(GapReason::UnattributedUse, None, detail));
                 continue;
             };
