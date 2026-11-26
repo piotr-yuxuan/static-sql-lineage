@@ -31,9 +31,9 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - A `*` as a function's argument gives a `wildcard` gap, where the Edge entry derives the
   output column from every column the `*` reads, but for Snowflake's
   `object_construct(*)`, `object_construct_keep_null(*)` and `hash(*)`, each alone in a
-  column of the outermost select list: polyglot-sql gives the others no upstream, such as
-  Snowflake's `array_construct(*)`, Databricks's `struct(*)` or a function in a CTE.
-  Class: a defect of the code.
+  column of the outermost select list and after no `*`: polyglot-sql gives the others no
+  upstream, such as Snowflake's `array_construct(*)` or Databricks's `struct(*)`, and its
+  analysis gives no projection of a function in a CTE. Class: a defect of the code.
 - A tuple's `IN`, such as `(a, b) in (select x, c from u)`, gives an `unattributed_use`
   gap for its clause, where the Edge entry says that `IN` decides rows: polyglot-sql
   reports only the subquery's first column (#574). Class: a defect of the code.
@@ -44,16 +44,17 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - A scalar subquery after a `*` in a select list gives an `unattributed_use` gap for the
   uses in it, where the Edge entry places them at the column that holds it: its place
   counts the `*` as one. Class: an aspiration.
-- A key that `USING` or `NATURAL` merges across more than two sources, or whose sides
-  the engine's lineage does not tell apart, such as a relation joined to itself by an
-  inner or a full join, gives an `unattributed_use` gap for its output column, where the
-  Edge entry gives each key the kind of its join's side. Class: an aspiration.
-- A key that `USING` or `NATURAL` merges in a branch of a set operation or in a
-  subquery leaves the values of each output column whose lineage has a step of the
-  key's name to an `unattributed_use` gap, and one merged among sources whose columns
-  are unknown those of every output column, where the Edge entry gives each key the
-  kind of its join's side: the engine's lineage does not tell its sides there. Class: an
-  aspiration.
+- A key that an inner or a full join's `USING` or `NATURAL` merges across more than two
+  sources, or whose sides the engine's lineage does not tell apart, such as a relation
+  joined to itself, gives an `unattributed_use` gap for its output column, where the Edge
+  entry gives each key the kind of its join's side. An outer join's key is its kept
+  side's column. Class: an aspiration.
+- A key that an inner or a full join's `USING` or `NATURAL` merges in a branch of a set
+  operation or in a subquery leaves the values of each output column whose lineage has a
+  step of the key's name to an `unattributed_use` gap, and one merged among sources whose
+  columns are unknown those of every output column, where the Edge entry gives each key
+  the kind of its join's side: the engine's lineage does not tell its sides there. Class:
+  an aspiration.
 - A subquery in a field of a `SELECT` other than its select list and the clauses that
   decide rows or order them, such as `LIMIT`, `TOP`, `DISTINCT ON` or a join's pivots,
   gives an `unattributed_use` gap for the uses in it. Class: an aspiration.
