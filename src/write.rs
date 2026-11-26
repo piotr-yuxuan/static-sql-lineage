@@ -758,7 +758,11 @@ impl Reach {
                 None => root,
                 Some(owner) => step && owner.reported_as(&node.source_name),
             };
-            let merged: Vec<&Key> = keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).collect();
+            // A key that the lineage gives one side of, as an outer join's, is that side's column.
+            let both =
+                |key: &&Key| node.downstream.iter().filter(|next| key.read.reported_as(&stands(next))).count() > 1;
+            let merged: Vec<&Key> =
+                keys.iter().filter(owns).filter(|key| key.column.reported_as(&node.name)).filter(both).collect();
             let names = |key: &Key, right: &RelationName| {
                 let sides = node.downstream.iter().filter(|next| key.read.reported_as(&stands(next)));
                 sides.filter(|next| right.reported_as(&next.source_name)).count()
