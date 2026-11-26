@@ -185,8 +185,11 @@ cases! {
         let all = ["users.id -> t.id copy", "users.name -> t.name copy"];
         let fed = ["users.id -> t.f derive", "users.name -> t.f derive"];
         for (dialect, function) in [
-            ("snowflake", "array_construct(*)"), ("snowflake", "array_construct(*, name)"),
-            ("snowflake", "hash(*) + id"), ("databricks", "struct(*)"), ("databricks", "hash(*)"),
+            ("snowflake", "array_construct(*)"),
+            ("snowflake", "array_construct(*, name)"),
+            ("snowflake", "hash(*) + id"),
+            ("databricks", "struct(*)"),
+            ("databricks", "hash(*)"),
             ("databricks", "concat(name, to_json(struct(*)))"),
             ("databricks", "to_json(named_struct('i', id, 'all', struct(*)))"),
         ] {
@@ -207,6 +210,8 @@ cases! {
         traces(USERS, "select * ilike 'N_ME' from users", &["users.name -> t.name copy"]);
         traces(USERS, "select * ilike 'I%' from users", &["users.id -> t.id copy"]);
     };
+    star_ilike_matching_no_column_is_an_empty_answer:
+        answered(USERS, "create view t as select * ilike 'N_E' from users", json!([]), &[]);
     an_outer_key_of_a_relation_joined_to_itself_copies: for (join, expected) in [
         ("left", &["s.k -> t.k copy"][..]),
         ("right", &["s.k -> t.k copy"]),
@@ -221,6 +226,12 @@ cases! {
     a_left_join_of_derived_tables_copies_the_kept_key: traces(&[("s", &["k"]), ("u", &["k"])],
         "select k from (select k from s) x left join (select k from u) y using (k)",
         &["s.k -> t.k copy", "u.k -> t.k rows"]);
+    a_left_join_in_an_intersect_copies_the_kept_key: traces(&[("s", &["k"]), ("u", &["k"]), ("v", &["k"])],
+        "select k from s left join u using (k) intersect select k from v",
+        &["s.k -> t.k copy", "u.k -> t.k rows", "v.k -> t.k rows"]);
+    a_left_join_of_a_union_copies_its_branches: traces(&[("s", &["k"]), ("u", &["k"]), ("v", &["k"])],
+        "select k from (select k from s union all select k from v) d left join u using (k)",
+        &["s.k -> t.k copy", "u.k -> t.k rows", "v.k -> t.k copy"]);
 }
 
 /// The relation of the rows of a `*` as a function's argument.
