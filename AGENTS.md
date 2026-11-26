@@ -42,6 +42,11 @@ Reuses: <operations and types at the base that the steps call or extend>
   catalogue of clauses carried over from the proof of concept, never from the
   implementation. A scenario's row carries its identifier, and a failing row names it:
   the macro names its test after it, `.` and `-` becoming `_`.
+- The engine's suite, `tests/engine.rs`, takes its expectations from the upstream issue
+  of each row, from the behaviour that the issue states as expected, never from the
+  engine's output nor from `docs/concepts.md`; a row is ignored while its issue is open,
+  and becomes active when its issue is closed and the row passes, a mismatch going to
+  the plan's notes.
 - The diagrams in `docs/diagrams/` are derived from `docs/concepts.md` and
   `docs/decisions.md`, drawn with the skill `diagram-design:diagram-design`; a plan
   that changes what one shows redraws it.
@@ -155,12 +160,15 @@ src/                 one module per home of `docs/concepts.md`: relation, write,
                      as scripts), graph (the migration order), command (the command
                      line and what it prints)
 tests/concepts.rs    the concept check
+tests/engine.rs      the engine's suite: one row per issue of polyglot-sql that bears on
+                     the answers, calling the engine, never the binary
 tests/protocol/      the binary run as a caller runs it: --describe and the uses it
                      refuses, requests, scenarios, answers, edges, stars, catalogue (of
                      clauses), cases (Snowflake's), agreement (with dbt's lineage),
                      statements (replace and contribute), commands (graph on scripts,
                      and the README's examples), logging (-v and the variables); rows,
-                     the macro of rows, which tests/concepts.rs loads too
+                     the macro of rows, which tests/concepts.rs and tests/engine.rs load
+                     too
 tests/scripts/       synthetic scripts as SQL Server's tools and the other dialects write
                      them, kept byte for byte by `.gitattributes`: CRLF, UTF-16; and in
                      expected/, what commands print from them, written from the protocol

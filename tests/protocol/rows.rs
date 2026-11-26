@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2
-//! The macro of rows, which `tests/concepts.rs` loads too.
+//! The macro of rows, which `tests/concepts.rs` and `tests/engine.rs` load too.
 
 /// One test per row, `name: body;`, named after the case: a scenario's identifier, `.`
 /// and `-` becoming `_`. The row's attributes, such as `ignore`, pass through.
