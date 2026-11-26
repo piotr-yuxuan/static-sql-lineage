@@ -261,5 +261,7 @@ mod tests {
         for (pattern, matches) in patterns {
             assert_eq!(name.ilike(pattern), matches, "{pattern}");
         }
+        // An escaped `_` is the character itself, which `n_me` has and `name` has not.
+        assert!(Name::read("n_me", Dialect::Snowflake).expect("one identifier").ilike("n\\_me"));
     }
 }
