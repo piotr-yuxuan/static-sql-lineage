@@ -34,14 +34,12 @@ impl Kind {
         }
     }
 
-    /// The kinds of the left and right sides of a key that a join of kind `join` merges:
-    /// an inner join copies both; an outer one copies the side that it keeps, and the
-    /// other decides its rows; a full one derives from both, as `coalesce` does.
+    /// The kinds of the left and right sides of a key that a join of kind `join` merges
+    /// into a `coalesce` of both: an inner join copies both; a full one derives from both,
+    /// as `coalesce` does. An outer join's key is the column of the side that it keeps.
     pub fn sides(join: JoinKind) -> Option<(Kind, Kind)> {
         match join {
             JoinKind::Inner | JoinKind::Natural => Some((Kind::Copy, Kind::Copy)),
-            JoinKind::Left | JoinKind::NaturalLeft => Some((Kind::Copy, Kind::Rows)),
-            JoinKind::Right | JoinKind::NaturalRight => Some((Kind::Rows, Kind::Copy)),
             JoinKind::Full | JoinKind::NaturalFull => Some((Kind::Derive, Kind::Derive)),
             _ => None,
         }
