@@ -176,38 +176,36 @@ cases! {
         json!(["region"]), &["gap analysis_failed - -"]);
     unpivot_is_a_gap: traces(&[("wide", &["id", "a", "b"])],
         "select id, metric, val from wide unpivot (val for metric in (a, b))", &["gap analysis_failed - -"]);
-    a_star_as_an_argument_derives_from_every_column: traces(&[("users", &["id", "name"])],
-        "select id, hash(*) as obj from users",
+    a_star_as_an_argument_derives_from_every_column: traces(USERS, "select id, hash(*) as obj from users",
         &["users.id -> t.id copy", "users.id -> t.obj derive", "users.name -> t.obj derive"]);
-    a_star_as_an_argument_in_a_cte_is_a_gap: traces_a_gap_among("snowflake", &[("users", &["id", "name"])],
+    a_star_as_an_argument_in_a_cte_is_a_gap: traces_a_gap_among("snowflake", USERS,
         "with c as (select id, hash(*) as h from users) select id, h from c",
-        &["users.id -> t.id copy", "users.id -> t.h derive", "users.name -> t.h derive"]);
+        &["users.id -> t.id copy"], &["users.id -> t.h derive", "users.name -> t.h derive"]);
     a_star_as_an_argument_elsewhere_is_a_gap: {
+        let all = ["users.id -> t.id copy", "users.name -> t.name copy"];
+        let fed = ["users.id -> t.f derive", "users.name -> t.f derive"];
         for (dialect, function) in [
-            ("snowflake", "array_construct(*)"),
-            ("snowflake", "array_construct(*, name)"),
-            ("snowflake", "hash(*) + id"),
-            ("databricks", "struct(*)"),
-            ("databricks", "hash(*)"),
+            ("snowflake", "array_construct(*)"), ("snowflake", "array_construct(*, name)"),
+            ("snowflake", "hash(*) + id"), ("databricks", "struct(*)"), ("databricks", "hash(*)"),
             ("databricks", "concat(name, to_json(struct(*)))"),
             ("databricks", "to_json(named_struct('i', id, 'all', struct(*)))"),
         ] {
-            let sql = format!("select id, {function} as f from users");
-            let edges = ["users.id -> t.id copy", "users.id -> t.f derive", "users.name -> t.f derive"];
-            traces_a_gap_among(dialect, &[("users", &["id", "name"])], &sql, &edges);
+            traces_a_gap_among(dialect, USERS, &format!("select id, {function} as f from users"), &all[..1], &fed);
         }
-        traces_a_gap_among("duckdb", &[("users", &["id", "name"])], "select id from users where hash(*) > 0",
-            &["users.id -> t.id copy", "users.name -> t.id rows"]);
+        traces_a_gap_among("snowflake", USERS, "select *, array_construct(*) as f from users", &all, &fed);
+        traces_a_gap_among("databricks", USERS, "select users.*, struct(*) as f from users", &all, &fed);
+        traces_a_gap_among("duckdb", USERS, "select id from users where hash(*) > 0",
+            &["users.id -> t.id copy"], &["users.name -> t.id rows"]);
     };
     a_star_as_an_argument_derives_beside_a_column_with_no_parent: for sql in [
         "select current_timestamp() as loaded_at, object_construct(*) as o from users",
         "select object_construct(*) as o, 1 as one from users",
     ] {
-        traces(&[("users", &["id", "name"])], sql, &["users.id -> t.o derive", "users.name -> t.o derive"]);
+        traces(USERS, sql, &["users.id -> t.o derive", "users.name -> t.o derive"]);
     };
     star_ilike_matches_its_pattern_ignoring_case: {
-        traces(&[("users", &["id", "name"])], "select * ilike 'N_ME' from users", &["users.name -> t.name copy"]);
-        traces(&[("users", &["id", "name"])], "select * ilike 'I%' from users", &["users.id -> t.id copy"]);
+        traces(USERS, "select * ilike 'N_ME' from users", &["users.name -> t.name copy"]);
+        traces(USERS, "select * ilike 'I%' from users", &["users.id -> t.id copy"]);
     };
     an_outer_key_of_a_relation_joined_to_itself_copies: for (join, expected) in [
         ("left", &["s.k -> t.k copy"][..]),
@@ -217,15 +215,25 @@ cases! {
     ] {
         traces(&[("s", &["k", "a"])], &format!("select k from s x {join} join s y using (k)"), expected);
     };
+    a_left_chain_of_three_copies_the_first_key: traces(&[("s", &["k"]), ("u", &["k"]), ("w", &["k"])],
+        "select k from s left join u using (k) left join w using (k)",
+        &["s.k -> t.k copy", "u.k -> t.k rows", "w.k -> t.k rows"]);
+    a_left_join_of_derived_tables_copies_the_kept_key: traces(&[("s", &["k"]), ("u", &["k"])],
+        "select k from (select k from s) x left join (select k from u) y using (k)",
+        &["s.k -> t.k copy", "u.k -> t.k rows"]);
 }
 
-/// Asserts that the answer to `sql` against `catalog` in `dialect`, its target `t`, has a
-/// `wildcard` gap, and no other line but edges among `edges`, which the Edge entry gives.
+/// The relation of the rows of a `*` as a function's argument.
+const USERS: &[(&str, &[&str])] = &[("users", &["id", "name"])];
+
+/// Asserts that the answer to `sql` against `catalog` in `dialect`, its target `t`, gives
+/// the edges `required`, in their order, and a `wildcard` gap, and no other line but edges
+/// among `fed`, those that the Edge entry gives from the `*`.
 #[track_caller]
-fn traces_a_gap_among(dialect: &str, catalog: &[(&str, &[&str])], sql: &str, edges: &[&str]) {
+fn traces_a_gap_among(dialect: &str, catalog: &[(&str, &[&str])], sql: &str, required: &[&str], fed: &[&str]) {
     let found = super::trace_in(dialect, catalog, sql);
-    let known = |line: &String| line == "gap wildcard - -" || edges.contains(&line.as_str());
-    assert!(found.contains(&"gap wildcard - -".to_string()) && found.iter().all(known), "{sql}: {found:?}");
+    let rest: Vec<&str> = found.iter().map(String::as_str).filter(|line| !fed.contains(line)).collect();
+    assert_eq!(rest, [required, &["gap wildcard - -"]].concat(), "{sql}: {found:?}");
 }
 
 /// For each join that merges `s` and `u` on `k`, the edges of `s.k` and `u.k` to the column
