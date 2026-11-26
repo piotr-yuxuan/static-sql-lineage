@@ -20,10 +20,11 @@ mod rows;
 
 /// The table of most issues' reproductions.
 const T: &[(&str, &[&str])] = &[("s.t", &["k", "status", "amount", "c"])];
-/// The tables of the issues of subqueries and joins.
-const TU: &[(&str, &[&str])] = &[("s.t", &["k", "a"]), ("s.u", &["k", "x"])];
+/// The tables of the issues of subqueries, joins and names, each a superset of the
+/// tables of its issue's reproduction.
+const TU: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b"]), ("s.u", &["k", "x", "c"]), ("s.c", &["z"])];
 /// The table of the issues of aggregates and names.
-const KAB: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b VARCHAR"])];
+const KAB: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b VARCHAR", "amount"])];
 
 /// A schema of `tables`, each `schema.table` or `table` with its columns, each `name` or
 /// `name TYPE`, `INT` by default.
@@ -103,6 +104,7 @@ cases! {
                    pivot (sum(amount) for status in ('placed', 'shipped'))";
         assert!(uses(&analysis(Snowflake, T, sql)).contains(&"Group: k".to_string()));
     };
+    // The row pins 0.14.4's form of the fix, `Filter` uses, which the issue left open.
     polyglot_560: {
         let found = analysis(Snowflake, T, "select k, metric, val from s.t unpivot (val for metric in (amount, c))");
         assert!(upstream(&found, 1).is_empty());
@@ -114,11 +116,12 @@ cases! {
         for clause in ["", " rename (a as z)", " replace (a + 1 as a)"] {
             assert!(parse_one(&format!("select * ilike '%a%'{clause} from s.t"), Snowflake).is_ok(), "{clause}");
         }
-        let tables: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b", "amount"])];
         for (pattern, columns) in [("%a%", &["A", "AMOUNT"][..]), ("a_ount", &["AMOUNT"])] {
-            assert_eq!(names(&analysis(Snowflake, tables, &format!("select * ilike '{pattern}' from s.t"))), columns);
+            assert_eq!(names(&analysis(Snowflake, KAB, &format!("select * ilike '{pattern}' from s.t"))), columns);
         }
     };
+    // The row pins 0.14.4's form of the fix, the projection's step in `scope_path`, one of
+    // the two that the issue offered.
     polyglot_562: for (at, sql) in [
         (1, "select k, (select max(u.x) from s.u u where u.k = t.k) as top, a from s.t t"),
         (2, "select k, a, (select max(u.x) from s.u u where u.k = t.k) as top from s.t t"),
@@ -174,32 +177,27 @@ cases! {
     };
     #[ignore = "tobilg/polyglot#573"]
     polyglot_573: for (dialect, sql) in [
-        (Snowflake, "select o.a from s.t as O"),
-        (DuckDB, "select o.a from s.t as O"),
-        (PostgreSQL, "select o.a from s.t as O"),
-        (Redshift, "select \"X\".a from s.t as x"),
+        (Snowflake, "select o.a from s.t as O"), (DuckDB, "select o.a from s.t as O"),
+        (PostgreSQL, "select o.a from s.t as O"), (Redshift, "select \"X\".a from s.t as x"),
     ] {
-        assert_eq!(upstream(&analysis(dialect, &[("s.t", &["a"])], sql), 0), ["s.t.a"], "{dialect:?}: {sql}");
+        assert_eq!(upstream(&analysis(dialect, TU, sql), 0), ["s.t.a"], "{dialect:?}: {sql}");
     };
     #[ignore = "tobilg/polyglot#574"]
     polyglot_574: {
-        let tables: &[(&str, &[&str])] = &[("s.t", &["a", "b"]), ("s.u", &["x", "c"])];
-        let found = analysis(Snowflake, tables, "select a from s.t where (a, b) in (select x, c from s.u)");
+        let found = analysis(Snowflake, TU, "select a from s.t where (a, b) in (select x, c from s.u)");
         let references = found.column_uses.iter().flat_map(|u| &u.references).map(|r| &r.reference);
         assert!(named(references).contains(&"s.u.c".into()));
     };
     #[ignore = "tobilg/polyglot#575"]
     polyglot_575: {
-        let tables: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b"]), ("s.u", &["k", "x"])];
         let sql = "select a, (select t.b + max(u.x) from s.u u where u.k = t.k) as m from s.t t";
-        assert_eq!(upstream(&analysis(Snowflake, tables, sql), 1), ["s.t.b", "s.u.x"]);
+        assert_eq!(upstream(&analysis(Snowflake, TU, sql), 1), ["s.t.b", "s.u.x"]);
     };
     #[ignore = "tobilg/polyglot#576"]
     polyglot_576: {
-        let tables: &[(&str, &[&str])] = &[("s.t", &["a"]), ("s.c", &["z"])];
         let cte = "with c as (select a from s.t) select";
-        assert_ne!(upstream(&analysis(Snowflake, tables, &format!("{cte} a from \"c\"")), 0), ["s.t.a"]);
-        let found = analysis(Snowflake, tables, &format!("{cte} z from \"c\""));
+        assert_ne!(upstream(&analysis(Snowflake, TU, &format!("{cte} a from \"c\"")), 0), ["s.t.a"]);
+        let found = analysis(Snowflake, TU, &format!("{cte} z from \"c\""));
         assert!(found.projections[0].upstream.iter().all(|r| r.source_kind != SourceKind::Cte));
     };
     #[ignore = "tobilg/polyglot#577"]
