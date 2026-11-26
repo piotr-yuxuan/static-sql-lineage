@@ -20,11 +20,12 @@ mod rows;
 
 /// The table of most issues' reproductions.
 const T: &[(&str, &[&str])] = &[("s.t", &["k", "status", "amount", "c"])];
-/// The tables of the issues of subqueries, joins and names, each a superset of the
-/// tables of its issue's reproduction.
-const TU: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b"]), ("s.u", &["k", "x", "c"]), ("s.c", &["z"])];
-/// The table of the issues of aggregates and names.
-const KAB: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b VARCHAR", "amount"])];
+/// The tables of the reproductions of #562 and #563.
+const TU: &[(&str, &[&str])] = &[("s.t", &["k", "a"]), ("s.u", &["k", "x"])];
+/// The table of the reproductions of #564, #565 and #568.
+const KAB: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b VARCHAR"])];
+/// The table of the reproductions of #566 and #567.
+const KABI: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b VARCHAR", "items VARIANT"])];
 
 /// A schema of `tables`, each `schema.table` or `table` with its columns, each `name` or
 /// `name TYPE`, `INT` by default.
@@ -116,8 +117,9 @@ cases! {
         for clause in ["", " rename (a as z)", " replace (a + 1 as a)"] {
             assert!(parse_one(&format!("select * ilike '%a%'{clause} from s.t"), Snowflake).is_ok(), "{clause}");
         }
+        let tables: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b", "amount"])];
         for (pattern, columns) in [("%a%", &["A", "AMOUNT"][..]), ("a_ount", &["AMOUNT"])] {
-            assert_eq!(names(&analysis(Snowflake, KAB, &format!("select * ilike '{pattern}' from s.t"))), columns);
+            assert_eq!(names(&analysis(Snowflake, tables, &format!("select * ilike '{pattern}' from s.t"))), columns);
         }
     };
     // The row pins 0.14.4's form of the fix, the projection's step in `scope_path`, one of
@@ -153,7 +155,7 @@ cases! {
     };
     #[ignore = "tobilg/polyglot#566"]
     polyglot_566: {
-        let names_of = |sql| names(&analysis(Snowflake, KAB, sql));
+        let names_of = |sql| names(&analysis(Snowflake, KABI, sql));
         assert_eq!(names_of("select a * 2, upper(b), a, a from s.t"), ["A * 2", "UPPER(B)", "A", "A_1"]);
         let pivot = "select * from (select k, b, a from s.t) pivot (sum(a) for b in ('x', 'y'))";
         assert_eq!(names_of(pivot), ["K", "'x'", "'y'"]);
@@ -163,11 +165,12 @@ cases! {
         ("select f.* from s.t t, lateral flatten(input => t.items) f",
             &["SEQ", "KEY", "PATH", "INDEX", "VALUE", "THIS"]),
     ] {
-        assert_eq!(names(&analysis(Snowflake, &[("s.t", &["k", "b VARCHAR", "items VARIANT"])], sql)), columns);
+        assert_eq!(names(&analysis(Snowflake, KABI, sql)), columns, "{sql}");
     };
     polyglot_568: {
-        assert_eq!(checked(Snowflake, TU, "select k from s.t where k in (select k from s.t)"), [""; 0]);
-        assert!(checked(Snowflake, TU, "select k from s.t where k in (select k, a from s.t)").contains(&"E217".into()));
+        assert_eq!(checked(Snowflake, KAB, "select k from s.t where k in (select k from s.t)"), [""; 0]);
+        let sql = "select k from s.t where k in (select k, a from s.t)";
+        assert!(checked(Snowflake, KAB, sql).contains(&"E217".into()));
     };
     #[ignore = "tobilg/polyglot#569"]
     polyglot_569: for (key, valid) in [("id", true), ("amount", false), ("missing_column", false)] {
@@ -177,27 +180,32 @@ cases! {
     };
     #[ignore = "tobilg/polyglot#573"]
     polyglot_573: for (dialect, sql) in [
-        (Snowflake, "select o.a from s.t as O"), (DuckDB, "select o.a from s.t as O"),
-        (PostgreSQL, "select o.a from s.t as O"), (Redshift, "select \"X\".a from s.t as x"),
+        (Snowflake, "select o.a from s.t as O"),
+        (DuckDB, "select o.a from s.t as O"),
+        (PostgreSQL, "select o.a from s.t as O"),
+        (Redshift, "select \"X\".a from s.t as x"),
     ] {
-        assert_eq!(upstream(&analysis(dialect, TU, sql), 0), ["s.t.a"], "{dialect:?}: {sql}");
+        assert_eq!(upstream(&analysis(dialect, &[("s.t", &["a"])], sql), 0), ["s.t.a"], "{dialect:?}: {sql}");
     };
     #[ignore = "tobilg/polyglot#574"]
     polyglot_574: {
-        let found = analysis(Snowflake, TU, "select a from s.t where (a, b) in (select x, c from s.u)");
+        let tables: &[(&str, &[&str])] = &[("s.t", &["a", "b"]), ("s.u", &["x", "c"])];
+        let found = analysis(Snowflake, tables, "select a from s.t where (a, b) in (select x, c from s.u)");
         let references = found.column_uses.iter().flat_map(|u| &u.references).map(|r| &r.reference);
         assert!(named(references).contains(&"s.u.c".into()));
     };
     #[ignore = "tobilg/polyglot#575"]
     polyglot_575: {
         let sql = "select a, (select t.b + max(u.x) from s.u u where u.k = t.k) as m from s.t t";
-        assert_eq!(upstream(&analysis(Snowflake, TU, sql), 1), ["s.t.b", "s.u.x"]);
+        let tables: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b"]), ("s.u", &["k", "x"])];
+        assert_eq!(upstream(&analysis(Snowflake, tables, sql), 1), ["s.t.b", "s.u.x"]);
     };
     #[ignore = "tobilg/polyglot#576"]
     polyglot_576: {
+        let tables: &[(&str, &[&str])] = &[("s.t", &["a"]), ("s.c", &["z"])];
         let cte = "with c as (select a from s.t) select";
-        assert_ne!(upstream(&analysis(Snowflake, TU, &format!("{cte} a from \"c\"")), 0), ["s.t.a"]);
-        let found = analysis(Snowflake, TU, &format!("{cte} z from \"c\""));
+        assert_ne!(upstream(&analysis(Snowflake, tables, &format!("{cte} a from \"c\"")), 0), ["s.t.a"]);
+        let found = analysis(Snowflake, tables, &format!("{cte} z from \"c\""));
         assert!(found.projections[0].upstream.iter().all(|r| r.source_kind != SourceKind::Cte));
     };
     #[ignore = "tobilg/polyglot#577"]
@@ -258,9 +266,10 @@ cases! {
     };
     #[ignore = "tobilg/polyglot#583"]
     polyglot_583: {
-        assert_eq!(uses(&analysis(Snowflake, KAB, "select distinct a, b from s.t")), ["Distinct: a", "Distinct: b"]);
-        assert_eq!(uses(&analysis(DuckDB, KAB, "select distinct on (k) a, b from s.t")), ["Distinct: k"]);
+        let tables: &[(&str, &[&str])] = &[("s.t", &["k", "a", "b"])];
+        assert_eq!(uses(&analysis(Snowflake, tables, "select distinct a, b from s.t")), ["Distinct: a", "Distinct: b"]);
+        assert_eq!(uses(&analysis(DuckDB, tables, "select distinct on (k) a, b from s.t")), ["Distinct: k"]);
         let sql = "select a from (select distinct a, b from s.t) as d";
-        assert_eq!(uses(&analysis(DuckDB, KAB, sql)), ["Distinct: a", "Distinct: b"]);
+        assert_eq!(uses(&analysis(DuckDB, tables, sql)), ["Distinct: a", "Distinct: b"]);
     };
 }
