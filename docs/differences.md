@@ -90,6 +90,10 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   keys first in Snowflake, PostgreSQL, Redshift and Databricks, so that a key and a
   column before it swap targets, where the Write entry maps the `*`'s columns in order.
   Class: a defect of the code.
+- `select * ilike '<pattern>'` whose pattern matches no column is answered with no column,
+  no edge and no gap, where Snowflake refuses a query with no column: as for the
+  statements below, validating SQL is out of scope, and the answer says what the write
+  reads, nothing. Class: an intended gap.
 - Statements that Snowflake refuses and polyglot-sql reads, such as `WITH ... INSERT`,
   `WHEN NOT MATCHED BY SOURCE` in a `MERGE`, or `SELECT ... INTO`, are traced as the
   statements of the dialects that accept them: validating SQL is out of scope. Class: an
