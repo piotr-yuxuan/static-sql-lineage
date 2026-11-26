@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use super::{answered, trace, trace_in, traces, traces_in};
+use super::{answered, trace, traces, traces_in};
 
 /// The answer to `select k, a, c from s <join> join u using (k)`.
 fn using(join: &str) -> Vec<String> {
@@ -223,7 +223,7 @@ cases! {
 /// `wildcard` gap, and no other line but edges among `edges`, which the Edge entry gives.
 #[track_caller]
 fn traces_a_gap_among(dialect: &str, catalog: &[(&str, &[&str])], sql: &str, edges: &[&str]) {
-    let found = trace_in(dialect, catalog, sql);
+    let found = super::trace_in(dialect, catalog, sql);
     let known = |line: &String| line == "gap wildcard - -" || edges.contains(&line.as_str());
     assert!(found.contains(&"gap wildcard - -".to_string()) && found.iter().all(known), "{sql}: {found:?}");
 }
