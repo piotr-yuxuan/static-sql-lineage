@@ -69,6 +69,7 @@ have. A reject scenario names an answer that must not be given.
   - `Name::read`: reads one identifier, alone, as SQL text under the dialect.
   - `Name::of`: the name of an identifier parsed from a write's SQL, as it spells it.
   - `Name::reported_as`: whether the engine's text for a name is this one's.
+  - `Name::ilike`: whether this name matches a `*`'s `ILIKE` pattern, as the engine matches it.
   - `RelationName::read`: reads a bare name of one to three parts, completed by the defaults.
   - `RelationName::of`: the name of a table reference parsed from a write's SQL.
   - `RelationName::reported_as`: whether the engine's text for a relation is this one's.

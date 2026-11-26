@@ -4,9 +4,9 @@
 //! which takes them from its `definition.md`, in protocol 1's terms: an edge spells its
 //! parent as the catalog does, and its child as the write's query, or a `*`, does; an
 //! "error" is a refusal and a "gap" a gap and no edge; its one case "outside", a `MERGE`,
-//! is read as plan 006 reads a `MERGE`. Five wait on polyglot: their tests are ignored,
-//! each naming the issue that it waits on; and the pivot's `FOR` column is a `derive`, as
-//! the Edge entry calls `CASE`.
+//! is read as plan 006 reads a `MERGE`. Two wait on the reading of `PIVOT` and `UNPIVOT`:
+//! their tests are ignored, each naming the entry of `docs/differences.md` that it waits
+//! on; and the pivot's `FOR` column is a `derive`, as the Edge entry calls `CASE`.
 
 use super::{outline, request, respond};
 
@@ -94,14 +94,14 @@ cases! {
         "CUSTOMERS.CUSTOMER_ID>ID CUSTOMER_ID AMOUNT STATUS name rows",
     ]);
     identifier: expect("select id from identifier('db.s.users')", &["USERS.ID>id copy"]);
-    #[ignore = "known failure: polyglot #559"]
+    #[ignore = "an aspiration of docs/differences.md: a write that holds a PIVOT"]
     pivot: expect("select * from (select region, quarter, amount from db.s.sales) \
         pivot (sum(amount) for quarter in ('Q1', 'Q2')) as p", &[
         "SALES.REGION>region copy",
         "SALES.AMOUNT SALES.QUARTER>\"'Q1'\" \"'Q2'\" derive",
         "SALES.REGION>\"'Q1'\" \"'Q2'\" rows",
     ]);
-    #[ignore = "known failure: polyglot #560"]
+    #[ignore = "an aspiration of docs/differences.md: a write that holds an UNPIVOT"]
     unpivot: expect("select id, metric, val from db.s.wide unpivot (val for metric in (a, b))",
         &["WIDE.ID>id copy", "WIDE.A WIDE.B>val copy", "WIDE.A WIDE.B>id metric rows"]);
     asof_join: expect("select t.id, t.ts, q.price from db.s.trades t asof join db.s.quotes q \
@@ -151,13 +151,10 @@ cases! {
     one_table_name_in_two_schemas: expect("select a.amount, r.amount_cents \
         from db.analytics.orders a join db.raw.orders r using (id)",
         &["MART.AMOUNT>amount copy", "RAW.AMOUNT_CENTS>amount_cents copy", "MART.ID RAW.ID>amount amount_cents rows"]);
-    #[ignore = "known failure: polyglot #557"]
     table_flatten: expect("select o.id, f.value:sku::string as sku \
         from db.s.orders o, table(flatten(input => o.items)) f",
         &["ORDERS.ID>id copy", "ORDERS.ITEMS>sku derive", "ORDERS.ITEMS>id rows"]);
-    #[ignore = "known failure: polyglot #561"]
     select_ilike: expect("select * ilike '%name%' from db.s.users", &["USERS.NAME>NAME copy"]);
-    #[ignore = "known failure: polyglot #556"]
     object_construct: expect("select id, object_construct(*) as obj from db.s.users",
         &["USERS.ID>id copy", "USERS.ID USERS.NAME USERS.SECRET>obj derive"]);
 }

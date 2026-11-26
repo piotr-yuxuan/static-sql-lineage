@@ -200,8 +200,8 @@ fn describe_names_the_build() {
     assert_eq!(description["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(description["protocols"], json!([1]));
     assert_eq!(description["engine"]["name"], "polyglot-sql");
-    // Cargo.toml pins the engine at =0.14.3, from crates.io.
-    assert_eq!(description["engine"]["version"], "0.14.3");
+    // Cargo.toml pins the engine at =0.14.4, from crates.io.
+    assert_eq!(description["engine"]["version"], "0.14.4");
     assert!(description["engine"]["source"].as_str().is_some_and(|source| source.starts_with("registry+")));
     // Both verbatim, as the engine's own entry in Cargo.lock gives them.
     let lock = read("Cargo.lock");

@@ -976,7 +976,10 @@ fn listed<'a>(
         }
         let excluded: Vec<Option<Name>> =
             star.except.iter().flatten().map(|identifier| Name::of(identifier, sql, dialect)).collect();
-        columns.retain(|column| !excluded.contains(column));
+        columns.retain(|column| {
+            !excluded.contains(column)
+                && star.ilike.as_ref().is_none_or(|pattern| column.as_ref().is_some_and(|column| column.ilike(pattern)))
+        });
         for (old, new) in star.rename.iter().flatten() {
             let old = Name::of(old, sql, dialect);
             columns
