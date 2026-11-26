@@ -12,44 +12,42 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - Under Snowflake, DuckDB and PostgreSQL, a table alias read in another case than it
   was given, as `o.a` in `select o.a from s as O`, gives an `unresolved_reference` gap,
   where the Edge entry gives the edge `s.a -> t.a`, `copy`, since the dialect's rules
-  for case make `o` and `O` one alias: polyglot-sql looks a qualifier up exactly. Class:
-  a defect of the code.
+  for case make `o` and `O` one alias: polyglot-sql looks a qualifier up exactly (#573).
+  Class: a defect of the code.
 - T-SQL's alias written before its expression, as in `select Total = a from s`, is read
   as a comparison, and the write refused, where the Write entry names its output column
-  `Total`: polyglot-sql does not parse that form. Class: a defect of the code.
+  `Total`: polyglot-sql does not parse that form (#577). Class: a defect of the code.
 - A `*` over a source whose columns a list renames, such as `with c (x) as (...)` or a
   derived table with column aliases, leaves a write's output columns unknown, a
   `wildcard` gap, where the Edge entry says that a column selected through `*` is a
   `copy`. Class: an aspiration.
 - A write that holds a `PIVOT` gives `analysis_failed` and no edge, where the Edge entry
-  says that its grouping columns decide rows: polyglot-sql gives a pivot's grouping
-  column no use (#559). Class: a defect of the code.
-- A write that holds an `UNPIVOT` gives `analysis_failed` and no edge: polyglot-sql
-  traces its name column as a `copy` of the columns it unpivots (#560). Class: a defect
-  of the code.
-- `TABLE(FLATTEN(...))` is refused `invalid`, where `LATERAL FLATTEN(...)` is traced:
-  polyglot-sql does not know the alias of the table function (#557). Class: a defect of
-  the code.
-- `select * ilike '<pattern>'` is refused `unparsed`: polyglot-sql does not parse it
-  (#561). Class: a defect of the code.
-- A `*` as a function's argument, such as `object_construct(*)` or `hash(*)`, gives a
-  `wildcard` gap, where the Edge entry derives the output column from every column the
-  `*` reads: polyglot-sql leaves that column with no upstream (#556). Class: a defect
-  of the code.
+  says that its grouping columns decide rows: a pivot's sources and the names of its
+  output columns are not read. Class: an aspiration.
+- A write that holds an `UNPIVOT` gives `analysis_failed` and no edge, where the Edge
+  entry copies the columns that it unpivots into its value column and lets them decide
+  the rows of the others: its sources and the names of its output columns are not read.
+  Class: an aspiration.
+- A `*` as a function's argument gives a `wildcard` gap, where the Edge entry derives the
+  output column from every column the `*` reads, but for Snowflake's
+  `object_construct(*)`, `object_construct_keep_null(*)` and `hash(*)`, each alone in a
+  column of the outermost select list: polyglot-sql gives the others no upstream, such as
+  Snowflake's `array_construct(*)`, Databricks's `struct(*)` or a function in a CTE.
+  Class: a defect of the code.
 - A tuple's `IN`, such as `(a, b) in (select x, c from u)`, gives an `unattributed_use`
   gap for its clause, where the Edge entry says that `IN` decides rows: polyglot-sql
-  reports only the subquery's first column. Class: a defect of the code.
+  reports only the subquery's first column (#574). Class: a defect of the code.
 - An outer column in a scalar subquery's select list, such as `s.b` in
   `(select s.b + max(x) from u)`, gives an `unresolved_reference` gap, where the Edge
-  entry derives the output column from it: polyglot-sql reports it as unknown. Class: an
-  aspiration.
+  entry derives the output column from it: polyglot-sql reports it as unknown (#575).
+  Class: an aspiration.
 - A scalar subquery after a `*` in a select list gives an `unattributed_use` gap for the
   uses in it, where the Edge entry places them at the column that holds it: its place
   counts the `*` as one. Class: an aspiration.
 - A key that `USING` or `NATURAL` merges across more than two sources, or whose sides
-  the engine's lineage does not tell apart, such as a relation joined to itself, gives
-  an `unattributed_use` gap for its output column, where the Edge entry gives each key
-  the kind of its join's side. Class: an aspiration.
+  the engine's lineage does not tell apart, such as a relation joined to itself by an
+  inner or a full join, gives an `unattributed_use` gap for its output column, where the
+  Edge entry gives each key the kind of its join's side. Class: an aspiration.
 - A key that `USING` or `NATURAL` merges in a branch of a set operation or in a
   subquery leaves the values of each output column whose lineage has a step of the
   key's name to an `unattributed_use` gap, and one merged among sources whose columns
@@ -70,7 +68,7 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - T-SQL's `INSERT t (...) SELECT ...`, without `INTO`, as SQL Server's scripts write it,
   and `DELETE FROM t FROM t JOIN ...` are refused `unparsed`, and reported as refused
   writes by `graph`, where the Write entry reads them as writes: polyglot-sql parses
-  neither. Class: a defect of the code.
+  neither (#578). Class: a defect of the code.
 - Snowflake's `INSERT ALL`, which writes several targets, and DuckDB's
   `INSERT ... BY NAME`, which maps its columns by name, are refused `not_a_query`, where
   the Write entry reads `INSERT ... SELECT` as a write. Class: an aspiration.
@@ -101,8 +99,8 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - Under Snowflake, a quoted name that differs from a CTE's only by case or quotes, as
   `"c"` beside `with c as (...)`, names another relation, but polyglot-sql's lineage
   matches CTE names ignoring ASCII case, so a write that reads `"c"` while the catalog
-  declares it may take the CTE's columns as its parents, with no gap. Class: a defect of
-  the code.
+  declares it may take the CTE's columns as its parents, with no gap (#576). Class: a
+  defect of the code.
 - Dynamic SQL other than SSMS's existence check, such as `EXEC` of a string or of a
   variable, or `sp_executesql` of a variable, is reported by `graph` as not read, where
   the Write entry reads each statement that writes a relation. Class: an aspiration.
@@ -116,7 +114,7 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   `SELECT` of a refused `INSERT`, is read as a statement of its own, where the Write
   entry reads one statement as one write. A statement also ends where polyglot-sql,
   after a complete statement, stops at a statement's first word within a line, as in
-  `IF ... INSERT ...`: that cut relies on polyglot-sql 0.14.3's wording of the error,
+  `IF ... INSERT ...`: that cut relies on polyglot-sql 0.14.4's wording of the error,
   "Invalid expression / Unexpected token", which the test
   `tsql_a_statement_after_an_if_on_its_line_is_read` pins. Class: a defect of the code.
 - SQLCMD variables, such as `$(DatabaseName)` in `USE [$(DatabaseName)]`, are left
@@ -130,17 +128,18 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - In a script in T-SQL, a declaration that holds an inline `INDEX`, a memory-optimised
   table's `HASH` index, `MASKED WITH` or `ENCRYPTED WITH` is refused, and its relation left
   unknown, where the Catalog entry declares its relation and its columns: polyglot-sql
-  parses none of them, and they are not among the storage clauses replaced by spaces.
-  Class: a defect of the code.
+  parses none of them (#579), and they are not among the storage clauses replaced by
+  spaces. Class: a defect of the code.
 - In a script in Snowflake, a declaration with `cluster by` followed by `comment`, or with
   a masking policy on a column, is refused, and its relation left unknown, where the
   Catalog entry declares its relation and its columns: polyglot-sql parses `cluster by`
-  alone and `comment` alone, not both, and no masking policy. Class: a defect of the code.
+  alone and `comment` alone, not both, and no masking policy (#580). Class: a defect of
+  the code.
 - In a script, a declaration with PostgreSQL's `TABLESPACE` or `ON COMMIT DROP`,
   Redshift's `INTERLEAVED SORTKEY`, or Databricks's `PARTITIONED BY` followed by
   `COMMENT` or `TBLPROPERTIES`, is refused, and its relation left unknown, where the
-  Catalog entry declares its relation and its columns: polyglot-sql parses none of them.
-  Class: a defect of the code.
+  Catalog entry declares its relation and its columns: polyglot-sql parses none of them
+  (#580). Class: a defect of the code.
 - In a script in PostgreSQL, a declaration by `PARTITION OF` is refused as a table with
   no column, where its columns are its parent's, which the Catalog entry would declare.
   Class: an aspiration.
@@ -149,7 +148,7 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
   under. Class: an aspiration.
 - Redshift's navigation of a `SUPER` value in `FROM`, as `o.items` in
   `from s o, o.items f`, is read as the relation `o.items`, an `unknown_relation` gap,
-  where the Write entry reads only `s`: polyglot-sql does not read the navigation.
+  where the Write entry reads only `s`: polyglot-sql does not read the navigation (#582).
   Class: a defect of the code.
 - A column that `ALTER TABLE ... ADD` adds to a declared relation is not added to its
   columns, where the Catalog entry knows the columns that the scripts give a relation: the
@@ -157,8 +156,12 @@ as a defect of the code, a defect of the definition, an aspiration or an intende
 - In T-SQL, a statement that holds a national string with a quote in it, such as
   `N'it''s'`, is refused `unparsed` once it is generated into a piece, through protocol 1
   as through the commands, where the Write entry reads it: polyglot-sql generates the
-  string as `N'it's'`, which does not parse again. A bare query, which is not generated, is
-  read. Class: a defect of the code.
+  string as `N'it's'`, which does not parse again (#581). A bare query, which is not
+  generated, is read. Class: a defect of the code.
+- A key of `USING` that a side lacks, as `USING (amount)` where one side has no `amount`,
+  or `USING (missing_column)`, is answered, where the Catalog entry refuses an unknown
+  column `invalid`: polyglot-sql's validation accepts it (#569). Class: a defect of the
+  code.
 - The command line has uses that are not commands of lineage, where the command entry
   of the context names `graph`, `trace`, `uses` and `outline` only: `completions`,
   which prints a shell's completion script, and `-`, which reads a request on standard
